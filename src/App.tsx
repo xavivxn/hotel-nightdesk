@@ -64,7 +64,7 @@ export default function App() {
     return (
       <div className="grid min-h-screen place-items-center px-6">
         <form
-          className="card w-full max-w-sm rounded-3xl p-8"
+          className="card w-full max-w-sm rounded-lg p-8"
           onSubmit={async (e) => {
             e.preventDefault();
             const ok = await api.verifyPin(pin);
@@ -77,7 +77,8 @@ export default function App() {
             }
           }}
         >
-          <p className="font-display text-3xl">Nightdesk</p>
+          <p className="font-mono text-xs font-semibold tracking-[0.22em] text-[var(--accent)]">NIGHTDESK</p>
+          <p className="mt-3 text-xl font-semibold tracking-tight">Desbloqueo</p>
           <p className="mt-2 text-sm text-[var(--muted)]">Ingresá el PIN para abrir la recepción.</p>
           <div className="mt-6">
             <Input

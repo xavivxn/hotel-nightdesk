@@ -27,8 +27,8 @@ export function RoomsPage({ settings }: { settings: AppSettings }) {
     <div className="px-6 py-6 lg:px-8">
       <header className="flex items-end justify-between">
         <div>
-          <p className="text-xs uppercase tracking-[0.22em] text-[var(--muted)]">Catálogo</p>
-          <h1 className="font-display text-4xl">Habitaciones y tarifas</h1>
+          <p className="page-kicker">Catálogo</p>
+          <h1 className="page-title">Habitaciones y tarifas</h1>
         </div>
         <div className="flex gap-2">
           <Button variant="secondary" onClick={() => setRateForm({
@@ -51,13 +51,13 @@ export function RoomsPage({ settings }: { settings: AppSettings }) {
       </header>
       {error ? <p className="mt-4 text-[var(--danger)]">{error}</p> : null}
       <div className="mt-6 grid gap-6 xl:grid-cols-2">
-        <section className="card rounded-2xl p-4">
-          <h2 className="mb-3 font-display text-2xl">Habitaciones</h2>
+        <section className="card rounded-lg p-4">
+          <h2 className="mb-3 text-lg font-semibold tracking-tight">Habitaciones</h2>
           <div className="space-y-2">
             {rooms.map((room) => (
-              <div key={room.id} className="flex items-center justify-between rounded-xl bg-[var(--surface-2)] px-3 py-3">
+              <div key={room.id} className="flex items-center justify-between rounded-lg bg-[var(--surface-2)] px-3 py-3">
                 <div>
-                  <p className="font-semibold">{room.number} · {room.room_type}</p>
+                  <p className="font-semibold"><span className="font-mono tabular-nums">{room.number}</span> · {room.room_type}</p>
                   <p className="text-xs text-[var(--muted)]">Piso {room.floor} · {statusLabel(room.status)}</p>
                 </div>
                 <div className="flex gap-2">
@@ -81,15 +81,15 @@ export function RoomsPage({ settings }: { settings: AppSettings }) {
             ))}
           </div>
         </section>
-        <section className="card rounded-2xl p-4">
-          <h2 className="mb-3 font-display text-2xl">Tarifas</h2>
+        <section className="card rounded-lg p-4">
+          <h2 className="mb-3 text-lg font-semibold tracking-tight">Tarifas</h2>
           <div className="space-y-2">
             {rates.map((rate) => (
-              <button key={rate.id} className="flex w-full items-center justify-between rounded-xl bg-[var(--surface-2)] px-3 py-3 text-left" onClick={() => setRateForm(rate)}>
+              <button key={rate.id} className="flex w-full items-center justify-between rounded-lg bg-[var(--surface-2)] px-3 py-3 text-left" onClick={() => setRateForm(rate)}>
                 <div>
                   <p className="font-semibold">{rate.name}</p>
                   <p className="text-xs text-[var(--muted)]">
-                    {rateKindLabel(rate.kind)} · {formatMoney(rate.base_amount_cents, settings.currency_symbol)}
+                    {rateKindLabel(rate.kind)} · <span className="font-mono tabular-nums">{formatMoney(rate.base_amount_cents, settings.currency_symbol)}</span>
                     {rate.active ? "" : " · inactiva"}
                   </p>
                 </div>

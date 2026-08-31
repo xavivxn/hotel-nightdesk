@@ -87,7 +87,7 @@ function CheckInDrawer({
   return (
     <Drawer open title={`Habitación ${item.room.number}`} subtitle="Check-in walk-in" onClose={onClose}>
       {item.display_status === "dirty" || item.display_status === "blocked" ? (
-        <div className="mb-4 rounded-xl bg-[var(--warn-soft)] px-4 py-3 text-sm">
+        <div className={`mb-4 rounded-xl px-4 py-3 text-sm ${item.display_status === "dirty" ? "bg-[var(--dirty-soft)]" : "bg-[var(--danger-soft)]"}`}>
           Esta habitación está {item.display_status === "dirty" ? "sucia" : "bloqueada"}. Podés marcarla libre desde acá.
           <Button
             className="mt-3 w-full"
@@ -244,7 +244,7 @@ function StayDrawer({
     return (
       <Drawer open wide title={`Habitación ${item.room.number}`} subtitle="Estadía cerrada" onClose={onClose}>
         <div className="space-y-4">
-          <p className="font-display text-3xl">{formatMoney(total, settings.currency_symbol)}</p>
+          <p className="font-mono text-3xl font-semibold tabular-nums">{formatMoney(total, settings.currency_symbol)}</p>
           <p className="text-sm text-[var(--muted)]">El cobro quedó registrado. La habitación pasa a sucia.</p>
           {printError ? <p className="text-sm text-[var(--warn)]">Impresora: {printError}. Podés reintentar.</p> : null}
           <Button
@@ -268,16 +268,16 @@ function StayDrawer({
   return (
     <Drawer open wide title={`Habitación ${item.room.number}`} subtitle={subtitle} onClose={onClose}>
       <div className="space-y-5">
-        <div className="rounded-2xl bg-[var(--surface-2)] p-4">
-          <p className="text-xs uppercase tracking-[0.16em] text-[var(--muted)]">Cuenta en vivo</p>
-          <p className="mt-1 font-display text-4xl">{formatMoney(total, settings.currency_symbol)}</p>
+        <div className="rounded-lg border border-[var(--line)] bg-[var(--bg)] p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">Cuenta en vivo</p>
+          <p className="mt-1 font-mono text-4xl font-semibold tabular-nums tracking-tight">{formatMoney(total, settings.currency_symbol)}</p>
           {overnight ? <p className="mt-2 text-sm text-[var(--accent)]">Se está aplicando tarifa de pernocte/noche</p> : null}
         </div>
         <ul className="space-y-2 text-sm">
           {lines.map((line, i) => (
             <li key={`${line.description}-${i}`} className="flex justify-between gap-4">
               <span>{line.description}</span>
-              <span className="font-medium">{formatMoney(line.amount_cents, settings.currency_symbol)}</span>
+              <span className="font-mono font-medium tabular-nums">{formatMoney(line.amount_cents, settings.currency_symbol)}</span>
             </li>
           ))}
         </ul>
@@ -334,7 +334,7 @@ function StayDrawer({
           <Input value={received} onChange={(e) => setReceived(e.target.value)} />
         </Field>
         {method === "cash" && change > 0 ? (
-          <p className="text-sm">Vuelto: {formatMoney(change, settings.currency_symbol)}</p>
+          <p className="text-sm">Vuelto: <span className="font-mono tabular-nums">{formatMoney(change, settings.currency_symbol)}</span></p>
         ) : null}
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={print} onChange={(e) => setPrint(e.target.checked)} />

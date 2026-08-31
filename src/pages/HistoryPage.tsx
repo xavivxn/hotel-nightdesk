@@ -32,20 +32,20 @@ export function HistoryPage({ settings }: { settings: AppSettings }) {
     <div className="px-6 py-6 lg:px-8">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-xs uppercase tracking-[0.22em] text-[var(--muted)]">Cierre</p>
-          <h1 className="font-display text-4xl">Historial del día</h1>
+          <p className="page-kicker">Cierre</p>
+          <h1 className="page-title">Historial del día</h1>
         </div>
         <div className="flex items-center gap-3">
-          <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-sm">
-            <span className="text-[var(--muted)]">Total cobrado</span>
-            <p className="text-lg font-semibold">{formatMoney(total, settings.currency_symbol)}</p>
+          <div className="rounded-lg border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-sm">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">Total cobrado</span>
+            <p className="font-mono text-lg font-semibold tabular-nums">{formatMoney(total, settings.currency_symbol)}</p>
           </div>
           <Input type="date" className="w-44" value={date} onChange={(e) => setDate(e.target.value)} />
         </div>
       </header>
       {error ? <p className="mt-4 text-[var(--danger)]">{error}</p> : null}
       {notice ? <p className="mt-4 text-sm text-[var(--muted)]">{notice}</p> : null}
-      <div className="mt-6 overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--surface)]">
+      <div className="mt-6 overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--surface)]">
         <table className="w-full text-left text-sm">
           <thead className="bg-[var(--surface-2)] text-xs uppercase tracking-[0.12em] text-[var(--muted)]">
             <tr>
@@ -60,11 +60,11 @@ export function HistoryPage({ settings }: { settings: AppSettings }) {
           <tbody>
             {items.map((item) => (
               <tr key={item.stay.id} className="border-t border-[var(--line)]">
-                <td className="px-4 py-3 font-semibold">{item.stay.room_number}</td>
+                <td className="px-4 py-3 font-mono font-semibold tabular-nums">{item.stay.room_number}</td>
                 <td className="px-4 py-3">{item.stay.guest_name}</td>
                 <td className="px-4 py-3">{item.stay.check_out_at ? formatDateTime(item.stay.check_out_at) : "—"}</td>
                 <td className="px-4 py-3">{paymentLabel(item.payment_method)}</td>
-                <td className="px-4 py-3 text-right font-medium">
+                <td className="px-4 py-3 text-right font-mono font-medium tabular-nums">
                   {formatMoney(item.total_cents, settings.currency_symbol)}
                 </td>
                 <td className="px-4 py-3 text-right">

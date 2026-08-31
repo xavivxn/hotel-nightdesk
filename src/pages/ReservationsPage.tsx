@@ -46,13 +46,13 @@ export function ReservationsPage() {
     <div className="px-6 py-6 lg:px-8">
       <header className="flex items-end justify-between gap-4">
         <div>
-          <p className="text-xs uppercase tracking-[0.22em] text-[var(--muted)]">Agenda</p>
-          <h1 className="font-display text-4xl">Reservas</h1>
+          <p className="page-kicker">Agenda</p>
+          <h1 className="page-title">Reservas</h1>
         </div>
         <Button onClick={() => setOpen(true)}>Nueva reserva</Button>
       </header>
       {error ? <p className="mt-4 text-[var(--danger)]">{error}</p> : null}
-      <div className="mt-6 overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--surface)]">
+      <div className="mt-6 overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--surface)]">
         <table className="w-full text-left text-sm">
           <thead className="bg-[var(--surface-2)] text-xs uppercase tracking-[0.12em] text-[var(--muted)]">
             <tr>
@@ -68,7 +68,7 @@ export function ReservationsPage() {
             {items.map((item) => (
               <tr key={item.id} className="border-t border-[var(--line)]">
                 <td className="px-4 py-3 font-medium">{item.guest_name}</td>
-                <td className="px-4 py-3">{item.room_number}</td>
+                <td className="px-4 py-3 font-mono tabular-nums">{item.room_number}</td>
                 <td className="px-4 py-3">{formatDateTime(item.expected_arrival_at)}</td>
                 <td className="px-4 py-3">{item.expected_nights}</td>
                 <td className="px-4 py-3">{statusLabel(item.status)}</td>

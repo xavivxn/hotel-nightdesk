@@ -2,8 +2,7 @@ import { cn } from "@/lib/utils";
 import type { ButtonHTMLAttributes } from "react";
 
 const variants = {
-  primary:
-    "bg-[var(--accent)] text-[#1c1408] hover:brightness-110 shadow-[0_8px_20px_-12px_var(--accent)]",
+  primary: "bg-[var(--accent)] text-[var(--accent-ink)] hover:brightness-110",
   secondary: "bg-[var(--surface-2)] text-[var(--ink)] border border-[var(--line)] hover:bg-[var(--bg-2)]",
   ghost: "bg-transparent text-[var(--ink)] hover:bg-[var(--surface-2)]",
   danger: "bg-[var(--danger-soft)] text-[var(--danger)] hover:brightness-110",
@@ -28,7 +27,7 @@ export function Button({
   return (
     <button
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-xl font-semibold transition disabled:opacity-50 disabled:pointer-events-none",
+        "inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition disabled:opacity-50 disabled:pointer-events-none",
         variants[variant],
         sizes[size],
         className,

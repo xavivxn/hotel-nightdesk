@@ -39,12 +39,12 @@ export function SettingsPage({
   return (
     <div className="px-6 py-6 lg:px-8">
       <header className="mb-6">
-        <p className="text-xs uppercase tracking-[0.22em] text-[var(--muted)]">Establecimiento</p>
-        <h1 className="font-display text-4xl">Ajustes</h1>
+        <p className="page-kicker">Establecimiento</p>
+        <h1 className="page-title">Ajustes</h1>
       </header>
       <div className="grid max-w-4xl gap-6 lg:grid-cols-2">
-        <section className="card space-y-4 rounded-2xl p-5">
-          <h2 className="font-display text-2xl">Datos del hotel</h2>
+        <section className="card space-y-4 rounded-lg p-5">
+          <h2 className="text-lg font-semibold tracking-tight">Datos del hotel</h2>
           <Field label="Nombre">
             <Input value={form.business_name} onChange={(e) => setForm({ ...form, business_name: e.target.value })} />
           </Field>
@@ -78,8 +78,8 @@ export function SettingsPage({
             </Select>
           </Field>
         </section>
-        <section className="card space-y-4 rounded-2xl p-5">
-          <h2 className="font-display text-2xl">Impresora ESC/POS</h2>
+        <section className="card space-y-4 rounded-lg p-5">
+          <h2 className="text-lg font-semibold tracking-tight">Impresora ESC/POS</h2>
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"

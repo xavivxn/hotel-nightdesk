@@ -2,10 +2,10 @@ import { cn } from "@/lib/utils";
 import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
 
 const field =
-  "w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3.5 h-11 text-[var(--ink)] outline-none focus:border-[var(--accent)] focus:ring-4 focus:ring-[var(--accent-soft)] placeholder:text-[var(--muted)]";
+  "w-full rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3.5 h-11 text-[var(--ink)] outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent-soft)] placeholder:text-[var(--muted)]";
 
 export function Label({ children }: { children: string }) {
-  return <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--muted)]">{children}</label>;
+  return <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">{children}</label>;
 }
 
 export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {

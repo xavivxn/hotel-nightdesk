@@ -29,7 +29,7 @@ export function Drawer({
       >
         <header className="flex items-start justify-between gap-4 border-b border-[var(--line)] px-6 py-5">
           <div>
-            <p className="font-display text-2xl">{title}</p>
+            <p className="text-xl font-semibold tracking-tight">{title}</p>
             {subtitle ? <p className="mt-1 text-sm text-[var(--muted)]">{subtitle}</p> : null}
           </div>
           <button
