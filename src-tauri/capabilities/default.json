@@ -1,0 +1,8 @@
+{
+  "identifier": "default",
+  "description": "Capacidades principales de Nightdesk",
+  "windows": ["main"],
+  "permissions": [
+    "core:default"
+  ]
+}
