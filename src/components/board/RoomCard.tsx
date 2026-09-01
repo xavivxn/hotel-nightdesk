@@ -37,15 +37,34 @@ const marks: Partial<Record<string, { Icon: LucideIcon; className: string }>> = 
 
 const legendStatuses = ["available", "occupied", "dirty", "reserved", "blocked"] as const;
 
-export function RoomStatusLegend() {
+export function RoomStatusLegend({
+  active,
+  onToggle,
+}: {
+  active: string[];
+  onToggle: (status: string) => void;
+}) {
+  const filtering = active.length > 0;
   return (
-    <ul className="mt-4 flex flex-wrap gap-2">
+    <ul className="mt-4 flex flex-wrap gap-2" aria-label="Filtrar por estado">
       {legendStatuses.map((status) => {
         const Icon = icons[status];
+        const selected = active.includes(status);
         return (
-          <li key={status} className={cn("stamp", stamps[status])}>
-            <Icon size={11} />
-            {statusLabel(status)}
+          <li key={status}>
+            <button
+              type="button"
+              aria-pressed={selected}
+              onClick={() => onToggle(status)}
+              className={cn(
+                "stamp cursor-pointer transition-opacity focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]",
+                stamps[status],
+                filtering && !selected && "opacity-35",
+              )}
+            >
+              <Icon size={11} />
+              {statusLabel(status)}
+            </button>
           </li>
         );
       })}

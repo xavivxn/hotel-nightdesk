@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/layout/AppShell";
+import { BootSplash } from "@/components/layout/BootSplash";
 import { BoardPage } from "@/pages/BoardPage";
 import { HistoryPage } from "@/pages/HistoryPage";
 import { ReservationsPage } from "@/pages/ReservationsPage";
@@ -11,6 +12,16 @@ import { useTheme } from "@/lib/theme";
 import type { AppSettings } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Field";
+
+/** Seconds the splash holds after boot. Integers like 10, 8, 5. */
+const BOOT_SPLASH_SECONDS = 2;
+const BOOT_FADE_MS = 180;
+
+function wait(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
 
 const fallbackSettings: AppSettings = {
   business_name: "Nightdesk Inn",
@@ -36,6 +47,7 @@ export default function App() {
   const [pin, setPin] = useState("");
   const [pinError, setPinError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const [leaving, setLeaving] = useState(false);
 
   async function loadSettings() {
     const current = await api.getSettings();
@@ -45,19 +57,30 @@ export default function App() {
     }
     const needsPin = await api.pinRequired();
     setLocked(needsPin);
-    setReady(true);
   }
 
   useEffect(() => {
-    loadSettings().catch(() => setReady(true));
+    let cancelled = false;
+    document.getElementById("boot-splash")?.remove();
+
+    void (async () => {
+      await loadSettings().catch(() => undefined);
+      if (cancelled) return;
+      await wait(BOOT_SPLASH_SECONDS * 1000);
+      if (cancelled) return;
+      setLeaving(true);
+      await wait(BOOT_FADE_MS);
+      if (cancelled) return;
+      setReady(true);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   if (!ready) {
-    return (
-      <div className="grid min-h-screen place-items-center text-[var(--muted)]">
-        Abriendo recepción…
-      </div>
-    );
+    return <BootSplash leaving={leaving} holdSeconds={BOOT_SPLASH_SECONDS} />;
   }
 
   if (locked) {

@@ -9,6 +9,7 @@ export function BoardPage({ settings }: { settings: AppSettings }) {
   const [board, setBoard] = useState<BoardRoom[]>([]);
   const [rates, setRates] = useState<RatePlan[]>([]);
   const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [selected, setSelected] = useState<BoardRoom | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,13 +32,14 @@ export function BoardPage({ settings }: { settings: AppSettings }) {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return board;
-    return board.filter((item) =>
-      [item.room.number, item.stay?.guest_name, item.reservation?.guest_name]
+    return board.filter((item) => {
+      if (statusFilter.length && !statusFilter.includes(item.display_status)) return false;
+      if (!q) return true;
+      return [item.room.number, item.stay?.guest_name, item.reservation?.guest_name]
         .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(q)),
-    );
-  }, [board, query]);
+        .some((value) => String(value).toLowerCase().includes(q));
+    });
+  }, [board, query, statusFilter]);
 
   const grouped = useMemo(() => {
     const map = new Map<number, BoardRoom[]>();
@@ -83,9 +85,23 @@ export function BoardPage({ settings }: { settings: AppSettings }) {
           </label>
         </div>
       </header>
-      <RoomStatusLegend />
+      <RoomStatusLegend
+        active={statusFilter}
+        onToggle={(status) => {
+          setStatusFilter((current) =>
+            current.includes(status) ? current.filter((item) => item !== status) : [...current, status],
+          );
+        }}
+      />
       {error ? <p className="mt-4 text-[var(--danger)]">{error}</p> : null}
       <div className="mt-2">
+        {grouped.length === 0 && !error ? (
+          <p className="mt-8 text-sm text-[var(--muted)]">
+            {statusFilter.length || query.trim()
+              ? "No hay habitaciones para este filtro."
+              : "No hay habitaciones."}
+          </p>
+        ) : null}
         {grouped.map(([floor, rooms]) => (
           <section key={floor} className="mt-6">
             <div className="mb-3 flex items-center gap-3">
