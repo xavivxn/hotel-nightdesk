@@ -26,7 +26,7 @@ type Db = {
   ids: { room: number; rate: number; guest: number; reservation: number; stay: number; charge: number; payment: number };
 };
 
-const KEY = "nightdesk.mock.v2";
+const KEY = "nightdesk.mock.v3";
 
 function nowIso() {
   const date = new Date();
@@ -38,20 +38,19 @@ function nowIso() {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}${sign}${hours}:${minutes}`;
 }
 
+function seedRooms(): Array<[string, string, number]> {
+  const rooms: Array<[string, string, number]> = [];
+  for (let n = 1; n <= 27; n++) {
+    const number = String(n).padStart(2, "0");
+    const floor = Math.ceil(n / 9);
+    const room_type = n % 9 === 0 ? "Suite" : "Estándar";
+    rooms.push([number, room_type, floor]);
+  }
+  return rooms;
+}
+
 function seed(): Db {
-  const seedRooms: Array<[string, string, number]> = [
-    ["101", "Estándar", 1],
-    ["102", "Estándar", 1],
-    ["103", "Estándar", 1],
-    ["104", "Estándar", 1],
-    ["105", "Estándar", 1],
-    ["106", "Suite", 1],
-    ["201", "Estándar", 2],
-    ["202", "Estándar", 2],
-    ["203", "Estándar", 2],
-    ["204", "Suite", 2],
-  ];
-  const rooms: Room[] = seedRooms.map(([number, room_type, floor], i) => ({
+  const rooms: Room[] = seedRooms().map(([number, room_type, floor], i) => ({
     id: i + 1,
     number,
     room_type,
@@ -115,11 +114,11 @@ function seed(): Db {
       printer_name: "",
       paper_width: 80,
       auto_print_on_checkout: true,
-      require_guest_name: true,
+      require_guest_name: false,
       pin_hash: "",
       has_pin: false,
     },
-    ids: { room: 10, rate: 3, guest: 0, reservation: 0, stay: 0, charge: 0, payment: 0 },
+    ids: { room: 27, rate: 3, guest: 0, reservation: 0, stay: 0, charge: 0, payment: 0 },
   };
 }
 
@@ -259,15 +258,12 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
     }
     case "check_in": {
       const payload = args.payload as CheckInPayload;
-      if ((db.settings.require_guest_name ?? true) && !payload.guest_name.trim()) {
-        fail("El nombre del huésped es obligatorio");
-      }
       const room = db.rooms.find((r) => r.id === payload.room_id) ?? fail("Habitación no encontrada");
       if (openStay(db, room.id)) fail("La habitación ya está ocupada");
       if (room.status === "blocked") fail("La habitación está bloqueada");
       const hold = todayHold(db, room.id);
       if (hold && payload.reservation_id !== hold.id) {
-        fail(`La habitación ${room.number} tiene una reserva de ${hold.guest_name} para hoy`);
+        fail(`La habitación ${room.number} tiene una reserva para hoy`);
       }
       const rate = db.rates.find((r) => r.id === payload.rate_plan_id) ?? fail("Tarifa no encontrada");
       let guestId = 0;
@@ -385,7 +381,6 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
         expected_nights: number;
         notes?: string | null;
       };
-      if (!payload.guest_name.trim()) fail("El nombre del huésped es obligatorio");
       const room = db.rooms.find((r) => r.id === payload.room_id) ?? fail("Habitación no encontrada");
       const rate = db.rates.find((r) => r.id === payload.rate_plan_id) ?? fail("Tarifa no encontrada");
       db.ids.guest += 1;
@@ -450,7 +445,7 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
     case "get_settings":
       return {
         ...db.settings,
-        require_guest_name: db.settings.require_guest_name ?? true,
+        require_guest_name: db.settings.require_guest_name ?? false,
         pin_hash: "",
         has_pin: Boolean(db.settings.pin_hash),
       };

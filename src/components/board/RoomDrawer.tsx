@@ -40,38 +40,6 @@ export function RoomDrawer({
   );
 }
 
-function GuestIdentityFields({
-  guestName,
-  document,
-  phone,
-  onGuestName,
-  onDocument,
-  onPhone,
-}: {
-  guestName: string;
-  document: string;
-  phone: string;
-  onGuestName: (value: string) => void;
-  onDocument: (value: string) => void;
-  onPhone: (value: string) => void;
-}) {
-  return (
-    <>
-      <Field label="Huésped">
-        <Input value={guestName} onChange={(e) => onGuestName(e.target.value)} placeholder="Nombre y apellido" />
-      </Field>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Documento">
-          <Input value={document} onChange={(e) => onDocument(e.target.value)} />
-        </Field>
-        <Field label="Teléfono">
-          <Input value={phone} onChange={(e) => onPhone(e.target.value)} />
-        </Field>
-      </div>
-    </>
-  );
-}
-
 function CheckInDrawer({
   item,
   rates,
@@ -86,18 +54,11 @@ function CheckInDrawer({
   onChanged: () => void;
 }) {
   const activeRates = rates.filter((r) => r.active);
-  const [guestName, setGuestName] = useState("");
-  const [document, setDocument] = useState("");
-  const [phone, setPhone] = useState("");
   const [rateId, setRateId] = useState(activeRates[0]?.id ?? 0);
   const [hours, setHours] = useState(3);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [guestOpen, setGuestOpen] = useState(settings.require_guest_name);
   const selected = activeRates.find((r) => r.id === rateId);
-  const requireName = settings.require_guest_name;
-  const hasGuestData = Boolean(guestName.trim() || document.trim() || phone.trim());
-  const showIdentity = requireName || guestOpen || hasGuestData;
 
   async function submit() {
     setBusy(true);
@@ -105,9 +66,9 @@ function CheckInDrawer({
     try {
       await api.checkIn({
         room_id: item.room.id,
-        guest_name: guestName,
-        document: document || null,
-        phone: phone || null,
+        guest_name: "",
+        document: null,
+        phone: null,
         rate_plan_id: rateId,
         expected_hours: selected?.kind === "hourly" ? hours : null,
       });
@@ -138,16 +99,6 @@ function CheckInDrawer({
         </div>
       ) : null}
       <div className="space-y-4">
-        {requireName ? (
-          <GuestIdentityFields
-            guestName={guestName}
-            document={document}
-            phone={phone}
-            onGuestName={setGuestName}
-            onDocument={setDocument}
-            onPhone={setPhone}
-          />
-        ) : null}
         <Field label="Tarifa">
           <Select value={rateId} onChange={(e) => setRateId(Number(e.target.value))}>
             {activeRates.map((rate) => (
@@ -161,28 +112,6 @@ function CheckInDrawer({
           <Field label="Horas esperadas">
             <Input type="number" min={1} value={hours} onChange={(e) => setHours(Number(e.target.value))} />
           </Field>
-        ) : null}
-        {!requireName && showIdentity ? (
-          <>
-            <GuestIdentityFields
-              guestName={guestName}
-              document={document}
-              phone={phone}
-              onGuestName={setGuestName}
-              onDocument={setDocument}
-              onPhone={setPhone}
-            />
-            {!hasGuestData ? (
-              <Button variant="ghost" className="w-full text-[var(--muted)]" onClick={() => setGuestOpen(false)}>
-                Ocultar datos
-              </Button>
-            ) : null}
-          </>
-        ) : null}
-        {!requireName && !showIdentity ? (
-          <Button variant="ghost" className="w-full text-[var(--muted)]" onClick={() => setGuestOpen(true)}>
-            Agregar datos del huésped
-          </Button>
         ) : null}
         {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
         <Button className="w-full" disabled={busy || item.display_status === "blocked" || item.display_status === "dirty"} onClick={submit}>
@@ -221,7 +150,6 @@ function ReservedDrawer({
   return (
     <Dialog open title={`Habitación ${item.room.number}`} subtitle="Reserva de hoy" onClose={onClose}>
       <div className="space-y-4">
-        <p className="text-lg font-semibold">{res.guest_name}</p>
         <p className="text-sm text-[var(--muted)]">
           {formatDateTime(res.expected_arrival_at)} · {res.expected_nights} noche(s) · {res.rate_plan_name}
         </p>
@@ -264,7 +192,7 @@ function StayDrawer({
   const [overnight, setOvernight] = useState(stay.converted_to_overnight);
   const [method, setMethod] = useState("cash");
   const [received, setReceived] = useState("");
-  const [extraDesc, setExtraDesc] = useState("Recargo");
+  const [extraDesc, setExtraDesc] = useState("Consumo");
   const [extraAmount, setExtraAmount] = useState("");
   const [print, setPrint] = useState(settings.auto_print_on_checkout);
   const [error, setError] = useState<string | null>(null);
@@ -292,13 +220,7 @@ function StayDrawer({
   const receivedCents = parseGuaranies(received || "0");
   const change = receivedCents - total;
 
-  const subtitle = useMemo(
-    () =>
-      stay.guest_name.trim()
-        ? `${stay.guest_name} · desde ${formatDateTime(stay.check_in_at)}`
-        : `desde ${formatDateTime(stay.check_in_at)}`,
-    [stay],
-  );
+  const subtitle = useMemo(() => `desde ${formatDateTime(stay.check_in_at)}`, [stay]);
 
   if (closedStayId) {
     function finish() {

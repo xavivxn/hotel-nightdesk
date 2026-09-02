@@ -23,7 +23,7 @@ export function SettingsPage({
     setBusy(true);
     setError(null);
     try {
-      const next = await api.saveSettings(form, clearPin ? "" : pin || undefined);
+      const next = await api.saveSettings({ ...form, require_guest_name: false }, clearPin ? "" : pin || undefined);
       setForm(next);
       onSaved(next);
       if (next.theme === "light" || next.theme === "dark") setTheme(next.theme);
@@ -69,20 +69,6 @@ export function SettingsPage({
               onChange={(e) => setForm({ ...form, tax_percent: Number(e.target.value) })}
             />
           </Field>
-          <label className="flex items-start gap-2 text-sm">
-            <input
-              type="checkbox"
-              className="mt-0.5"
-              checked={form.require_guest_name}
-              onChange={(e) => setForm({ ...form, require_guest_name: e.target.checked })}
-            />
-            <span>
-              Pedir nombre del huésped al check-in
-              <span className="mt-0.5 block text-[var(--muted)]">
-                Si lo apagás, el check-in no pide datos. Se pueden agregar en el momento.
-              </span>
-            </span>
-          </label>
           <Field label="Pie del ticket">
             <Textarea value={form.receipt_footer} onChange={(e) => setForm({ ...form, receipt_footer: e.target.value })} />
           </Field>

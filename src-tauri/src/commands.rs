@@ -270,10 +270,6 @@ pub fn save_rate_plan(state: State<AppState>, payload: SaveRatePlanPayload) -> A
 #[tauri::command]
 pub fn check_in(state: State<AppState>, payload: CheckInPayload) -> AppResult<Stay> {
     let conn = conn(&state);
-    let settings = db::load_settings(&conn)?;
-    if settings.require_guest_name && payload.guest_name.trim().is_empty() {
-        return Err(AppError::msg("El nombre del huésped es obligatorio"));
-    }
     let room = db::get_room(&conn, payload.room_id)?;
     if db::open_stay_for_room(&conn, room.id)?.is_some() {
         return Err(AppError::msg("La habitación ya está ocupada"));
@@ -284,8 +280,8 @@ pub fn check_in(state: State<AppState>, payload: CheckInPayload) -> AppResult<St
     if let Some(hold) = db::today_hold_for_room(&conn, room.id)? {
         if payload.reservation_id != Some(hold.id) {
             return Err(AppError::msg(format!(
-                "La habitación {} tiene una reserva de {} para hoy",
-                room.number, hold.guest_name
+                "La habitación {} tiene una reserva para hoy",
+                room.number
             )));
         }
     }
@@ -495,9 +491,6 @@ pub fn list_reservations(state: State<AppState>) -> AppResult<Vec<Reservation>> 
 #[tauri::command]
 pub fn create_reservation(state: State<AppState>, payload: CreateReservationPayload) -> AppResult<Reservation> {
     let conn = conn(&state);
-    if payload.guest_name.trim().is_empty() {
-        return Err(AppError::msg("El nombre del huésped es obligatorio"));
-    }
     let room = db::get_room(&conn, payload.room_id)?;
     let _rate = db::get_rate_plan(&conn, payload.rate_plan_id)?;
     let _arrival = db::parse_dt(&payload.expected_arrival_at)?;

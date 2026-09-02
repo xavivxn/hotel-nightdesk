@@ -39,6 +39,8 @@
   --dirty: #6d28d9;
   --dirty-ink: #f6f1ff;
   --dirty-soft: #ddd6fe;
+  --gold: #a16207;
+  --gold-glow: rgba(161, 98, 7, 0.3);
   --shadow: 0 18px 40px -24px rgba(20, 18, 15, 0.28);
 }
 
@@ -69,6 +71,8 @@
   --dirty: #c4b5fd;
   --dirty-ink: #1e1035;
   --dirty-soft: #4c3380;
+  --gold: #f0c419;
+  --gold-glow: rgba(240, 196, 25, 0.32);
   --shadow: 0 24px 48px -24px rgba(0, 0, 0, 0.7);
 }
 
@@ -145,51 +149,186 @@ textarea {
 
 .room-card {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 8.5rem;
   overflow: hidden;
+  padding: 0;
+  text-align: left;
   background: var(--surface);
-  border-width: 2px;
+  border: 2px solid var(--room, var(--line));
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    box-shadow 140ms ease;
 }
 
-.room-card::before {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 0.7rem;
+.room-head {
+  display: flex;
+  align-items: stretch;
+  min-height: 2.4rem;
+}
+
+.room-head-number {
+  display: flex;
+  align-items: center;
+  padding: 0.3rem 0.55rem;
+  font-family: var(--font-mono);
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.room-head-status {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.5rem;
+  background: var(--room);
+  color: var(--room-ink);
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.room-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.55rem 0.6rem 0.6rem;
+}
+
+.room-panel {
+  border: 1px solid var(--line);
+  border-radius: 0.45rem;
+  background: var(--bg-2);
+  padding: 0.45rem 0.55rem;
+}
+
+.room-timer-label {
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.room-timer {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.1rem;
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--ink);
+}
+
+.room-panel.is-overdue {
+  border-color: var(--danger);
+}
+
+.room-panel.is-overdue .room-timer-label,
+.room-panel.is-overdue .room-timer {
+  color: var(--danger);
+}
+
+.room-sub {
+  margin-top: 0.2rem;
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.room-note {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.room-tariff {
+  margin-top: auto;
+  text-align: right;
+  font-size: 0.6875rem;
+  color: var(--muted);
+}
+
+.room-tariff b {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.room-suite-label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+
+.room-card:hover {
+  background: var(--surface-2);
+}
+
+.room-card:focus-visible {
+  background: var(--surface-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .room-card {
+    transition: none;
+  }
 }
 
 .room-available {
-  border-color: var(--ok);
-}
-.room-available::before {
-  background: var(--ok);
+  --room: var(--ok);
+  --room-ink: var(--ok-ink);
 }
 
 .room-occupied {
-  border-color: var(--warn);
-}
-.room-occupied::before {
-  background: var(--warn);
+  --room: var(--warn);
+  --room-ink: var(--warn-ink);
+  box-shadow: 0 0 18px -6px var(--warn);
 }
 
 .room-dirty {
-  border-color: var(--dirty);
-}
-.room-dirty::before {
-  background: var(--dirty);
+  --room: var(--dirty);
+  --room-ink: var(--dirty-ink);
 }
 
 .room-reserved {
-  border-color: var(--info);
-}
-.room-reserved::before {
-  background: var(--info);
+  --room: var(--info);
+  --room-ink: var(--info-ink);
 }
 
 .room-blocked {
-  border-color: var(--danger);
+  --room: var(--danger);
+  --room-ink: var(--danger-ink);
 }
-.room-blocked::before {
-  background: var(--danger);
+
+.room-suite {
+  box-shadow:
+    0 0 0 2px var(--gold),
+    0 0 16px -4px var(--gold-glow);
+}
+
+.room-suite .room-head-number {
+  color: var(--gold);
 }
 
 .scrollbar-thin {

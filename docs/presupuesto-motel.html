@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<title>Presupuesto — Sistema de recepción y control para motel</title>
+<style>
+  @page {
+    size: A4;
+    margin: 14mm 13mm 16mm 13mm;
+  }
+
+  :root {
+    --ink: #10161d;
+    --ink-soft: #46535f;
+    --muted: #7b8794;
+    --line: #dfe4ea;
+    --night: #101a24;
+    --night-2: #1b2a38;
+    --amber: #d99425;
+    --amber-soft: #fbf3e3;
+    --green: #1f7a5a;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    font-family: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+    color: var(--ink);
+    font-size: 10.4pt;
+    line-height: 1.5;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  h1, h2, h3 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
+
+  /* ---------- Header ---------- */
+  .hero {
+    background: linear-gradient(135deg, var(--night) 0%, var(--night-2) 100%);
+    color: #fff;
+    border-radius: 10px;
+    padding: 22px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 20px;
+  }
+
+  .hero .eyebrow {
+    font-size: 8pt;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--amber);
+    font-weight: 600;
+  }
+
+  .hero h1 {
+    font-size: 19pt;
+    margin-top: 6px;
+    line-height: 1.2;
+    color: #fff;
+  }
+
+  .hero p {
+    margin: 8px 0 0;
+    font-size: 9.6pt;
+    color: #b9c6d2;
+    max-width: 105mm;
+  }
+
+  .hero-meta {
+    text-align: right;
+    font-size: 8.6pt;
+    color: #b9c6d2;
+    white-space: nowrap;
+  }
+
+  .hero-meta strong {
+    display: block;
+    color: #fff;
+    font-size: 9.4pt;
+    font-weight: 600;
+  }
+
+  .hero-meta div + div { margin-top: 9px; }
+
+  /* ---------- Sections ---------- */
+  section {
+    margin-top: 17px;
+    break-inside: avoid;
+  }
+
+  .sec-title {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-bottom: 10px;
+  }
+
+  .sec-title .num {
+    width: 19px;
+    height: 19px;
+    border-radius: 5px;
+    background: var(--amber);
+    color: #fff;
+    font-size: 8.4pt;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+  }
+
+  .sec-title h2 { font-size: 12pt; }
+
+  .lead {
+    color: var(--ink-soft);
+    margin: 0;
+  }
+
+  /* ---------- Feature grid ---------- */
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 22px;
+  }
+
+  ul.check {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  ul.check li {
+    position: relative;
+    padding-left: 17px;
+    margin-bottom: 5px;
+    color: var(--ink-soft);
+  }
+
+  ul.check li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 6px;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    background: var(--amber);
+    opacity: 0.85;
+  }
+
+  ul.plain {
+    margin: 0;
+    padding-left: 16px;
+    color: var(--ink-soft);
+  }
+
+  ul.plain li { margin-bottom: 4px; }
+
+  /* ---------- Price cards ---------- */
+  .prices {
+    display: grid;
+    grid-template-columns: 1.15fr 1fr;
+    gap: 12px;
+  }
+
+  .card {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px 17px;
+    break-inside: avoid;
+  }
+
+  .card.featured {
+    border: 1.5px solid var(--amber);
+    background: var(--amber-soft);
+  }
+
+  .card .tag {
+    font-size: 7.6pt;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-weight: 700;
+    color: var(--amber);
+  }
+
+  .card.plain-tag .tag { color: var(--muted); }
+
+  .card h3 {
+    font-size: 11.4pt;
+    margin-top: 5px;
+  }
+
+  .price {
+    font-size: 24pt;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-top: 8px;
+    line-height: 1;
+  }
+
+  .price small {
+    font-size: 9.5pt;
+    font-weight: 500;
+    color: var(--muted);
+    letter-spacing: 0;
+  }
+
+  .card ul {
+    margin: 12px 0 0;
+    padding: 0;
+    list-style: none;
+    font-size: 9.6pt;
+  }
+
+  .card ul li {
+    position: relative;
+    padding-left: 15px;
+    margin-bottom: 4px;
+    color: var(--ink-soft);
+  }
+
+  .card ul li::before {
+    content: "\2713";
+    position: absolute;
+    left: 0;
+    top: -1px;
+    color: var(--green);
+    font-size: 9pt;
+    font-weight: 700;
+  }
+
+  /* ---------- Table ---------- */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9.8pt;
+  }
+
+  th, td {
+    text-align: left;
+    padding: 6.5px 10px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  th {
+    font-size: 8.2pt;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--muted);
+    font-weight: 600;
+    border-bottom: 1.5px solid var(--line);
+  }
+
+  td.num, th.num { text-align: right; white-space: nowrap; }
+
+  tr.total td {
+    font-weight: 700;
+    border-bottom: none;
+    background: #f5f7f9;
+  }
+
+  /* ---------- Notes ---------- */
+  .note {
+    border-left: 3px solid var(--amber);
+    background: #fafbfc;
+    padding: 9px 12px;
+    border-radius: 0 7px 7px 0;
+    font-size: 9.5pt;
+    color: var(--ink-soft);
+  }
+
+  .cols-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+  }
+
+  .box {
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    padding: 12px 14px;
+    break-inside: avoid;
+  }
+
+  .box h3 {
+    font-size: 9.6pt;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--muted);
+    margin-bottom: 7px;
+    font-weight: 650;
+  }
+
+  .box ul { font-size: 9.6pt; }
+
+  /* ---------- Signature ---------- */
+  .sign {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+    margin-top: 18px;
+  }
+
+  .sign .line {
+    border-top: 1px solid #9aa5b1;
+    padding-top: 6px;
+    font-size: 8.8pt;
+    color: var(--muted);
+  }
+
+  .foot {
+    margin-top: 14px;
+    padding-top: 9px;
+    border-top: 1px solid var(--line);
+    font-size: 8.4pt;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .page-break { break-before: page; }
+  .avoid-break { break-inside: avoid; }
+</style>
+</head>
+<body>
+
+  <div class="hero">
+    <div>
+      <div class="eyebrow">Propuesta comercial</div>
+      <h1>Sistema de recepción y<br />control de caja para motel</h1>
+      <p>Software de escritorio 100% local para habitaciones, estadías, consumos, cobro e impresión de tickets. Sin internet obligatorio, con los datos en el propio local.</p>
+    </div>
+    <div class="hero-meta">
+      <div><strong>27 habitaciones</strong>1 punto de recepción</div>
+      <div><strong>Septiembre 2026</strong>Validez: 30 días</div>
+      <div><strong>USD</strong>Pago en Gs al cambio del día</div>
+    </div>
+  </div>
+
+  <section>
+    <div class="sec-title"><div class="num">1</div><h2>Qué resuelve</h2></div>
+    <p class="lead">
+      Hoy el control de habitaciones y caja depende de papel, memoria y confianza. Este sistema convierte cada
+      movimiento en un registro: qué habitación está ocupada, desde qué hora, cuánto se cobró, con qué forma de pago
+      y con ticket impreso como respaldo. Todo desde una sola pantalla en recepción, incluso sin conexión a internet.
+    </p>
+  </section>
+
+  <section>
+    <div class="sec-title"><div class="num">2</div><h2>Alcance funcional</h2></div>
+    <div class="grid-2">
+      <ul class="check">
+        <li>Tablero visual de las 27 habitaciones (libre, ocupada, sucia, bloqueada, reservada)</li>
+        <li>Check-in por hora, por noche o pernocte, con tarifas configurables</li>
+        <li>Cuenta en vivo de la estadía mientras la habitación está ocupada</li>
+        <li>Consumos, recargos y descuentos cargados a la habitación</li>
+      </ul>
+      <ul class="check">
+        <li>Cobro al checkout: efectivo, tarjeta o transferencia</li>
+        <li>Impresión de ticket en impresora térmica (58 mm u 80 mm)</li>
+        <li>Reservas simples: en espera, check-in, cancelación y no-show</li>
+        <li>Historial del día, cierre y reimpresión de tickets</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="avoid-break">
+    <div class="sec-title"><div class="num">3</div><h2>Inversión</h2></div>
+    <p class="lead" style="margin-bottom:13px">
+      La inversión se divide en dos conceptos separados: el <strong>sistema implementado</strong>, que se paga una sola
+      vez, y el <strong>mantenimiento</strong>, que es el servicio continuo que mantiene el sistema funcionando y
+      actualizado a lo largo del tiempo.
+    </p>
+
+    <div class="prices">
+      <div class="card featured">
+        <div class="tag">Pago único</div>
+        <h3>Implementación del sistema</h3>
+        <div class="price">USD 2.500</div>
+        <ul>
+          <li>Licencia de uso del sistema (1 local / 1 PC)</li>
+          <li>Instalación y configuración en recepción</li>
+          <li>Carga de las 27 habitaciones y sus tarifas</li>
+          <li>Configuración de impresora de tickets</li>
+          <li>Capacitación al personal de recepción</li>
+          <li><strong>2 meses de garantía por fallos</strong> incluidos</li>
+        </ul>
+      </div>
+
+      <div class="card plain-tag">
+        <div class="tag">Desde el mes 3</div>
+        <h3>Mantenimiento</h3>
+        <div class="price">USD 62,50 <small>/ mes</small></div>
+        <ul>
+          <li>Soporte por WhatsApp en horario acordado</li>
+          <li>Corrección de errores y mantenimiento</li>
+          <li>Actualizaciones y mejoras del sistema</li>
+          <li>Asistencia remota de configuración</li>
+          <li>Continuidad de la licencia de uso</li>
+        </ul>
+        <div style="margin-top:11px;font-size:9.2pt;color:var(--muted);border-top:1px solid var(--line);padding-top:9px">
+          Equivale a <strong style="color:var(--ink)">USD 750 / año</strong>. Se puede abonar mes a mes o anual por adelantado.
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:14px">
+      <table>
+        <thead>
+          <tr>
+            <th>Detalle</th>
+            <th class="num">Monto</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Implementación del sistema (pago único)</td>
+            <td class="num">USD 2.500</td>
+          </tr>
+          <tr>
+            <td>Garantía por fallos — meses 1 y 2</td>
+            <td class="num">Sin costo</td>
+          </tr>
+          <tr>
+            <td>Mantenimiento — desde el mes 3 (10 meses del año 1)</td>
+            <td class="num">USD 625</td>
+          </tr>
+          <tr class="total">
+            <td>Total año 1</td>
+            <td class="num">USD 3.125</td>
+          </tr>
+          <tr>
+            <td style="padding-top:12px">Mantenimiento año 2 en adelante</td>
+            <td class="num" style="padding-top:12px">USD 750 / año</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note" style="margin-top:12px">
+      <strong>Forma de pago sugerida:</strong> 50% de la implementación al aceptar la propuesta y 50% contra entrega del
+      sistema funcionando en el local. El mantenimiento comienza a facturarse recién a partir del tercer mes. El
+      equivalente en guaraníes se calcula al tipo de cambio del día de cada pago. Indicar si se requiere factura con RUC.
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-title"><div class="num">4</div><h2>Requisitos del local</h2></div>
+    <div class="grid-2">
+      <ul class="check">
+        <li>PC con Windows en recepción, preferentemente de uso exclusivo</li>
+        <li>Impresora térmica ESC/POS de 58 mm u 80 mm</li>
+      </ul>
+      <ul class="check">
+        <li>Tarifas, nombres de habitaciones y formas de cobro definidos</li>
+        <li>Una persona de referencia para decisiones de configuración</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-title"><div class="num">5</div><h2>Condiciones y límites</h2></div>
+    <div class="cols-2">
+      <div class="box">
+        <h3>Incluido en la implementación</h3>
+        <ul class="plain">
+          <li>Uso del sistema en 1 local, en 1 PC de recepción</li>
+          <li>Puesta en marcha con datos reales del motel</li>
+          <li>Capacitación práctica al personal</li>
+          <li>Acompañamiento durante el arranque</li>
+          <li>Garantía por fallos durante los 2 primeros meses</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>No incluido en la implementación</h3>
+        <ul class="plain">
+          <li>Hardware: PC, monitor, impresora, papel, cajón de dinero</li>
+          <li>Facturación electrónica / integración con la SET</li>
+          <li>App para huéspedes o reservas por web pública</li>
+          <li>Módulo completo de stock e inventario de bar</li>
+          <li>Segunda PC, segunda sucursal o franquicia</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note" style="margin-top:13px">
+      <strong>Garantía y mantenimiento no son lo mismo.</strong> La garantía de los 2 primeros meses cubre la corrección
+      de fallos de lo entregado. El mantenimiento, desde el mes 3, es el servicio continuo: soporte por WhatsApp,
+      correcciones, mejoras y actualizaciones del sistema mientras el motel lo siga usando.
+    </div>
+
+    <div style="margin-top:14px">
+      <table>
+        <thead>
+          <tr>
+            <th>Ampliaciones opcionales</th>
+            <th class="num">Referencia</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Segunda PC en el mismo local</td><td class="num">USD 600 (única vez)</td></tr>
+          <tr><td>Otra sucursal o segundo motel</td><td class="num">Se cotiza como local nuevo</td></tr>
+          <tr><td>Módulo de stock e inventario de bar</td><td class="num">Presupuesto aparte</td></tr>
+          <tr><td>Desarrollos a medida fuera del alcance</td><td class="num">A convenir</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-title"><div class="num">6</div><h2>Cómo trabajamos</h2></div>
+    <table>
+      <tbody>
+        <tr><td style="width:26mm"><strong>Etapa 1</strong></td><td>Relevamiento: habitaciones, tarifas, consumos y forma de cobro actual</td></tr>
+        <tr><td><strong>Etapa 2</strong></td><td>Aceptación de la propuesta y pago inicial del 50%</td></tr>
+        <tr><td><strong>Etapa 3</strong></td><td>Instalación en el local, carga de datos y configuración de impresora</td></tr>
+        <tr><td><strong>Etapa 4</strong></td><td>Capacitación del personal y prueba con casos reales de recepción</td></tr>
+        <tr><td><strong>Etapa 5</strong></td><td>Entrega operativa, pago del saldo e inicio de los 2 meses de garantía</td></tr>
+        <tr><td><strong>Etapa 6</strong></td><td>Desde el mes 3: mantenimiento mensual con soporte y actualizaciones</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="avoid-break">
+    <div class="sec-title"><div class="num">7</div><h2>Aceptación</h2></div>
+    <p class="lead">
+      La firma de este documento confirma la contratación de la implementación del sistema por <strong>USD 2.500</strong>,
+      con <strong>2 meses de garantía</strong> por fallos, y el servicio de mantenimiento de <strong>USD 62,50 por mes</strong>
+      (<strong>USD 750 al año</strong>) a partir del tercer mes.
+    </p>
+
+    <div class="sign">
+      <div class="line">Nombre y firma — Cliente</div>
+      <div class="line">Nombre y firma — Proveedor</div>
+      <div class="line">CI / RUC</div>
+      <div class="line">Fecha</div>
+    </div>
+
+    <div class="foot">
+      <span>Presupuesto — Sistema de recepción y control para motel</span>
+      <span>Validez de la oferta: 30 días</span>
+    </div>
+  </section>
+
+</body>
+</html>

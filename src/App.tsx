@@ -36,7 +36,7 @@ const fallbackSettings: AppSettings = {
   printer_name: "",
   paper_width: 80,
   auto_print_on_checkout: true,
-  require_guest_name: true,
+  require_guest_name: false,
   pin_hash: "",
   has_pin: false,
 };
@@ -126,7 +126,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route element={<AppShell businessName={settings.business_name} />}>
+        <Route element={<AppShell />}>
           <Route path="/" element={<BoardPage settings={settings} />} />
           <Route path="/reservas" element={<ReservationsPage />} />
           <Route path="/habitaciones" element={<RoomsPage settings={settings} />} />

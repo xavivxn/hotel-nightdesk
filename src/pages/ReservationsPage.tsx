@@ -56,7 +56,6 @@ export function ReservationsPage() {
         <table className="w-full text-left text-sm">
           <thead className="bg-[var(--surface-2)] text-xs uppercase tracking-[0.12em] text-[var(--muted)]">
             <tr>
-              <th className="px-4 py-3">Huésped</th>
               <th className="px-4 py-3">Habitación</th>
               <th className="px-4 py-3">Llegada</th>
               <th className="px-4 py-3">Noches</th>
@@ -67,7 +66,6 @@ export function ReservationsPage() {
           <tbody>
             {items.map((item) => (
               <tr key={item.id} className="border-t border-[var(--line)]">
-                <td className="px-4 py-3 font-medium">{item.guest_name}</td>
                 <td className="px-4 py-3 font-mono tabular-nums">{item.room_number}</td>
                 <td className="px-4 py-3">{formatDateTime(item.expected_arrival_at)}</td>
                 <td className="px-4 py-3">{item.expected_nights}</td>
@@ -91,7 +89,7 @@ export function ReservationsPage() {
             ))}
             {items.length === 0 ? (
               <tr>
-                <td className="px-4 py-10 text-center text-[var(--muted)]" colSpan={6}>
+                <td className="px-4 py-10 text-center text-[var(--muted)]" colSpan={5}>
                   No hay reservas. Creá una para bloquear una habitación el día de llegada.
                 </td>
               </tr>
@@ -101,17 +99,6 @@ export function ReservationsPage() {
       </div>
       <Drawer open={open} title="Nueva reserva" onClose={() => setOpen(false)}>
         <div className="space-y-4">
-          <Field label="Huésped">
-            <Input value={form.guest_name} onChange={(e) => setForm({ ...form, guest_name: e.target.value })} />
-          </Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Documento">
-              <Input value={form.document} onChange={(e) => setForm({ ...form, document: e.target.value })} />
-            </Field>
-            <Field label="Teléfono">
-              <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-            </Field>
-          </div>
           <Field label="Habitación">
             <Select value={form.room_id} onChange={(e) => setForm({ ...form, room_id: Number(e.target.value) })}>
               {rooms.map((room) => (
@@ -151,6 +138,9 @@ export function ReservationsPage() {
               try {
                 await api.createReservation({
                   ...form,
+                  guest_name: "",
+                  document: null,
+                  phone: null,
                   expected_arrival_at: localInputToRfc3339(form.expected_arrival_at),
                 });
                 setOpen(false);

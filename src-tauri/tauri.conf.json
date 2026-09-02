@@ -13,11 +13,12 @@
     "windows": [
       {
         "label": "main",
-        "title": "Nightdesk",
+        "title": "",
         "width": 1440,
         "height": 900,
         "minWidth": 1100,
-        "minHeight": 720
+        "minHeight": 720,
+        "decorations": false
       }
     ],
     "security": {

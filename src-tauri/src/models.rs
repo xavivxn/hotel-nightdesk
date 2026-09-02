@@ -179,7 +179,7 @@ impl Default for AppSettings {
             printer_name: "".into(),
             paper_width: 80,
             auto_print_on_checkout: true,
-            require_guest_name: true,
+            require_guest_name: false,
             pin_hash: "".into(),
             has_pin: false,
         }

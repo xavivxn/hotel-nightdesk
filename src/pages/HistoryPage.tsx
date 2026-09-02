@@ -50,7 +50,6 @@ export function HistoryPage({ settings }: { settings: AppSettings }) {
           <thead className="bg-[var(--surface-2)] text-xs uppercase tracking-[0.12em] text-[var(--muted)]">
             <tr>
               <th className="px-4 py-3">Habitación</th>
-              <th className="px-4 py-3">Huésped</th>
               <th className="px-4 py-3">Salida</th>
               <th className="px-4 py-3">Pago</th>
               <th className="px-4 py-3 text-right">Total</th>
@@ -61,7 +60,6 @@ export function HistoryPage({ settings }: { settings: AppSettings }) {
             {items.map((item) => (
               <tr key={item.stay.id} className="border-t border-[var(--line)]">
                 <td className="px-4 py-3 font-mono font-semibold tabular-nums">{item.stay.room_number}</td>
-                <td className="px-4 py-3">{item.stay.guest_name.trim() || "—"}</td>
                 <td className="px-4 py-3">{item.stay.check_out_at ? formatDateTime(item.stay.check_out_at) : "—"}</td>
                 <td className="px-4 py-3">{paymentLabel(item.payment_method)}</td>
                 <td className="px-4 py-3 text-right font-mono font-medium tabular-nums">
@@ -84,7 +82,7 @@ export function HistoryPage({ settings }: { settings: AppSettings }) {
             ))}
             {items.length === 0 ? (
               <tr>
-                <td className="px-4 py-10 text-center text-[var(--muted)]" colSpan={6}>
+                <td className="px-4 py-10 text-center text-[var(--muted)]" colSpan={5}>
                   No hay estadías cerradas en esta fecha.
                 </td>
               </tr>

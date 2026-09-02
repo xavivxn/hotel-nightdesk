@@ -42,19 +42,10 @@ fn seed_if_empty(conn: &Connection) -> AppResult<()> {
     }
 
     let now = now_rfc3339();
-    let rooms = [
-        ("101", "Estándar", 1),
-        ("102", "Estándar", 1),
-        ("103", "Estándar", 1),
-        ("104", "Estándar", 1),
-        ("105", "Estándar", 1),
-        ("106", "Suite", 1),
-        ("201", "Estándar", 2),
-        ("202", "Estándar", 2),
-        ("203", "Estándar", 2),
-        ("204", "Suite", 2),
-    ];
-    for (number, room_type, floor) in rooms {
+    for n in 1..=27 {
+        let number = format!("{n:02}");
+        let floor = ((n - 1) / 9) + 1;
+        let room_type = if n % 9 == 0 { "Suite" } else { "Estándar" };
         conn.execute(
             "INSERT INTO rooms (number, room_type, floor, status, created_at) VALUES (?1, ?2, ?3, 'available', ?4)",
             params![number, room_type, floor, now],
@@ -90,7 +81,7 @@ fn seed_if_empty(conn: &Connection) -> AppResult<()> {
     upsert_setting(conn, "printer_name", "")?;
     upsert_setting(conn, "paper_width", "80")?;
     upsert_setting(conn, "auto_print_on_checkout", "true")?;
-    upsert_setting(conn, "require_guest_name", "true")?;
+    upsert_setting(conn, "require_guest_name", "false")?;
     upsert_setting(conn, "pin_hash", "")?;
     Ok(())
 }
@@ -143,7 +134,7 @@ pub fn load_settings(conn: &Connection) -> AppResult<AppSettings> {
     settings.auto_print_on_checkout =
         get_setting(conn, "auto_print_on_checkout", "true")? == "true";
     settings.require_guest_name =
-        get_setting(conn, "require_guest_name", "true")? == "true";
+        get_setting(conn, "require_guest_name", "false")? == "true";
     settings.pin_hash = get_setting(conn, "pin_hash", "")?;
     settings.has_pin = !settings.pin_hash.is_empty();
     Ok(settings)
