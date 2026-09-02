@@ -26,7 +26,7 @@ type Db = {
   ids: { room: number; rate: number; guest: number; reservation: number; stay: number; charge: number; payment: number };
 };
 
-const KEY = "nightdesk.mock.v1";
+const KEY = "nightdesk.mock.v2";
 
 function nowIso() {
   const date = new Date();
@@ -64,8 +64,8 @@ function seed(): Db {
       id: 1,
       name: "3 horas",
       kind: "hourly",
-      base_amount_cents: 1_800_000,
-      extra_hour_cents: 500_000,
+      base_amount_cents: 80_000,
+      extra_hour_cents: 20_000,
       included_hours: 3,
       grace_minutes: 10,
       night_cutoff_hour: 12,
@@ -75,8 +75,8 @@ function seed(): Db {
       id: 2,
       name: "Noche",
       kind: "night",
-      base_amount_cents: 4_500_000,
-      extra_hour_cents: 600_000,
+      base_amount_cents: 150_000,
+      extra_hour_cents: 25_000,
       included_hours: 24,
       grace_minutes: 15,
       night_cutoff_hour: 12,
@@ -86,8 +86,8 @@ function seed(): Db {
       id: 3,
       name: "Pernocte",
       kind: "overnight",
-      base_amount_cents: 3_200_000,
-      extra_hour_cents: 500_000,
+      base_amount_cents: 120_000,
+      extra_hour_cents: 20_000,
       included_hours: 12,
       grace_minutes: 15,
       night_cutoff_hour: 12,
@@ -106,8 +106,8 @@ function seed(): Db {
       business_name: "Nightdesk Inn",
       address: "Av. Principal 100",
       phone: "",
-      tax_percent: 0,
-      currency_symbol: "$",
+      tax_percent: 10,
+      currency_symbol: "Gs.",
       theme: "dark",
       receipt_footer: "Gracias por su visita",
       printer_enabled: false,

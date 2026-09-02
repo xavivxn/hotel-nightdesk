@@ -2,7 +2,7 @@
 name: nightdesk-conventions
 description: >-
   Define folder layout, dual-mode Tauri/mock, language (English code / Spanish UI),
-  money in cents, and how to verify Nightdesk changes. Use when adding files or
+  money in guaraníes (fields still named *_cents), and how to verify Nightdesk changes. Use when adding files or
   features, choosing where code lives, working on api.ts, mock.ts, pages, or
   verifying the hotel-nightdesk repo.
 ---
@@ -42,7 +42,7 @@ Alias `@/` → `src/`. Estado local (`useState`); no agregar store global.
 
 ## Dinero en UI
 
-Enteros en centavos. Mostrar y parsear solo con `formatMoney` y `pesosToCents` (`src/lib/format.ts`). No persistir floats.
+Enteros en **guaraníes** (1 = 1 Gs). Los campos IPC/DB se llaman `*_cents` por herencia. Mostrar y parsear solo con `formatMoney` y `parseGuaranies` (`src/lib/format.ts`). Formato: `80.000 Gs.` (símbolo al final, sin decimales). No persistir floats.
 
 ## Dual-mode
 
@@ -52,7 +52,7 @@ UI → api.*() → cmd() → invoke (Tauri) | mockInvoke (browser)
 
 - Componentes **nunca** importan `@tauri-apps/api` ni llaman `invoke`.
 - Detección: `"__TAURI_INTERNALS__" in window` (ya está en `api.ts`).
-- `npm run dev` → Vite + `localStorage` (`nightdesk.mock.v1`).
+- `npm run dev` → Vite + `localStorage` (`nightdesk.mock.v2`).
 - `npm run tauri dev` → SQLite en el data dir de la app.
 
 Comando o tipo nuevo: seguir `nightdesk-add-command`. Cobro: `nightdesk-billing`. Schema/ocupación: `nightdesk-schema`. UI/CSS/componentes: `nightdesk-design`.

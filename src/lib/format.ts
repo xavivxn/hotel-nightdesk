@@ -1,22 +1,24 @@
-export function formatMoney(cents: number, symbol = "$") {
-  const negative = cents < 0;
-  const abs = Math.abs(Math.round(cents));
-  const whole = Math.floor(abs / 100);
-  const frac = abs % 100;
-  const wholeStr = whole.toLocaleString("es-AR");
-  return `${negative ? "-" : ""}${symbol}\u00a0${wholeStr},${frac.toString().padStart(2, "0")}`;
+export function formatMoney(amount: number, symbol = "Gs.") {
+  const negative = amount < 0;
+  const abs = Math.abs(Math.round(amount));
+  const wholeStr = abs.toLocaleString("es-PY");
+  return `${negative ? "-" : ""}${wholeStr}\u00a0${symbol}`;
 }
 
-export function pesosToCents(value: string | number) {
-  if (typeof value === "number") return Math.round(value * 100);
-  const normalized = value.replace(/\./g, "").replace(",", ".").trim();
+export function parseGuaranies(value: string | number) {
+  if (typeof value === "number") return Math.round(value);
+  const normalized = value
+    .replace(/Gs\.?/gi, "")
+    .replace(/[\s.]/g, "")
+    .replace(/,/g, "")
+    .trim();
   const parsed = Number.parseFloat(normalized);
   if (Number.isNaN(parsed)) return 0;
-  return Math.round(parsed * 100);
+  return Math.round(parsed);
 }
 
-export function centsToInput(cents: number) {
-  return (cents / 100).toFixed(2);
+export function guaraniesToInput(amount: number) {
+  return Math.round(amount).toLocaleString("es-PY");
 }
 
 export function formatDateTime(rfc: string) {

@@ -4,7 +4,12 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-pub fn build_receipt(settings: &AppSettings, stay: &Stay, bill: &BillPreview, payment_method: &str) -> Vec<u8> {
+pub fn build_receipt(
+    settings: &AppSettings,
+    stay: &Stay,
+    bill: &BillPreview,
+    payment_method: &str,
+) -> Vec<u8> {
     let width: usize = if settings.paper_width <= 58 { 32 } else { 48 };
     let mut out = Vec::new();
     out.extend_from_slice(&[0x1B, 0x40]); // init
@@ -23,8 +28,14 @@ pub fn build_receipt(settings: &AppSettings, stay: &Stay, bill: &BillPreview, pa
     out.extend_from_slice(&[0x1B, 0x61, 0]); // left
     writeln_ascii(&mut out, &"-".repeat(width));
     writeln_ascii(&mut out, &format!("Habitacion: {}", stay.room_number));
-    writeln_ascii(&mut out, &format!("Huesped: {}", sanitize(&stay.guest_name)));
-    writeln_ascii(&mut out, &format!("Entrada: {}", short_dt(&stay.check_in_at)));
+    writeln_ascii(
+        &mut out,
+        &format!("Huesped: {}", sanitize(&stay.guest_name)),
+    );
+    writeln_ascii(
+        &mut out,
+        &format!("Entrada: {}", short_dt(&stay.check_in_at)),
+    );
     if let Some(out_at) = &stay.check_out_at {
         writeln_ascii(&mut out, &format!("Salida:  {}", short_dt(out_at)));
     }
@@ -33,14 +44,24 @@ pub fn build_receipt(settings: &AppSettings, stay: &Stay, bill: &BillPreview, pa
     for line in &bill.lines {
         writeln_ascii(
             &mut out,
-            &kv_line(width, &sanitize(&line.description), line.amount_cents, &settings.currency_symbol),
+            &kv_line(
+                width,
+                &sanitize(&line.description),
+                line.amount_cents,
+                &settings.currency_symbol,
+            ),
         );
     }
     writeln_ascii(&mut out, &"-".repeat(width));
     if bill.tax_cents != 0 {
         writeln_ascii(
             &mut out,
-            &kv_line(width, "Subtotal", bill.subtotal_cents, &settings.currency_symbol),
+            &kv_line(
+                width,
+                "Subtotal",
+                bill.subtotal_cents,
+                &settings.currency_symbol,
+            ),
         );
         writeln_ascii(
             &mut out,
@@ -58,7 +79,10 @@ pub fn build_receipt(settings: &AppSettings, stay: &Stay, bill: &BillPreview, pa
         &kv_line(width, "TOTAL", bill.total_cents, &settings.currency_symbol),
     );
     out.extend_from_slice(&[0x1B, 0x45, 0]);
-    writeln_ascii(&mut out, &format!("Pago: {}", payment_label(payment_method)));
+    writeln_ascii(
+        &mut out,
+        &format!("Pago: {}", payment_label(payment_method)),
+    );
     writeln_ascii(&mut out, &"-".repeat(width));
     out.extend_from_slice(&[0x1B, 0x61, 1]);
     writeln_ascii(&mut out, &sanitize(&settings.receipt_footer));
@@ -68,7 +92,12 @@ pub fn build_receipt(settings: &AppSettings, stay: &Stay, bill: &BillPreview, pa
     out
 }
 
-pub fn print_bytes(bytes: &[u8], settings: &AppSettings, app_data: &Path, label: &str) -> AppResult<Option<String>> {
+pub fn print_bytes(
+    bytes: &[u8],
+    settings: &AppSettings,
+    app_data: &Path,
+    label: &str,
+) -> AppResult<Option<String>> {
     archive_ticket(bytes, app_data, label);
     if !settings.printer_enabled {
         return Ok(None);
@@ -98,7 +127,8 @@ pub fn build_test_receipt(settings: &AppSettings) -> Vec<u8> {
 
 fn send_to_printer(bytes: &[u8], settings: &AppSettings) -> Result<(), String> {
     if !settings.printer_path.trim().is_empty() {
-        std::fs::write(settings.printer_path.trim(), bytes).map_err(|e| format!("No se pudo escribir en el puerto: {e}"))?;
+        std::fs::write(settings.printer_path.trim(), bytes)
+            .map_err(|e| format!("No se pudo escribir en el puerto: {e}"))?;
         return Ok(());
     }
     if settings.printer_name.trim().is_empty() {
@@ -118,7 +148,10 @@ fn print_named(bytes: &[u8], name: &str) -> Result<(), String> {
             .status()
             .or_else(|_| {
                 Command::new("cmd")
-                    .args(["/C", &format!("copy /B \"{}\" \"\\\\localhost\\{}\"", tmp.display(), name)])
+                    .args([
+                        "/C",
+                        &format!("copy /B \"{}\" \"\\\\localhost\\{}\"", tmp.display(), name),
+                    ])
                     .status()
             })
             .map_err(|e| format!("No se pudo enviar al spooler: {e}"))?;
@@ -201,13 +234,10 @@ fn kv_line(width: usize, label: &str, cents: i64, symbol: &str) -> String {
     format!("{label} {amount}")
 }
 
-fn format_money(cents: i64, symbol: &str) -> String {
-    let negative = cents < 0;
-    let abs = cents.abs();
-    let whole = abs / 100;
-    let frac = abs % 100;
-    let whole_s = thousand_sep(whole);
-    let mut s = format!("{symbol}{whole_s},{:02}", frac);
+fn format_money(amount: i64, symbol: &str) -> String {
+    let negative = amount < 0;
+    let whole_s = thousand_sep(amount.abs());
+    let mut s = format!("{whole_s} {symbol}");
     if negative {
         s = format!("-{s}");
     }
@@ -237,5 +267,25 @@ fn payment_label(method: &str) -> &'static str {
         "card" => "Tarjeta",
         "transfer" => "Transferencia",
         _ => "Efectivo",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_money_pyg_has_no_decimals_and_symbol_after() {
+        assert_eq!(format_money(0, "Gs."), "0 Gs.");
+        assert_eq!(format_money(5_000, "Gs."), "5.000 Gs.");
+        assert_eq!(format_money(1_250_000, "Gs."), "1.250.000 Gs.");
+        assert_eq!(format_money(-5_000, "Gs."), "-5.000 Gs.");
+    }
+
+    #[test]
+    fn thousand_sep_groups_by_thousands() {
+        assert_eq!(thousand_sep(0), "0");
+        assert_eq!(thousand_sep(80_000), "80.000");
+        assert_eq!(thousand_sep(1_250_000), "1.250.000");
     }
 }

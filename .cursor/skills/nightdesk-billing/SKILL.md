@@ -1,7 +1,7 @@
 ---
 name: nightdesk-billing
 description: >-
-  Hotel billing rules for Nightdesk: cents, rate kinds (hourly/night/overnight),
+  Hotel billing rules for Nightdesk: guaraníes (fields still named *_cents), rate kinds (hourly/night/overnight),
   IVA, live bill preview, checkout transaction, surcharges, and tickets. Use when
   changing billing.rs, billing.ts, check_out, preview_bill, convert_to_overnight,
   add_charge, rates, tax, recargos, pernocte, or ESC/POS receipts.
@@ -9,7 +9,7 @@ description: >-
 
 # Cobro Nightdesk
 
-Montos: **enteros en centavos** (`i64` / `number`). Nunca floats en DB ni en IPC.
+Montos: **enteros en guaraníes** (`i64` / `number`; campos `*_cents`, 1 = 1 Gs). Nunca floats en DB ni en IPC. UI: `formatMoney` / `parseGuaranies` (`80.000 Gs.`).
 
 ## Fuente de verdad
 

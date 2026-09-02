@@ -1,5 +1,7 @@
 use crate::error::{AppError, AppResult};
-use crate::models::{AppSettings, Charge, Guest, Payment, RateKind, RatePlan, Reservation, Room, Stay};
+use crate::models::{
+    AppSettings, Charge, Guest, Payment, RateKind, RatePlan, Reservation, Room, Stay,
+};
 use chrono::{DateTime, Local};
 use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
@@ -62,25 +64,25 @@ fn seed_if_empty(conn: &Connection) -> AppResult<()> {
     conn.execute(
         "INSERT INTO rate_plans (name, kind, base_amount_cents, extra_hour_cents, included_hours, grace_minutes, night_cutoff_hour, active)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
-        params!["3 horas", "hourly", 18_000_00i64, 5_000_00i64, 3i64, 10i64, 12i64],
+        params!["3 horas", "hourly", 80_000i64, 20_000i64, 3i64, 10i64, 12i64],
     )?;
     conn.execute(
         "INSERT INTO rate_plans (name, kind, base_amount_cents, extra_hour_cents, included_hours, grace_minutes, night_cutoff_hour, active)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
-        params!["Noche", "night", 45_000_00i64, 6_000_00i64, 24i64, 15i64, 12i64],
+        params!["Noche", "night", 150_000i64, 25_000i64, 24i64, 15i64, 12i64],
     )?;
     conn.execute(
         "INSERT INTO rate_plans (name, kind, base_amount_cents, extra_hour_cents, included_hours, grace_minutes, night_cutoff_hour, active)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
-        params!["Pernocte", "overnight", 32_000_00i64, 5_000_00i64, 12i64, 15i64, 12i64],
+        params!["Pernocte", "overnight", 120_000i64, 20_000i64, 12i64, 15i64, 12i64],
     )?;
 
     let defaults = AppSettings::default();
     upsert_setting(conn, "business_name", &defaults.business_name)?;
     upsert_setting(conn, "address", &defaults.address)?;
     upsert_setting(conn, "phone", "")?;
-    upsert_setting(conn, "tax_percent", "0")?;
-    upsert_setting(conn, "currency_symbol", "$")?;
+    upsert_setting(conn, "tax_percent", "10")?;
+    upsert_setting(conn, "currency_symbol", "Gs.")?;
     upsert_setting(conn, "theme", "dark")?;
     upsert_setting(conn, "receipt_footer", &defaults.receipt_footer)?;
     upsert_setting(conn, "printer_enabled", "false")?;
@@ -113,7 +115,9 @@ pub fn upsert_setting(conn: &Connection, key: &str, value: &str) -> AppResult<()
 
 pub fn get_setting(conn: &Connection, key: &str, default: &str) -> AppResult<String> {
     let value: Option<String> = conn
-        .query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| row.get(0))
+        .query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| {
+            row.get(0)
+        })
         .optional()?;
     Ok(value.unwrap_or_else(|| default.to_string()))
 }
@@ -123,10 +127,10 @@ pub fn load_settings(conn: &Connection) -> AppResult<AppSettings> {
     settings.business_name = get_setting(conn, "business_name", &settings.business_name)?;
     settings.address = get_setting(conn, "address", &settings.address)?;
     settings.phone = get_setting(conn, "phone", "")?;
-    settings.tax_percent = get_setting(conn, "tax_percent", "0")?
+    settings.tax_percent = get_setting(conn, "tax_percent", "10")?
         .parse()
-        .unwrap_or(0.0);
-    settings.currency_symbol = get_setting(conn, "currency_symbol", "$")?;
+        .unwrap_or(10.0);
+    settings.currency_symbol = get_setting(conn, "currency_symbol", "Gs.")?;
     settings.theme = get_setting(conn, "theme", "dark")?;
     settings.receipt_footer = get_setting(conn, "receipt_footer", &settings.receipt_footer)?;
     settings.printer_enabled = get_setting(conn, "printer_enabled", "false")? == "true";
@@ -135,7 +139,8 @@ pub fn load_settings(conn: &Connection) -> AppResult<AppSettings> {
     settings.paper_width = get_setting(conn, "paper_width", "80")?
         .parse()
         .unwrap_or(80);
-    settings.auto_print_on_checkout = get_setting(conn, "auto_print_on_checkout", "true")? == "true";
+    settings.auto_print_on_checkout =
+        get_setting(conn, "auto_print_on_checkout", "true")? == "true";
     settings.pin_hash = get_setting(conn, "pin_hash", "")?;
     settings.has_pin = !settings.pin_hash.is_empty();
     Ok(settings)
@@ -381,6 +386,9 @@ pub fn map_reservation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Reservation>
 }
 
 pub fn set_room_status(conn: &Connection, room_id: i64, status: &str) -> AppResult<()> {
-    conn.execute("UPDATE rooms SET status = ?1 WHERE id = ?2", params![status, room_id])?;
+    conn.execute(
+        "UPDATE rooms SET status = ?1 WHERE id = ?2",
+        params![status, room_id],
+    )?;
     Ok(())
 }

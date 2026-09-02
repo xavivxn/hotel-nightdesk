@@ -34,7 +34,7 @@ No hay tests de frontend.
 
 ## Invariantes
 
-- Montos: enteros en **centavos**. `billing.rs` manda; `billing.ts` y sus tests se actualizan juntos.
+- Montos: enteros en **guaraníes** (campos `*_cents` heredan el nombre, 1 = 1 Gs). `billing.rs` manda; `billing.ts` y sus tests se actualizan juntos.
 - Una estadía `open` por habitación. Check-in → `occupied`. Checkout → `dirty` (nunca `available`).
 - Checkout atómico. Fallo de impresora **no** revierte el cobro.
 - Dual-mode: cada comando nuevo vive en `models.rs` + `types.ts` + `commands.rs` + `lib.rs` + `api.ts` + `mock.ts`.

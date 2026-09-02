@@ -55,7 +55,11 @@ export function SettingsPage({
             <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
           </Field>
           <Field label="Símbolo de moneda">
-            <Input value={form.currency_symbol} onChange={(e) => setForm({ ...form, currency_symbol: e.target.value })} />
+            <Input
+              value={form.currency_symbol}
+              onChange={(e) => setForm({ ...form, currency_symbol: e.target.value })}
+              placeholder="Gs."
+            />
           </Field>
           <Field label="IVA %">
             <Input

@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/Button";
 import { Drawer } from "@/components/ui/Drawer";
 import { Field, Input, Select } from "@/components/ui/Field";
 import { api } from "@/lib/api";
-import { centsToInput, formatMoney, pesosToCents, rateKindLabel, statusLabel } from "@/lib/format";
+import { formatMoney, guaraniesToInput, parseGuaranies, rateKindLabel, statusLabel } from "@/lib/format";
 import type { AppSettings, RateKind, RatePlan, Room } from "@/lib/types";
 import { useEffect, useState } from "react";
 
@@ -131,11 +131,19 @@ export function RoomsPage({ settings }: { settings: AppSettings }) {
                 <option value="overnight">Pernocte</option>
               </Select>
             </Field>
-            <Field label="Monto base">
-              <Input defaultValue={centsToInput(rateForm.base_amount_cents)} onBlur={(e) => setRateForm({ ...rateForm, base_amount_cents: pesosToCents(e.target.value) })} />
+            <Field label="Monto base (Gs.)">
+              <Input
+                inputMode="numeric"
+                defaultValue={guaraniesToInput(rateForm.base_amount_cents)}
+                onBlur={(e) => setRateForm({ ...rateForm, base_amount_cents: parseGuaranies(e.target.value) })}
+              />
             </Field>
-            <Field label="Hora extra">
-              <Input defaultValue={centsToInput(rateForm.extra_hour_cents)} onBlur={(e) => setRateForm({ ...rateForm, extra_hour_cents: pesosToCents(e.target.value) })} />
+            <Field label="Hora extra (Gs.)">
+              <Input
+                inputMode="numeric"
+                defaultValue={guaraniesToInput(rateForm.extra_hour_cents)}
+                onBlur={(e) => setRateForm({ ...rateForm, extra_hour_cents: parseGuaranies(e.target.value) })}
+              />
             </Field>
             <div className="grid grid-cols-3 gap-2">
               <Field label="Horas incl.">

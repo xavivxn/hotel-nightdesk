@@ -1,5 +1,5 @@
 import { api } from "@/lib/api";
-import { formatDateTime, formatMoney, pesosToCents, rateKindLabel } from "@/lib/format";
+import { formatDateTime, formatMoney, parseGuaranies, rateKindLabel } from "@/lib/format";
 import type { AppSettings, BoardRoom, Charge, RatePlan } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
 import { Drawer } from "@/components/ui/Drawer";
@@ -221,7 +221,7 @@ function StayDrawer({
     setLines(preview.lines);
     setCharges(currentCharges.filter((c) => c.kind === "surcharge" || c.kind === "discount"));
     setOvernight(preview.overnight_applied);
-    if (!received) setReceived((preview.total_cents / 100).toFixed(2));
+    if (!received) setReceived(String(preview.total_cents));
   }
 
   useEffect(() => {
@@ -232,7 +232,7 @@ function StayDrawer({
   }, [stay.id]);
 
   const total = bill ?? 0;
-  const receivedCents = pesosToCents(received || "0");
+  const receivedCents = parseGuaranies(received || "0");
   const change = receivedCents - total;
 
   const subtitle = useMemo(
@@ -296,15 +296,15 @@ function StayDrawer({
         ) : null}
         <div className="grid grid-cols-[1fr_120px_auto] gap-2">
           <Input value={extraDesc} onChange={(e) => setExtraDesc(e.target.value)} />
-          <Input value={extraAmount} onChange={(e) => setExtraAmount(e.target.value)} placeholder="0,00" />
+          <Input value={extraAmount} onChange={(e) => setExtraAmount(e.target.value)} placeholder="0" inputMode="numeric" />
           <Button
             variant="secondary"
             onClick={async () => {
               await api.addCharge({
                 stay_id: stay.id,
-                kind: pesosToCents(extraAmount) < 0 ? "discount" : "surcharge",
+                kind: parseGuaranies(extraAmount) < 0 ? "discount" : "surcharge",
                 description: extraDesc,
-                amount_cents: pesosToCents(extraAmount),
+                amount_cents: parseGuaranies(extraAmount),
               });
               setExtraAmount("");
               await refresh();
