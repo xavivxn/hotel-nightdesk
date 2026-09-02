@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 # Stop Nightdesk Vite (npm run dev / preview) and free its ports.
+#
+# Desde la raíz del repo:
+#   ./scripts/kill-vite.sh
+# Si no es ejecutable:
+#   bash scripts/kill-vite.sh
 set -u
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
