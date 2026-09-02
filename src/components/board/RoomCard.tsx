@@ -115,7 +115,9 @@ export function RoomCard({
       <div className={cn("relative mt-auto w-full pt-6", mark && "pr-12")}>
         {item.stay ? (
           <>
-            <p className="truncate font-medium">{item.stay.guest_name}</p>
+            {item.stay.guest_name.trim() ? (
+              <p className="truncate font-medium">{item.stay.guest_name}</p>
+            ) : null}
             <div className="mt-1 flex items-center justify-between text-sm text-[var(--muted)]">
               <span>{item.stay.converted_to_overnight ? "Pernocte" : item.stay.rate_plan_name}</span>
               <span className="font-mono tabular-nums">{formatDuration(item.elapsed_minutes ?? 0)}</span>

@@ -3,7 +3,7 @@ name: nightdesk-design
 description: >-
   Night Ops UI-UX for Nightdesk: tokens, IBM Plex, room status colors, stamps,
   cards, sidebar DutyClock, light/dark. Use when adding or changing pages,
-  components, CSS, Button, Drawer, Field, RoomCard, AppShell, DutyClock,
+  components, CSS, Button, Drawer, Dialog, Field, RoomCard, AppShell, DutyClock,
   index.css, layout, or any visual work.
 ---
 
@@ -70,7 +70,8 @@ Reusar, no reinventar:
 |-------|---------|-------|
 | Botón | `components/ui/Button.tsx` | `primary` / `secondary` / `ghost` / `danger` / `ok`. Un CTA fuerte por bloque. |
 | Field | `components/ui/Field.tsx` | focus `border-accent` + `ring-2 ring-accent-soft`. |
-| Drawer | `components/ui/Drawer.tsx` | panel derecho; título `text-xl font-semibold tracking-tight`. |
+| Dialog | `components/ui/Dialog.tsx` | caja centrada. Check-in/reserva `sm`; cobro `lg` (cuenta \| pagar). Overlay cierra solo si `dismissible` (cobro: no). |
+| Drawer | `components/ui/Drawer.tsx` | panel derecho. Alta de datos (habitación, tarifa, reserva). No cobro ni check-in. |
 | Card genérica | `.card` | surface + line. `rounded-lg`. |
 | Reloj | `layout/DutyClock.tsx` | no otro reloj. Flip solo HH/MM; SS estático; riel 2px. |
 | Shell | `layout/AppShell.tsx` | nav; activo = `accent-soft` + texto `accent`. |
@@ -90,7 +91,7 @@ Tablas: thead `surface-2`, headers uppercase muted. Habitación y totales en mon
 
 - Cards: `hover:bg-surface-2`, sin lift.
 - DutyClock: flip 180ms en hora/minuto; colon late; `prefers-reduced-motion` apaga flip y pulso.
-- Drawer: ok entrar/salir. No animar el grid del tablero.
+- Drawer / Dialog: ok entrar/salir. No animar el grid del tablero.
 - Touch ≥ 44px.
 
 ## Checklist componente nuevo
@@ -98,7 +99,7 @@ Tablas: thead `surface-2`, headers uppercase muted. Habitación y totales en mon
 1. ¿Tokens `var(--*)` en claro y oscuro? ¿Cero hex sueltos?
 2. ¿Sans para texto, mono para números?
 3. ¿Color = semántica (marca o estado), no adorno?
-4. ¿Reusa Button / Field / Drawer / `.card` / `.stamp`?
+4. ¿Reusa Button / Field / Dialog / Drawer / `.card` / `.stamp`?
 5. ¿Un primary? ¿Empty/error en español?
 6. ¿Se ve en **los dos temas**? Verificar ambos.
 

@@ -36,6 +36,7 @@ const fallbackSettings: AppSettings = {
   printer_name: "",
   paper_width: 80,
   auto_print_on_checkout: true,
+  require_guest_name: true,
   pin_hash: "",
   has_pin: false,
 };

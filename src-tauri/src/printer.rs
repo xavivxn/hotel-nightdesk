@@ -28,10 +28,12 @@ pub fn build_receipt(
     out.extend_from_slice(&[0x1B, 0x61, 0]); // left
     writeln_ascii(&mut out, &"-".repeat(width));
     writeln_ascii(&mut out, &format!("Habitacion: {}", stay.room_number));
-    writeln_ascii(
-        &mut out,
-        &format!("Huesped: {}", sanitize(&stay.guest_name)),
-    );
+    if !stay.guest_name.trim().is_empty() {
+        writeln_ascii(
+            &mut out,
+            &format!("Huesped: {}", sanitize(&stay.guest_name)),
+        );
+    }
     writeln_ascii(
         &mut out,
         &format!("Entrada: {}", short_dt(&stay.check_in_at)),

@@ -115,6 +115,7 @@ export type AppSettings = {
   printer_name: string;
   paper_width: number;
   auto_print_on_checkout: boolean;
+  require_guest_name: boolean;
   pin_hash: string;
   has_pin: boolean;
 };

@@ -90,6 +90,7 @@ fn seed_if_empty(conn: &Connection) -> AppResult<()> {
     upsert_setting(conn, "printer_name", "")?;
     upsert_setting(conn, "paper_width", "80")?;
     upsert_setting(conn, "auto_print_on_checkout", "true")?;
+    upsert_setting(conn, "require_guest_name", "true")?;
     upsert_setting(conn, "pin_hash", "")?;
     Ok(())
 }
@@ -141,6 +142,8 @@ pub fn load_settings(conn: &Connection) -> AppResult<AppSettings> {
         .unwrap_or(80);
     settings.auto_print_on_checkout =
         get_setting(conn, "auto_print_on_checkout", "true")? == "true";
+    settings.require_guest_name =
+        get_setting(conn, "require_guest_name", "true")? == "true";
     settings.pin_hash = get_setting(conn, "pin_hash", "")?;
     settings.has_pin = !settings.pin_hash.is_empty();
     Ok(settings)

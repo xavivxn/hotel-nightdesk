@@ -2,7 +2,7 @@ import { api } from "@/lib/api";
 import { formatDateTime, formatMoney, parseGuaranies, rateKindLabel } from "@/lib/format";
 import type { AppSettings, BoardRoom, Charge, RatePlan } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
-import { Drawer } from "@/components/ui/Drawer";
+import { Dialog } from "@/components/ui/Dialog";
 import { Field, Input, Select } from "@/components/ui/Field";
 import { useEffect, useMemo, useState } from "react";
 
@@ -40,6 +40,38 @@ export function RoomDrawer({
   );
 }
 
+function GuestIdentityFields({
+  guestName,
+  document,
+  phone,
+  onGuestName,
+  onDocument,
+  onPhone,
+}: {
+  guestName: string;
+  document: string;
+  phone: string;
+  onGuestName: (value: string) => void;
+  onDocument: (value: string) => void;
+  onPhone: (value: string) => void;
+}) {
+  return (
+    <>
+      <Field label="Huésped">
+        <Input value={guestName} onChange={(e) => onGuestName(e.target.value)} placeholder="Nombre y apellido" />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Documento">
+          <Input value={document} onChange={(e) => onDocument(e.target.value)} />
+        </Field>
+        <Field label="Teléfono">
+          <Input value={phone} onChange={(e) => onPhone(e.target.value)} />
+        </Field>
+      </div>
+    </>
+  );
+}
+
 function CheckInDrawer({
   item,
   rates,
@@ -61,7 +93,11 @@ function CheckInDrawer({
   const [hours, setHours] = useState(3);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [guestOpen, setGuestOpen] = useState(settings.require_guest_name);
   const selected = activeRates.find((r) => r.id === rateId);
+  const requireName = settings.require_guest_name;
+  const hasGuestData = Boolean(guestName.trim() || document.trim() || phone.trim());
+  const showIdentity = requireName || guestOpen || hasGuestData;
 
   async function submit() {
     setBusy(true);
@@ -85,7 +121,7 @@ function CheckInDrawer({
   }
 
   return (
-    <Drawer open title={`Habitación ${item.room.number}`} subtitle="Check-in walk-in" onClose={onClose}>
+    <Dialog open title={`Habitación ${item.room.number}`} subtitle="Check-in walk-in" onClose={onClose}>
       {item.display_status === "dirty" || item.display_status === "blocked" ? (
         <div className={`mb-4 rounded-xl px-4 py-3 text-sm ${item.display_status === "dirty" ? "bg-[var(--dirty-soft)]" : "bg-[var(--danger-soft)]"}`}>
           Esta habitación está {item.display_status === "dirty" ? "sucia" : "bloqueada"}. Podés marcarla libre desde acá.
@@ -102,17 +138,16 @@ function CheckInDrawer({
         </div>
       ) : null}
       <div className="space-y-4">
-        <Field label="Huésped">
-          <Input value={guestName} onChange={(e) => setGuestName(e.target.value)} placeholder="Nombre y apellido" />
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Documento">
-            <Input value={document} onChange={(e) => setDocument(e.target.value)} />
-          </Field>
-          <Field label="Teléfono">
-            <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
-          </Field>
-        </div>
+        {requireName ? (
+          <GuestIdentityFields
+            guestName={guestName}
+            document={document}
+            phone={phone}
+            onGuestName={setGuestName}
+            onDocument={setDocument}
+            onPhone={setPhone}
+          />
+        ) : null}
         <Field label="Tarifa">
           <Select value={rateId} onChange={(e) => setRateId(Number(e.target.value))}>
             {activeRates.map((rate) => (
@@ -126,6 +161,28 @@ function CheckInDrawer({
           <Field label="Horas esperadas">
             <Input type="number" min={1} value={hours} onChange={(e) => setHours(Number(e.target.value))} />
           </Field>
+        ) : null}
+        {!requireName && showIdentity ? (
+          <>
+            <GuestIdentityFields
+              guestName={guestName}
+              document={document}
+              phone={phone}
+              onGuestName={setGuestName}
+              onDocument={setDocument}
+              onPhone={setPhone}
+            />
+            {!hasGuestData ? (
+              <Button variant="ghost" className="w-full text-[var(--muted)]" onClick={() => setGuestOpen(false)}>
+                Ocultar datos
+              </Button>
+            ) : null}
+          </>
+        ) : null}
+        {!requireName && !showIdentity ? (
+          <Button variant="ghost" className="w-full text-[var(--muted)]" onClick={() => setGuestOpen(true)}>
+            Agregar datos del huésped
+          </Button>
         ) : null}
         {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
         <Button className="w-full" disabled={busy || item.display_status === "blocked" || item.display_status === "dirty"} onClick={submit}>
@@ -145,7 +202,7 @@ function CheckInDrawer({
           </Button>
         ) : null}
       </div>
-    </Drawer>
+    </Dialog>
   );
 }
 
@@ -162,7 +219,7 @@ function ReservedDrawer({
   const res = item.reservation!;
   const [error, setError] = useState<string | null>(null);
   return (
-    <Drawer open title={`Habitación ${item.room.number}`} subtitle="Reserva de hoy" onClose={onClose}>
+    <Dialog open title={`Habitación ${item.room.number}`} subtitle="Reserva de hoy" onClose={onClose}>
       <div className="space-y-4">
         <p className="text-lg font-semibold">{res.guest_name}</p>
         <p className="text-sm text-[var(--muted)]">
@@ -185,7 +242,7 @@ function ReservedDrawer({
         </Button>
         <p className="text-sm text-[var(--muted)]">{res.rate_plan_name}</p>
       </div>
-    </Drawer>
+    </Dialog>
   );
 }
 
@@ -236,13 +293,20 @@ function StayDrawer({
   const change = receivedCents - total;
 
   const subtitle = useMemo(
-    () => `${stay.guest_name} · desde ${formatDateTime(stay.check_in_at)}`,
+    () =>
+      stay.guest_name.trim()
+        ? `${stay.guest_name} · desde ${formatDateTime(stay.check_in_at)}`
+        : `desde ${formatDateTime(stay.check_in_at)}`,
     [stay],
   );
 
   if (closedStayId) {
+    function finish() {
+      onChanged();
+      onClose();
+    }
     return (
-      <Drawer open wide title={`Habitación ${item.room.number}`} subtitle="Estadía cerrada" onClose={onClose}>
+      <Dialog open title={`Habitación ${item.room.number}`} subtitle="Estadía cerrada" onClose={finish}>
         <div className="space-y-4">
           <p className="font-mono text-3xl font-semibold tabular-nums">{formatMoney(total, settings.currency_symbol)}</p>
           <p className="text-sm text-[var(--muted)]">El cobro quedó registrado. La habitación pasa a sucia.</p>
@@ -257,118 +321,154 @@ function StayDrawer({
           >
             Reimprimir ticket
           </Button>
-          <Button className="w-full" onClick={onClose}>
+          <Button className="w-full" onClick={finish}>
             Volver al tablero
           </Button>
         </div>
-      </Drawer>
+      </Dialog>
     );
   }
 
   return (
-    <Drawer open wide title={`Habitación ${item.room.number}`} subtitle={subtitle} onClose={onClose}>
-      <div className="space-y-5">
-        <div className="rounded-lg border border-[var(--line)] bg-[var(--bg)] p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">Cuenta en vivo</p>
-          <p className="mt-1 font-mono text-4xl font-semibold tabular-nums tracking-tight">{formatMoney(total, settings.currency_symbol)}</p>
-          {overnight ? <p className="mt-2 text-sm text-[var(--accent)]">Se está aplicando tarifa de pernocte/noche</p> : null}
-        </div>
-        <ul className="space-y-2 text-sm">
-          {lines.map((line, i) => (
-            <li key={`${line.description}-${i}`} className="flex justify-between gap-4">
-              <span>{line.description}</span>
-              <span className="font-mono font-medium tabular-nums">{formatMoney(line.amount_cents, settings.currency_symbol)}</span>
-            </li>
-          ))}
-        </ul>
-        {!stay.converted_to_overnight ? (
-          <Button
-            variant="secondary"
-            className="w-full"
-            onClick={async () => {
-              await api.convertToOvernight(stay.id);
-              await refresh();
-              onChanged();
-            }}
-          >
-            Convertir a pernocte
-          </Button>
-        ) : null}
-        <div className="grid grid-cols-[1fr_120px_auto] gap-2">
-          <Input value={extraDesc} onChange={(e) => setExtraDesc(e.target.value)} />
-          <Input value={extraAmount} onChange={(e) => setExtraAmount(e.target.value)} placeholder="0" inputMode="numeric" />
-          <Button
-            variant="secondary"
-            onClick={async () => {
-              await api.addCharge({
-                stay_id: stay.id,
-                kind: parseGuaranies(extraAmount) < 0 ? "discount" : "surcharge",
-                description: extraDesc,
-                amount_cents: parseGuaranies(extraAmount),
-              });
-              setExtraAmount("");
-              await refresh();
-            }}
-          >
-            Sumar
-          </Button>
-        </div>
-        {charges.map((charge) => (
-          <div key={charge.id} className="flex items-center justify-between text-sm">
-            <span>
-              {charge.description} · {formatMoney(charge.amount_cents, settings.currency_symbol)}
-            </span>
-            <button className="text-[var(--danger)]" onClick={async () => { await api.deleteCharge(charge.id); await refresh(); }}>
-              Quitar
-            </button>
+    <Dialog
+      open
+      size="lg"
+      dismissible={false}
+      title={`Habitación ${item.room.number}`}
+      subtitle={subtitle}
+      onClose={onClose}
+    >
+      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden min-[800px]:grid-cols-2">
+        <div className="min-h-0 space-y-5 overflow-y-auto border-[var(--line)] p-6 scrollbar-thin min-[800px]:border-r">
+          <div className="rounded-lg border border-[var(--line)] bg-[var(--bg)] p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">Cuenta en vivo</p>
+            <p className="mt-1 font-mono text-4xl font-semibold tabular-nums tracking-tight">
+              {formatMoney(total, settings.currency_symbol)}
+            </p>
+            {overnight ? (
+              <p className="mt-2 text-sm text-[var(--accent)]">Se está aplicando tarifa de pernocte/noche</p>
+            ) : null}
           </div>
-        ))}
-        <Field label="Medio de pago">
-          <Select value={method} onChange={(e) => setMethod(e.target.value)}>
-            <option value="cash">Efectivo</option>
-            <option value="card">Tarjeta</option>
-            <option value="transfer">Transferencia</option>
-          </Select>
-        </Field>
-        <Field label="Monto recibido">
-          <Input value={received} onChange={(e) => setReceived(e.target.value)} />
-        </Field>
-        {method === "cash" && change > 0 ? (
-          <p className="text-sm">Vuelto: <span className="font-mono tabular-nums">{formatMoney(change, settings.currency_symbol)}</span></p>
-        ) : null}
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={print} onChange={(e) => setPrint(e.target.checked)} />
-          Imprimir ticket al cerrar
-        </label>
-        {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
-        {printError ? <p className="text-sm text-[var(--warn)]">{printError}</p> : null}
-        <Button
-          className="w-full"
-          variant="ok"
-          disabled={busy}
-          onClick={async () => {
-            setBusy(true);
-            setError(null);
-            try {
-              const result = await api.checkOut({
-                stay_id: stay.id,
-                method,
-                amount_cents: receivedCents,
-                print,
-              });
-              setClosedStayId(result.stay.id);
-              if (result.print_error) setPrintError(result.print_error);
-              onChanged();
-            } catch (e) {
-              setError(String(e));
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          Cobrar y cerrar
-        </Button>
+          <ul className="space-y-2 text-sm">
+            {lines.map((line, i) => (
+              <li key={`${line.description}-${i}`} className="flex justify-between gap-4">
+                <span>{line.description}</span>
+                <span className="font-mono font-medium tabular-nums">
+                  {formatMoney(line.amount_cents, settings.currency_symbol)}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {!stay.converted_to_overnight ? (
+            <Button
+              variant="secondary"
+              className="w-full"
+              onClick={async () => {
+                await api.convertToOvernight(stay.id);
+                await refresh();
+                onChanged();
+              }}
+            >
+              Convertir a pernocte
+            </Button>
+          ) : null}
+          <div className="grid grid-cols-[1fr_120px_auto] gap-2">
+            <Input value={extraDesc} onChange={(e) => setExtraDesc(e.target.value)} />
+            <Input
+              value={extraAmount}
+              onChange={(e) => setExtraAmount(e.target.value)}
+              placeholder="0"
+              inputMode="numeric"
+            />
+            <Button
+              variant="secondary"
+              onClick={async () => {
+                await api.addCharge({
+                  stay_id: stay.id,
+                  kind: parseGuaranies(extraAmount) < 0 ? "discount" : "surcharge",
+                  description: extraDesc,
+                  amount_cents: parseGuaranies(extraAmount),
+                });
+                setExtraAmount("");
+                await refresh();
+              }}
+            >
+              Sumar
+            </Button>
+          </div>
+          {charges.map((charge) => (
+            <div key={charge.id} className="flex items-center justify-between text-sm">
+              <span>
+                {charge.description} · {formatMoney(charge.amount_cents, settings.currency_symbol)}
+              </span>
+              <button
+                className="text-[var(--danger)]"
+                onClick={async () => {
+                  await api.deleteCharge(charge.id);
+                  await refresh();
+                }}
+              >
+                Quitar
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="flex min-h-0 flex-col p-6">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto scrollbar-thin">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">Cobrar</p>
+            <Field label="Medio de pago">
+              <Select value={method} onChange={(e) => setMethod(e.target.value)}>
+                <option value="cash">Efectivo</option>
+                <option value="card">Tarjeta</option>
+                <option value="transfer">Transferencia</option>
+              </Select>
+            </Field>
+            <Field label="Monto recibido">
+              <Input value={received} onChange={(e) => setReceived(e.target.value)} />
+            </Field>
+            {method === "cash" && change > 0 ? (
+              <p className="text-sm">
+                Vuelto:{" "}
+                <span className="font-mono tabular-nums">{formatMoney(change, settings.currency_symbol)}</span>
+              </p>
+            ) : null}
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={print} onChange={(e) => setPrint(e.target.checked)} />
+              Imprimir ticket al cerrar
+            </label>
+          </div>
+          <div className="mt-4 shrink-0 space-y-3 border-t border-[var(--line)] pt-4">
+            {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
+            {printError ? <p className="text-sm text-[var(--warn)]">{printError}</p> : null}
+            <Button
+              className="w-full"
+              variant="ok"
+              size="lg"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                setError(null);
+                try {
+                  const result = await api.checkOut({
+                    stay_id: stay.id,
+                    method,
+                    amount_cents: receivedCents,
+                    print,
+                  });
+                  setClosedStayId(result.stay.id);
+                  if (result.print_error) setPrintError(result.print_error);
+                } catch (e) {
+                  setError(String(e));
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              Cobrar y cerrar
+            </Button>
+          </div>
+        </div>
       </div>
-    </Drawer>
+    </Dialog>
   );
 }

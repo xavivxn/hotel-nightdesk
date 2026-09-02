@@ -159,6 +159,7 @@ pub struct AppSettings {
     pub printer_name: String,
     pub paper_width: i64,
     pub auto_print_on_checkout: bool,
+    pub require_guest_name: bool,
     pub pin_hash: String,
     pub has_pin: bool,
 }
@@ -178,6 +179,7 @@ impl Default for AppSettings {
             printer_name: "".into(),
             paper_width: 80,
             auto_print_on_checkout: true,
+            require_guest_name: true,
             pin_hash: "".into(),
             has_pin: false,
         }

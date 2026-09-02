@@ -61,7 +61,7 @@ export function HistoryPage({ settings }: { settings: AppSettings }) {
             {items.map((item) => (
               <tr key={item.stay.id} className="border-t border-[var(--line)]">
                 <td className="px-4 py-3 font-mono font-semibold tabular-nums">{item.stay.room_number}</td>
-                <td className="px-4 py-3">{item.stay.guest_name}</td>
+                <td className="px-4 py-3">{item.stay.guest_name.trim() || "—"}</td>
                 <td className="px-4 py-3">{item.stay.check_out_at ? formatDateTime(item.stay.check_out_at) : "—"}</td>
                 <td className="px-4 py-3">{paymentLabel(item.payment_method)}</td>
                 <td className="px-4 py-3 text-right font-mono font-medium tabular-nums">

@@ -270,7 +270,8 @@ pub fn save_rate_plan(state: State<AppState>, payload: SaveRatePlanPayload) -> A
 #[tauri::command]
 pub fn check_in(state: State<AppState>, payload: CheckInPayload) -> AppResult<Stay> {
     let conn = conn(&state);
-    if payload.guest_name.trim().is_empty() {
+    let settings = db::load_settings(&conn)?;
+    if settings.require_guest_name && payload.guest_name.trim().is_empty() {
         return Err(AppError::msg("El nombre del huésped es obligatorio"));
     }
     let room = db::get_room(&conn, payload.room_id)?;
@@ -625,6 +626,11 @@ pub fn save_settings(state: State<AppState>, payload: AppSettings, new_pin: Opti
         &conn,
         "auto_print_on_checkout",
         if payload.auto_print_on_checkout { "true" } else { "false" },
+    )?;
+    db::upsert_setting(
+        &conn,
+        "require_guest_name",
+        if payload.require_guest_name { "true" } else { "false" },
     )?;
     if let Some(pin) = new_pin {
         if pin.is_empty() {

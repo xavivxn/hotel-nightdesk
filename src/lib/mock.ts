@@ -115,6 +115,7 @@ function seed(): Db {
       printer_name: "",
       paper_width: 80,
       auto_print_on_checkout: true,
+      require_guest_name: true,
       pin_hash: "",
       has_pin: false,
     },
@@ -258,7 +259,9 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
     }
     case "check_in": {
       const payload = args.payload as CheckInPayload;
-      if (!payload.guest_name.trim()) fail("El nombre del huésped es obligatorio");
+      if ((db.settings.require_guest_name ?? true) && !payload.guest_name.trim()) {
+        fail("El nombre del huésped es obligatorio");
+      }
       const room = db.rooms.find((r) => r.id === payload.room_id) ?? fail("Habitación no encontrada");
       if (openStay(db, room.id)) fail("La habitación ya está ocupada");
       if (room.status === "blocked") fail("La habitación está bloqueada");
@@ -382,6 +385,7 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
         expected_nights: number;
         notes?: string | null;
       };
+      if (!payload.guest_name.trim()) fail("El nombre del huésped es obligatorio");
       const room = db.rooms.find((r) => r.id === payload.room_id) ?? fail("Habitación no encontrada");
       const rate = db.rates.find((r) => r.id === payload.rate_plan_id) ?? fail("Tarifa no encontrada");
       db.ids.guest += 1;
@@ -444,7 +448,12 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
         });
     }
     case "get_settings":
-      return { ...db.settings, pin_hash: "", has_pin: Boolean(db.settings.pin_hash) };
+      return {
+        ...db.settings,
+        require_guest_name: db.settings.require_guest_name ?? true,
+        pin_hash: "",
+        has_pin: Boolean(db.settings.pin_hash),
+      };
     case "save_settings": {
       const payload = args.payload as AppSettings;
       const newPin = args.new_pin;
