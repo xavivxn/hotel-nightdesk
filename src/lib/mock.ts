@@ -1,4 +1,5 @@
 import { previewBill } from "./billing";
+import { buildSeedProducts } from "./products";
 import type {
   AppSettings,
   BoardRoom,
@@ -8,6 +9,7 @@ import type {
   CheckOutResult,
   HistoryStay,
   Payment,
+  Product,
   RatePlan,
   Reservation,
   Room,
@@ -17,6 +19,7 @@ import type {
 type Db = {
   rooms: Room[];
   rates: RatePlan[];
+  products: Product[];
   guests: { id: number; name: string; document: string | null; phone: string | null }[];
   reservations: Reservation[];
   stays: Stay[];
@@ -26,7 +29,7 @@ type Db = {
   ids: { room: number; rate: number; guest: number; reservation: number; stay: number; charge: number; payment: number };
 };
 
-const KEY = "nightdesk.mock.v3";
+const KEY = "nightdesk.mock.v4";
 
 function nowIso() {
   const date = new Date();
@@ -96,6 +99,7 @@ function seed(): Db {
   return {
     rooms,
     rates,
+    products: buildSeedProducts(),
     guests: [],
     reservations: [],
     stays: [],
@@ -336,6 +340,28 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
         kind,
         description: payload.description,
         amount_cents: amount,
+        created_at: nowIso(),
+      };
+      db.charges.push(charge);
+      return charge;
+    }
+    case "list_products": {
+      const activeOnly = args.active_only !== false;
+      return (db.products ?? []).filter((p) => (activeOnly ? p.active : true));
+    }
+    case "add_product_charge": {
+      const payload = args.payload as { stay_id: number; product_id: number };
+      const stay = db.stays.find((s) => s.id === payload.stay_id) ?? fail("Estadía no encontrada");
+      if (stay.status !== "open") fail("No se pueden agregar cargos a una estadía cerrada");
+      const product = (db.products ?? []).find((p) => p.id === payload.product_id) ?? fail("Producto no encontrado");
+      if (!product.active) fail("El producto no está activo");
+      db.ids.charge += 1;
+      const charge: Charge = {
+        id: db.ids.charge,
+        stay_id: payload.stay_id,
+        kind: "surcharge",
+        description: product.name,
+        amount_cents: product.price_cents,
         created_at: nowIso(),
       };
       db.charges.push(charge);

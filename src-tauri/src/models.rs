@@ -50,6 +50,16 @@ pub struct RatePlan {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Product {
+    pub id: i64,
+    pub name: String,
+    pub category: String,
+    pub price_cents: i64,
+    pub active: bool,
+    pub sort_order: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Guest {
     pub id: i64,
     pub name: String,
@@ -245,6 +255,12 @@ pub struct AddChargePayload {
     pub kind: String,
     pub description: String,
     pub amount_cents: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AddProductChargePayload {
+    pub stay_id: i64,
+    pub product_id: i64,
 }
 
 #[derive(Debug, Serialize)]

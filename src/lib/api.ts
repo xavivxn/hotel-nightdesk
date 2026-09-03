@@ -8,6 +8,7 @@ import type {
   CheckOutResult,
   HistoryStay,
   Payment,
+  Product,
   RatePlan,
   Reservation,
   Room,
@@ -18,10 +19,21 @@ function isTauri() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
+/** Tauri 2 expects camelCase for top-level command args; nested payloads stay snake_case. */
+function toTauriArgs(args?: Record<string, unknown>) {
+  if (!args) return undefined;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(args)) {
+    const camel = key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+    out[camel] = value;
+  }
+  return out;
+}
+
 export async function cmd<T>(name: string, args?: Record<string, unknown>): Promise<T> {
   if (isTauri()) {
     const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<T>(name, args);
+    return invoke<T>(name, toTauriArgs(args));
   }
   const { mockInvoke } = await import("./mock");
   return mockInvoke<T>(name, args ?? {});
@@ -39,7 +51,10 @@ export const api = {
   getStayDetail: (stay_id: number) =>
     cmd<[Stay, BillPreview, Charge[], Payment[]]>("get_stay_detail", { stay_id }),
   convertToOvernight: (stay_id: number) => cmd<Stay>("convert_to_overnight", { stay_id }),
+  listProducts: (active_only = true) => cmd<Product[]>("list_products", { active_only }),
   addCharge: (payload: unknown) => cmd<Charge>("add_charge", { payload }),
+  addProductCharge: (payload: { stay_id: number; product_id: number }) =>
+    cmd<Charge>("add_product_charge", { payload }),
   deleteCharge: (charge_id: number) => cmd<void>("delete_charge", { charge_id }),
   checkOut: (payload: CheckOutPayload) => cmd<CheckOutResult>("check_out", { payload }),
   listReservations: () => cmd<Reservation[]>("list_reservations"),

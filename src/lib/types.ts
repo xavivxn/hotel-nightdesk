@@ -21,6 +21,15 @@ export type RatePlan = {
   active: boolean;
 };
 
+export type Product = {
+  id: number;
+  name: string;
+  category: string;
+  price_cents: number;
+  active: boolean;
+  sort_order: number;
+};
+
 export type Stay = {
   id: number;
   room_id: number;

@@ -1,6 +1,6 @@
 use crate::error::{AppError, AppResult};
 use crate::models::{
-    AppSettings, Charge, Guest, Payment, RateKind, RatePlan, Reservation, Room, Stay,
+    AppSettings, Charge, Guest, Payment, Product, RateKind, RatePlan, Reservation, Room, Stay,
 };
 use chrono::{DateTime, Local};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -8,28 +8,37 @@ use sha2::{Digest, Sha256};
 use std::path::Path;
 
 const MIGRATION_001: &str = include_str!("../migrations/001_init.sql");
+const MIGRATION_002: &str = include_str!("../migrations/002_products.sql");
 
 pub fn open(db_path: &Path) -> AppResult<Connection> {
     let conn = Connection::open(db_path)?;
     conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
     migrate(&conn)?;
     seed_if_empty(&conn)?;
+    seed_products_if_empty(&conn)?;
     Ok(conn)
 }
 
 fn migrate(conn: &Connection) -> AppResult<()> {
     conn.execute_batch(MIGRATION_001)?;
+    apply_migration(conn, "001_init")?;
+    conn.execute_batch(MIGRATION_002)?;
+    apply_migration(conn, "002_products")?;
+    Ok(())
+}
+
+fn apply_migration(conn: &Connection, id: &str) -> AppResult<()> {
     let applied: Option<String> = conn
         .query_row(
             "SELECT id FROM schema_migrations WHERE id = ?1",
-            ["001_init"],
+            [id],
             |row| row.get(0),
         )
         .optional()?;
     if applied.is_none() {
         conn.execute(
             "INSERT INTO schema_migrations (id, applied_at) VALUES (?1, ?2)",
-            params!["001_init", now_rfc3339()],
+            params![id, now_rfc3339()],
         )?;
     }
     Ok(())
@@ -84,6 +93,103 @@ fn seed_if_empty(conn: &Connection) -> AppResult<()> {
     upsert_setting(conn, "require_guest_name", "false")?;
     upsert_setting(conn, "pin_hash", "")?;
     Ok(())
+}
+
+fn seed_products_if_empty(conn: &Connection) -> AppResult<()> {
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM products", [], |row| row.get(0))?;
+    if count > 0 {
+        return Ok(());
+    }
+
+    let products: &[(&str, &str, i64)] = &[
+        ("Agua", "bebidas", 5_000),
+        ("Coca", "bebidas", 8_000),
+        ("Pulp", "bebidas", 8_000),
+        ("Fanta", "bebidas", 8_000),
+        ("Tónica", "bebidas", 7_000),
+        ("Del valle", "bebidas", 10_000),
+        ("Energy", "bebidas", 12_000),
+        ("Power", "bebidas", 12_000),
+        ("Bud 66", "bebidas", 12_000),
+        ("Skol", "bebidas", 12_000),
+        ("Smirnoff", "bebidas", 18_000),
+        ("Beldent", "snacks", 5_000),
+        ("Halls", "snacks", 5_000),
+        ("Papa", "snacks", 10_000),
+        ("Gullón", "snacks", 8_000),
+        ("Turrón", "snacks", 8_000),
+        ("Bonbon", "snacks", 7_000),
+        ("Chocolate", "snacks", 10_000),
+        ("Kent Conv.", "tabaco", 18_000),
+        ("Lucky", "tabaco", 18_000),
+        ("Encendedor", "tabaco", 8_000),
+        ("Crema D.", "higiene", 10_000),
+        ("Cepillo D.", "higiene", 8_000),
+        ("Baño E.", "higiene", 12_000),
+        ("Gel Pant.", "higiene", 15_000),
+        ("Prestobarba", "higiene", 12_000),
+        ("Prime", "adulto", 15_000),
+        ("Control", "adulto", 15_000),
+        ("Lubricante", "adulto", 25_000),
+        ("Prot. 100", "adulto", 20_000),
+        ("Prot. 150", "adulto", 30_000),
+        ("Prot. 200", "adulto", 40_000),
+        ("Capa P.", "adulto", 25_000),
+        ("Agrandador", "adulto", 35_000),
+        ("Anillo v.", "adulto", 45_000),
+        ("Estimulador", "adulto", 50_000),
+        ("Fantasía", "adulto", 60_000),
+        ("Quinta", "licores", 45_000),
+        ("Sta. Helena", "licores", 50_000),
+        ("Monje", "licores", 55_000),
+        ("Johnnie W.", "licores", 180_000),
+    ];
+
+    for (i, (name, category, price)) in products.iter().enumerate() {
+        conn.execute(
+            "INSERT INTO products (name, category, price_cents, active, sort_order) VALUES (?1, ?2, ?3, 1, ?4)",
+            params![name, category, price, (i as i64) + 1],
+        )?;
+    }
+    Ok(())
+}
+
+pub fn list_products(conn: &Connection, active_only: bool) -> AppResult<Vec<Product>> {
+    let sql = if active_only {
+        "SELECT id, name, category, price_cents, active, sort_order FROM products WHERE active = 1 ORDER BY sort_order, name"
+    } else {
+        "SELECT id, name, category, price_cents, active, sort_order FROM products ORDER BY sort_order, name"
+    };
+    let mut stmt = conn.prepare(sql)?;
+    let rows = stmt.query_map([], |row| {
+        Ok(Product {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            category: row.get(2)?,
+            price_cents: row.get(3)?,
+            active: row.get::<_, i64>(4)? != 0,
+            sort_order: row.get(5)?,
+        })
+    })?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+pub fn get_product(conn: &Connection, id: i64) -> AppResult<Product> {
+    conn.query_row(
+        "SELECT id, name, category, price_cents, active, sort_order FROM products WHERE id = ?1",
+        [id],
+        |row| {
+            Ok(Product {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                category: row.get(2)?,
+                price_cents: row.get(3)?,
+                active: row.get::<_, i64>(4)? != 0,
+                sort_order: row.get(5)?,
+            })
+        },
+    )
+    .map_err(|_| AppError::msg("Producto no encontrado"))
 }
 
 pub fn now_rfc3339() -> String {

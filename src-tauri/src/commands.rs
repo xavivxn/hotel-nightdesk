@@ -375,6 +375,12 @@ pub fn convert_to_overnight(state: State<AppState>, stay_id: i64) -> AppResult<S
 }
 
 #[tauri::command]
+pub fn list_products(state: State<AppState>, active_only: Option<bool>) -> AppResult<Vec<Product>> {
+    let conn = conn(&state);
+    db::list_products(&conn, active_only.unwrap_or(true))
+}
+
+#[tauri::command]
 pub fn add_charge(state: State<AppState>, payload: AddChargePayload) -> AppResult<Charge> {
     let conn = conn(&state);
     let stay = db::get_stay(&conn, payload.stay_id)?;
@@ -405,6 +411,35 @@ pub fn add_charge(state: State<AppState>, payload: AddChargePayload) -> AppResul
         kind: kind.into(),
         description: payload.description.trim().into(),
         amount_cents: amount,
+        created_at: now,
+    })
+}
+
+#[tauri::command]
+pub fn add_product_charge(state: State<AppState>, payload: AddProductChargePayload) -> AppResult<Charge> {
+    let conn = conn(&state);
+    let stay = db::get_stay(&conn, payload.stay_id)?;
+    if stay.status != "open" {
+        return Err(AppError::msg("No se pueden agregar cargos a una estadía cerrada"));
+    }
+    let product = db::get_product(&conn, payload.product_id)?;
+    if !product.active {
+        return Err(AppError::msg("El producto no está activo"));
+    }
+    if product.price_cents <= 0 {
+        return Err(AppError::msg("El precio del producto no es válido"));
+    }
+    let now = now_rfc3339();
+    conn.execute(
+        "INSERT INTO charges (stay_id, kind, description, amount_cents, created_at) VALUES (?1, 'surcharge', ?2, ?3, ?4)",
+        params![payload.stay_id, product.name, product.price_cents, now],
+    )?;
+    Ok(Charge {
+        id: conn.last_insert_rowid(),
+        stay_id: payload.stay_id,
+        kind: "surcharge".into(),
+        description: product.name,
+        amount_cents: product.price_cents,
         created_at: now,
     })
 }

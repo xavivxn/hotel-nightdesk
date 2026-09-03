@@ -4,6 +4,7 @@ import type { AppSettings, BoardRoom, Charge, RatePlan } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, Input, Select } from "@/components/ui/Field";
+import { RoomShop } from "@/components/board/RoomShop";
 import { useEffect, useMemo, useState } from "react";
 
 export function RoomDrawer({
@@ -206,7 +207,7 @@ function StayDrawer({
     setLines(preview.lines);
     setCharges(currentCharges.filter((c) => c.kind === "surcharge" || c.kind === "discount"));
     setOvernight(preview.overnight_applied);
-    if (!received) setReceived(String(preview.total_cents));
+    setReceived(String(preview.total_cents));
   }
 
   useEffect(() => {
@@ -294,8 +295,17 @@ function StayDrawer({
               Convertir a pernocte
             </Button>
           ) : null}
+          <RoomShop
+            stayId={stay.id}
+            currency={settings.currency_symbol}
+            charges={charges}
+            onChanged={async () => {
+              await refresh();
+              onChanged();
+            }}
+          />
           <div className="grid grid-cols-[1fr_120px_auto] gap-2">
-            <Input value={extraDesc} onChange={(e) => setExtraDesc(e.target.value)} />
+            <Input value={extraDesc} onChange={(e) => setExtraDesc(e.target.value)} placeholder="Otro cargo" />
             <Input
               value={extraAmount}
               onChange={(e) => setExtraAmount(e.target.value)}
