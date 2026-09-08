@@ -1,3 +1,4 @@
+import { BedDouble, BrushCleaning, CalendarClock, Check, X } from "lucide-react";
 import { RoomCard, RoomStatusLegend } from "@/components/board/RoomCard";
 import { RoomDrawer } from "@/components/board/RoomDrawer";
 import { api } from "@/lib/api";
@@ -14,6 +15,7 @@ export function BoardPage({ settings }: { settings: AppSettings }) {
   async function load() {
     try {
       const [rooms, plans] = await Promise.all([api.listBoard(), api.listRatePlans(true)]);
+      setError(null);
       setBoard(rooms);
       setRates(plans);
       setSelected((current) => current ? rooms.find((r) => r.room.id === current.room.id) ?? null : null);
@@ -29,8 +31,7 @@ export function BoardPage({ settings }: { settings: AppSettings }) {
   }, []);
 
   const filtered = useMemo(() => {
-    if (!statusFilter.length) return board;
-    return board.filter((item) => statusFilter.includes(item.display_status));
+    return board.filter((item) => !statusFilter.length || statusFilter.includes(item.display_status));
   }, [board, statusFilter]);
 
   const grouped = useMemo(() => {
@@ -49,26 +50,23 @@ export function BoardPage({ settings }: { settings: AppSettings }) {
   const baseRateCents = rates[0]?.base_amount_cents ?? null;
 
   return (
-    <div className="px-6 py-6 lg:px-8">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="page-kicker">Recepción</p>
-          <h1 className="page-title">Tablero</h1>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="min-w-[148px] rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2">
-            <div className="flex items-baseline justify-between gap-3">
-              <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">Ocupación</span>
-              <span className="font-mono text-sm font-semibold tabular-nums">
-                {occupied}/{board.length}
-              </span>
-            </div>
-            <div className="mt-2 h-1 overflow-hidden rounded-full bg-[var(--surface-2)]">
-              <div className="h-full bg-[var(--warn)]" style={{ width: `${occupancyPct}%` }} />
-            </div>
-          </div>
-        </div>
+    <div className="board-page px-6 py-6 lg:px-8">
+      <header className="board-header">
+        <div><p className="page-kicker">Recepción / Vista general</p><h1 className="page-title">Tablero de habitaciones</h1><p className="page-description">Cada habitación, cada movimiento. Todo bajo control.</p></div>
+        <div className="occupancy-overview"><span className="occupancy-number">{occupancyPct}<small>%</small></span><div><p>Ocupación actual</p><span>{occupied} de {board.length} habitaciones</span><div className="occupancy-track"><div style={{ width: `${occupancyPct}%` }} /></div></div></div>
       </header>
+      <div className="board-stats" aria-label="Resumen de habitaciones">
+        {[
+          { status: "available", label: "Disponibles", hint: "Listas para recibir", icon: Check },
+          { status: "occupied", label: "Ocupadas", hint: "Estadías en curso", icon: BedDouble },
+          { status: "dirty", label: "Por limpiar", hint: "Pendientes de aseo", icon: BrushCleaning },
+          { status: "reserved", label: "Reservadas", hint: "Próximas llegadas", icon: CalendarClock },
+        ].map(({ status, label, hint, icon: Icon }) => <button key={status} type="button" className={`stat-card room-${status}`} aria-pressed={statusFilter.includes(status)} onClick={() => setStatusFilter(current => current.length === 1 && current[0] === status ? [] : [status])}><div className="stat-icon"><Icon size={20} /></div><div><p>{label}</p><span>{hint}</span></div><strong>{board.filter(room => room.display_status === status).length}</strong></button>)}
+      </div>
+      <div className="board-toolbar">
+        <span className="toolbar-count">{filtered.length} habitaciones</span>
+        {statusFilter.length > 0 ? <button className="clear-filters" onClick={() => { setStatusFilter([]); }}><X size={14} /> Limpiar filtros</button> : null}
+      </div>
       <RoomStatusLegend
         active={statusFilter}
         onToggle={(status) => {
@@ -88,14 +86,14 @@ export function BoardPage({ settings }: { settings: AppSettings }) {
         ) : null}
         {grouped.map(([floor, rooms]) => (
           <section key={floor} className="mt-6">
-            <div className="mb-3 flex items-center gap-3">
+            <div className="floor-heading mb-3 flex items-center gap-3">
               <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">
                 Piso {floor}
               </p>
               <div className="h-px flex-1 bg-[var(--line)]" />
-              <p className="font-mono text-[11px] tabular-nums text-[var(--muted)]">{rooms.length}</p>
+              <p className="font-mono text-[11px] tabular-nums text-[var(--muted)]">{rooms.length} habitaciones</p>
             </div>
-            <div className="grid grid-cols-3 gap-3 2xl:grid-cols-9">
+            <div className="room-grid">
               {rooms.map((item) => (
                 <RoomCard
                   key={item.room.id}

@@ -66,12 +66,12 @@ export function RoomStatusLegend({
               aria-pressed={selected}
               onClick={() => onToggle(status)}
               className={cn(
-                "stamp cursor-pointer transition-opacity focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]",
+                "stamp status-filter cursor-pointer transition-opacity focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]",
                 stamps[status],
                 filtering && !selected && "opacity-35",
               )}
             >
-              <Icon size={11} />
+              <Icon size={14} />
               {statusLabel(status)}
             </button>
           </li>
@@ -116,7 +116,6 @@ export function RoomCard({
       <div className="room-head">
         <span className="room-head-number">{item.room.number}</span>
         <span className="room-head-status">
-          {isSuite ? <Crown size={12} className="shrink-0" /> : null}
           <Icon size={12} className="shrink-0" />
           <span className="truncate">{statusLabel(status)}</span>
         </span>
@@ -135,6 +134,7 @@ export function RoomCard({
           </div>
         ) : (
           <>
+            <Icon className="room-watermark" size={40} aria-hidden="true" />
             {isSuite ? (
               <p className="room-suite-label">
                 <Crown size={13} className="shrink-0" />

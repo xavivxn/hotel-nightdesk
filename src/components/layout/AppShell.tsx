@@ -20,16 +20,23 @@ export function AppShell() {
     <div className="flex h-screen flex-col overflow-hidden">
       <TitleBar />
       <div className="flex min-h-0 flex-1">
-        <aside className="flex h-full w-[88px] flex-col border-r border-[var(--line)] bg-[var(--surface)] px-3 py-5 lg:w-64 lg:px-4">
-          <nav className="flex flex-1 flex-col gap-1">
+        <aside className="app-sidebar flex h-full w-[88px] flex-col border-r border-[var(--line)] bg-[var(--surface)] px-3 py-5 lg:w-56 lg:px-4">
+          <div className="sidebar-brand">
+            <div className="brand-symbol"><LayoutGrid size={23} /></div>
+            <div className="hidden lg:block"><p className="brand-caption">CONTROL DE<br />RECEPCIÓN</p></div>
+          </div>
+          <p className="nav-section hidden lg:block">OPERACIÓN</p>
+          <nav aria-label="Navegación principal" className="flex flex-1 flex-col gap-1">
             {links.map((link) => (
               <NavLink
                 key={link.to}
                 to={link.to}
+                title={link.label}
+                aria-label={link.label}
                 end={link.to === "/"}
                 className={({ isActive }) =>
                   cn(
-                    "flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)]",
+                    "sidebar-link flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)]",
                     isActive && "bg-[var(--accent-soft)] text-[var(--accent)]",
                   )
                 }
