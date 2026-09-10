@@ -1,6 +1,10 @@
 # Nightdesk
 
-Recepción hotel/motel 100% offline: Tauri 2 + React + SQLite local. Sin red, sin sync, sin nube.
+Recepción hotel/motel con operación local sin internet: Tauri 2 + React + SQLite local.
+
+## Arquitectura acordada el 10/09/2026
+
+Leer `docs/arquitectura-offline-vpn-backups.md` antes de implementar usuarios, permisos, API, VPN, sincronización de vistas o respaldos. Es una especificación pendiente de implementación. Se autoriza red para administración remota con escritura mediante API privada/VPN y para respaldos diarios externos. SQLite en recepción sigue siendo la única fuente operativa; no habilitar escritura remota directa sobre su archivo ni bases editables independientes. Admin ya no es solo consulta. Esta decisión sustituye las restricciones anteriores de «sin red / sin nube» en skills locales; la operación local no puede depender de internet.
 
 ## Mapa
 

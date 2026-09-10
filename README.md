@@ -4,6 +4,12 @@ Sistema local de recepción para hotel/motel: tablero de habitaciones, check-in 
 
 Pensado para el dueño o el personal de recepción. Los datos quedan en el equipo: no hace falta internet ni un servidor en la nube.
 
+## Evolución acordada (pendiente de implementación)
+
+La operación de recepción seguirá siendo local. Se incorporarán usuarios con roles admin/recepción, administración remota con escritura por API privada y VPN, y respaldos diarios cifrados a un servidor externo.
+
+Ver [Arquitectura, requisitos y criterios de aceptación](docs/arquitectura-offline-vpn-backups.md). Esta especificación reemplaza la restricción anterior de ausencia total de red; no implica que las funciones ya estén implementadas.
+
 ## Qué incluye el MVP
 
 - Tablero visual de habitaciones (libre, ocupada, sucia, bloqueada, reservada)
@@ -71,7 +77,7 @@ La base SQLite se crea al primer arranque en el data dir de la app, no dentro de
 - macOS: `~/Library/Application Support/com.nightdesk.hotel/`
 - Windows: `%APPDATA%\com.nightdesk.hotel\`
 
-Un backup es copiar el archivo `nightdesk.db`.
+Con WAL activo, no copiar únicamente `nightdesk.db` mientras la app está trabajando. El mecanismo previsto generará snapshots consistentes con SQLite Online Backup API y verificará su restauración. Ver la especificación de respaldos vinculada arriba.
 
 ## Impresora
 
