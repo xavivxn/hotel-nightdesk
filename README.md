@@ -23,6 +23,7 @@ Recorrido de recepción documentado en [N02 — Control de cuentas](docs/recepci
 - Historial del día y reimpresión de ticket
 - Tema claro/oscuro y PIN opcional de desbloqueo
 - Impresión ESC/POS (58 mm / 80 mm); si la impresora falla, el cobro igual se cierra
+- Catálogo de consumos para administración: altas, edición, precios en Gs. y baja lógica
 
 ## Stack
 

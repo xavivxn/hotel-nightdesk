@@ -466,6 +466,26 @@ pub fn list_products(state: State<AppState>, active_only: Option<bool>) -> AppRe
 }
 
 #[tauri::command]
+pub fn save_product(state: State<AppState>, payload: SaveProductPayload) -> AppResult<Product> {
+    let conn = conn(&state);
+    db::save_product(
+        &conn,
+        payload.id,
+        &payload.name,
+        &payload.category,
+        payload.price_cents,
+        payload.active,
+        payload.sort_order,
+    )
+}
+
+#[tauri::command]
+pub fn set_product_active(state: State<AppState>, product_id: i64, active: bool) -> AppResult<Product> {
+    let conn = conn(&state);
+    db::set_product_active(&conn, product_id, active)
+}
+
+#[tauri::command]
 pub fn add_charge(state: State<AppState>, payload: AddChargePayload) -> AppResult<Charge> {
     let conn = conn(&state);
     let stay = db::get_stay(&conn, payload.stay_id)?;

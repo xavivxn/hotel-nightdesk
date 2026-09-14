@@ -262,6 +262,16 @@ pub struct AddProductChargePayload {
     pub product_id: i64,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct SaveProductPayload {
+    pub id: Option<i64>,
+    pub name: String,
+    pub category: String,
+    pub price_cents: i64,
+    pub active: bool,
+    pub sort_order: Option<i64>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct CheckOutResult {
     pub stay: Stay,

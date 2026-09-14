@@ -52,6 +52,9 @@ export const api = {
     cmd<[Stay, BillPreview, Charge[], Payment[]]>("get_stay_detail", { stay_id }),
   convertToOvernight: (stay_id: number) => cmd<Stay>("convert_to_overnight", { stay_id }),
   listProducts: (active_only = true) => cmd<Product[]>("list_products", { active_only }),
+  saveProduct: (payload: unknown) => cmd<Product>("save_product", { payload }),
+  setProductActive: (product_id: number, active: boolean) =>
+    cmd<Product>("set_product_active", { product_id, active }),
   addCharge: (payload: unknown) => cmd<Charge>("add_charge", { payload }),
   addProductCharge: (payload: { stay_id: number; product_id: number }) =>
     cmd<Charge>("add_product_charge", { payload }),

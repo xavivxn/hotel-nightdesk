@@ -583,3 +583,91 @@ mod room_scope_tests {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod product_catalog_tests {
+    use super::*;
+
+    fn catalog_db() -> AppResult<Connection> {
+        let conn = Connection::open_in_memory()?;
+        migrate(&conn)?;
+        seed_if_empty(&conn)?;
+        seed_products_if_empty(&conn)?;
+        Ok(conn)
+    }
+
+    #[test]
+    fn product_price_must_be_positive_and_integer() -> AppResult<()> {
+        let conn = catalog_db()?;
+        let error = save_product(&conn, None, "Agua test", "bebidas", 0, true, None)
+            .expect_err("zero price must be rejected");
+        assert!(error.to_string().contains("entero mayor que 0"));
+        let product = save_product(&conn, None, "Agua test", "bebidas", 15_000, true, None)?;
+        assert_eq!(product.price_cents, 15_000);
+        Ok(())
+    }
+
+    #[test]
+    fn deactivation_is_logical_and_reactivation_keeps_the_row() -> AppResult<()> {
+        let conn = catalog_db()?;
+        let product = save_product(&conn, None, "Producto temporal", "snacks", 9_000, true, None)?;
+        set_product_active(&conn, product.id, false)?;
+        assert!(!list_products(&conn, true)?.iter().any(|item| item.id == product.id));
+        assert!(!get_product(&conn, product.id)?.active);
+        let restored = set_product_active(&conn, product.id, true)?;
+        assert!(restored.active);
+        assert!(list_products(&conn, true)?.iter().any(|item| item.id == product.id));
+        Ok(())
+    }
+}
+
+pub fn save_product(
+    conn: &Connection,
+    id: Option<i64>,
+    name: &str,
+    category: &str,
+    price_cents: i64,
+    active: bool,
+    sort_order: Option<i64>,
+) -> AppResult<Product> {
+    let name = name.trim();
+    let category = category.trim();
+    if name.is_empty() {
+        return Err(AppError::msg("El nombre del producto es obligatorio"));
+    }
+    if category.is_empty() {
+        return Err(AppError::msg("La categoría del producto es obligatoria"));
+    }
+    if !matches!(category, "bebidas" | "snacks" | "tabaco" | "higiene" | "adulto" | "licores") {
+        return Err(AppError::msg("La categoría del producto no es válida"));
+    }
+    if price_cents <= 0 {
+        return Err(AppError::msg("El precio debe ser un número entero mayor que 0 Gs."));
+    }
+    if let Some(id) = id {
+        let current = get_product(conn, id)?;
+        conn.execute(
+            "UPDATE products SET name = ?1, category = ?2, price_cents = ?3, active = ?4, sort_order = ?5 WHERE id = ?6",
+            params![name, category, price_cents, if active { 1 } else { 0 }, sort_order.unwrap_or(current.sort_order), id],
+        )?;
+        return get_product(conn, id);
+    }
+    let next_order = sort_order.unwrap_or_else(|| {
+        conn.query_row("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM products", [], |row| row.get(0))
+            .unwrap_or(1)
+    });
+    conn.execute(
+        "INSERT INTO products (name, category, price_cents, active, sort_order) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![name, category, price_cents, if active { 1 } else { 0 }, next_order],
+    )?;
+    get_product(conn, conn.last_insert_rowid())
+}
+
+pub fn set_product_active(conn: &Connection, id: i64, active: bool) -> AppResult<Product> {
+    get_product(conn, id)?;
+    conn.execute(
+        "UPDATE products SET active = ?1 WHERE id = ?2",
+        params![if active { 1 } else { 0 }, id],
+    )?;
+    get_product(conn, id)
+}

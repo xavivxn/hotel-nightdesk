@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
-import { BedDouble, CalendarClock, History, LayoutGrid, Moon, Settings2, Sun } from "lucide-react";
+import { BedDouble, CalendarClock, History, LayoutGrid, Moon, Package, Settings2, Sun } from "lucide-react";
 import { DutyClock } from "@/components/layout/DutyClock";
 import { TitleBar } from "@/components/layout/TitleBar";
 import { useTheme } from "@/lib/theme";
@@ -10,6 +10,7 @@ const links = [
   { to: "/reservas", label: "Reservas", icon: CalendarClock },
   { to: "/habitaciones", label: "Habitaciones", icon: BedDouble },
   { to: "/historial", label: "Historial", icon: History },
+  { to: "/catalogo", label: "Catálogo admin", icon: Package },
   { to: "/ajustes", label: "Ajustes", icon: Settings2 },
 ];
 

@@ -7,6 +7,7 @@ import { HistoryPage } from "@/pages/HistoryPage";
 import { ReservationsPage } from "@/pages/ReservationsPage";
 import { RoomsPage } from "@/pages/RoomsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
+import { CatalogPage } from "@/pages/CatalogPage";
 import { api } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
 import type { AppSettings } from "@/lib/types";
@@ -131,6 +132,7 @@ export default function App() {
           <Route path="/reservas" element={<ReservationsPage />} />
           <Route path="/habitaciones" element={<RoomsPage settings={settings} />} />
           <Route path="/historial" element={<HistoryPage settings={settings} />} />
+          <Route path="/catalogo" element={<CatalogPage settings={settings} />} />
           <Route
             path="/ajustes"
             element={<SettingsPage settings={settings} onSaved={setSettings} />}

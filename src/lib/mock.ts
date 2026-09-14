@@ -27,7 +27,7 @@ type Db = {
   payments: Payment[];
   closed_bills: Record<string, ReturnType<typeof previewBill>>;
   settings: AppSettings;
-  ids: { room: number; rate: number; guest: number; reservation: number; stay: number; charge: number; payment: number };
+  ids: { room: number; rate: number; product: number; guest: number; reservation: number; stay: number; charge: number; payment: number };
 };
 
 const KEY = "nightdesk.mock.v4";
@@ -125,7 +125,7 @@ function seed(): Db {
       pin_hash: "",
       has_pin: false,
     },
-    ids: { room: 23, rate: 3, guest: 0, reservation: 0, stay: 0, charge: 0, payment: 0 },
+    ids: { room: 23, rate: 3, product: 41, guest: 0, reservation: 0, stay: 0, charge: 0, payment: 0 },
   };
 }
 
@@ -159,6 +159,9 @@ function load(): Db {
   try {
     const db = JSON.parse(raw) as Db;
     db.closed_bills ??= {};
+    db.products ??= buildSeedProducts();
+    db.ids ??= { room: 23, rate: 3, product: db.products.reduce((max, item) => Math.max(max, item.id), 0), guest: 0, reservation: 0, stay: 0, charge: 0, payment: 0 };
+    db.ids.product ??= db.products.reduce((max, item) => Math.max(max, item.id), 0);
     return normalizeRoomConfiguration(db);
   } catch {
     const db = seed();
@@ -382,6 +385,30 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
     case "list_products": {
       const activeOnly = args.active_only !== false;
       return (db.products ?? []).filter((p) => (activeOnly ? p.active : true));
+    }
+    case "save_product": {
+      const payload = args.payload as { id?: number | null; name: string; category: string; price_cents: number; active?: boolean; sort_order?: number };
+      const name = String(payload.name ?? "").trim();
+      const category = String(payload.category ?? "").trim();
+      const price = Number(payload.price_cents);
+      if (!name) fail("El nombre del producto es obligatorio");
+      if (!category) fail("La categoría del producto es obligatoria");
+      if (!["bebidas", "snacks", "tabaco", "higiene", "adulto", "licores"].includes(category)) fail("La categoría del producto no es válida");
+      if (!Number.isInteger(price) || price <= 0) fail("El precio debe ser un número entero mayor que 0 Gs.");
+      if (payload.id) {
+        const product = db.products.find((item) => item.id === payload.id) ?? fail("Producto no encontrado");
+        Object.assign(product, { name, category, price_cents: price, active: payload.active ?? product.active, sort_order: payload.sort_order ?? product.sort_order });
+        return product;
+      }
+      db.ids.product = Math.max(db.ids.product ?? 0, ...db.products.map((item) => item.id)) + 1;
+      const product: Product = { id: db.ids.product, name, category, price_cents: price, active: payload.active ?? true, sort_order: payload.sort_order ?? db.ids.product };
+      db.products.push(product);
+      return product;
+    }
+    case "set_product_active": {
+      const product = db.products.find((item) => item.id === Number(args.product_id)) ?? fail("Producto no encontrado");
+      product.active = Boolean(args.active);
+      return product;
     }
     case "add_product_charge": {
       const payload = args.payload as { stay_id: number; product_id: number };

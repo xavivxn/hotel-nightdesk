@@ -38,6 +38,8 @@ pub fn run() {
             commands::get_stay_detail,
             commands::convert_to_overnight,
             commands::list_products,
+            commands::save_product,
+            commands::set_product_active,
             commands::add_charge,
             commands::add_product_charge,
             commands::delete_charge,
