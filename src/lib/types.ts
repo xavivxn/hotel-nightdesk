@@ -7,6 +7,7 @@ export type Room = {
   floor: number;
   status: string;
   notes: string | null;
+  active: boolean;
 };
 
 export type RatePlan = {

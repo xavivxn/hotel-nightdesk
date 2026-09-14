@@ -43,10 +43,10 @@ function nowIso() {
 
 function seedRooms(): Array<[string, string, number]> {
   const rooms: Array<[string, string, number]> = [];
-  for (let n = 1; n <= 27; n++) {
+  for (let n = 1; n <= 23; n++) {
     const number = String(n).padStart(2, "0");
     const floor = Math.ceil(n / 9);
-    const room_type = n % 9 === 0 ? "Suite" : "Estándar";
+    const room_type = n > 19 ? "Jacuzzi" : "Normal";
     rooms.push([number, room_type, floor]);
   }
   return rooms;
@@ -60,6 +60,7 @@ function seed(): Db {
     floor: Number(floor),
     status: "available",
     notes: null,
+    active: true,
   }));
   const rates: RatePlan[] = [
     {
@@ -122,8 +123,28 @@ function seed(): Db {
       pin_hash: "",
       has_pin: false,
     },
-    ids: { room: 27, rate: 3, guest: 0, reservation: 0, stay: 0, charge: 0, payment: 0 },
+    ids: { room: 23, rate: 3, guest: 0, reservation: 0, stay: 0, charge: 0, payment: 0 },
   };
+}
+
+function normalizeRoomConfiguration(db: Db): Db {
+  db.rooms = db.rooms.map((room) => ({
+    ...room,
+    active: typeof room.active === "boolean" ? room.active : true,
+  }));
+
+  const retireCount = Math.max(db.rooms.filter((room) => room.active).length - 23, 0);
+  const candidates = db.rooms
+    .filter((room) => room.active)
+    .filter((room) => !db.stays.some((stay) => stay.room_id === room.id && stay.status === "open"))
+    .filter((room) => !db.reservations.some((res) => res.room_id === room.id && res.status === "hold"))
+    .sort((a, b) => Number(b.number) - Number(a.number) || b.id - a.id)
+    .slice(0, retireCount);
+
+  for (const room of candidates) {
+    room.active = false;
+  }
+  return db;
 }
 
 function load(): Db {
@@ -134,7 +155,7 @@ function load(): Db {
     return db;
   }
   try {
-    return JSON.parse(raw) as Db;
+    return normalizeRoomConfiguration(JSON.parse(raw) as Db);
   } catch {
     const db = seed();
     save(db);
@@ -197,7 +218,7 @@ export async function mockInvoke<T>(name: string, args: Record<string, unknown> 
 function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
   switch (name) {
     case "list_board":
-      return db.rooms.map((room) => {
+      return db.rooms.filter((room) => room.active).map((room) => {
         const stay = openStay(db, room.id) ?? null;
         const reservation = stay ? null : todayHold(db, room.id) ?? null;
         let display_status = "available";
@@ -220,7 +241,7 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
         return item;
       });
     case "list_rooms":
-      return db.rooms;
+      return db.rooms.filter((room) => room.active);
     case "save_room": {
       const payload = args.payload as { id?: number; number: string; room_type: string; floor: number; notes?: string | null };
       if (payload.id) {
@@ -236,12 +257,14 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
         floor: payload.floor,
         status: "available",
         notes: payload.notes ?? null,
+        active: true,
       };
       db.rooms.push(room);
       return room;
     }
     case "set_room_status": {
       const room = db.rooms.find((r) => r.id === args.room_id) ?? fail("Habitación no encontrada");
+      if (!room.active) fail("La habitación ya no está habilitada");
       if (openStay(db, room.id)) fail("No se puede cambiar el estado de una habitación ocupada");
       room.status = String(args.status);
       return room;
@@ -263,6 +286,7 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
     case "check_in": {
       const payload = args.payload as CheckInPayload;
       const room = db.rooms.find((r) => r.id === payload.room_id) ?? fail("Habitación no encontrada");
+      if (!room.active) fail("La habitación ya no está habilitada");
       if (openStay(db, room.id)) fail("La habitación ya está ocupada");
       if (room.status === "blocked") fail("La habitación está bloqueada");
       const hold = todayHold(db, room.id);
@@ -408,6 +432,7 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
         notes?: string | null;
       };
       const room = db.rooms.find((r) => r.id === payload.room_id) ?? fail("Habitación no encontrada");
+      if (!room.active) fail("La habitación ya no está habilitada");
       const rate = db.rates.find((r) => r.id === payload.rate_plan_id) ?? fail("Tarifa no encontrada");
       db.ids.guest += 1;
       db.guests.push({

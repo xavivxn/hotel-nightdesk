@@ -9,6 +9,7 @@ use std::path::Path;
 
 const MIGRATION_001: &str = include_str!("../migrations/001_init.sql");
 const MIGRATION_002: &str = include_str!("../migrations/002_products.sql");
+const MIGRATION_003: &str = include_str!("../migrations/003_rooms_scope.sql");
 
 pub fn open(db_path: &Path) -> AppResult<Connection> {
     let conn = Connection::open(db_path)?;
@@ -24,10 +25,14 @@ fn migrate(conn: &Connection) -> AppResult<()> {
     apply_migration(conn, "001_init")?;
     conn.execute_batch(MIGRATION_002)?;
     apply_migration(conn, "002_products")?;
+    if !migration_applied(conn, "003_rooms_scope")? {
+        conn.execute_batch(MIGRATION_003)?;
+        apply_migration(conn, "003_rooms_scope")?;
+    }
     Ok(())
 }
 
-fn apply_migration(conn: &Connection, id: &str) -> AppResult<()> {
+fn migration_applied(conn: &Connection, id: &str) -> AppResult<bool> {
     let applied: Option<String> = conn
         .query_row(
             "SELECT id FROM schema_migrations WHERE id = ?1",
@@ -35,7 +40,11 @@ fn apply_migration(conn: &Connection, id: &str) -> AppResult<()> {
             |row| row.get(0),
         )
         .optional()?;
-    if applied.is_none() {
+    Ok(applied.is_some())
+}
+
+fn apply_migration(conn: &Connection, id: &str) -> AppResult<()> {
+    if !migration_applied(conn, id)? {
         conn.execute(
             "INSERT INTO schema_migrations (id, applied_at) VALUES (?1, ?2)",
             params![id, now_rfc3339()],
@@ -51,10 +60,10 @@ fn seed_if_empty(conn: &Connection) -> AppResult<()> {
     }
 
     let now = now_rfc3339();
-    for n in 1..=27 {
+    for n in 1..=23 {
         let number = format!("{n:02}");
         let floor = ((n - 1) / 9) + 1;
-        let room_type = if n % 9 == 0 { "Suite" } else { "Estándar" };
+        let room_type = if n > 19 { "Jacuzzi" } else { "Normal" };
         conn.execute(
             "INSERT INTO rooms (number, room_type, floor, status, created_at) VALUES (?1, ?2, ?3, 'available', ?4)",
             params![number, room_type, floor, now],
@@ -255,7 +264,7 @@ pub fn hash_pin(pin: &str) -> String {
 
 pub fn get_room(conn: &Connection, id: i64) -> AppResult<Room> {
     conn.query_row(
-        "SELECT id, number, room_type, floor, status, notes FROM rooms WHERE id = ?1",
+        "SELECT id, number, room_type, floor, status, notes, active FROM rooms WHERE id = ?1",
         [id],
         |row| {
             Ok(Room {
@@ -265,6 +274,7 @@ pub fn get_room(conn: &Connection, id: i64) -> AppResult<Room> {
                 floor: row.get(3)?,
                 status: row.get(4)?,
                 notes: row.get(5)?,
+                active: row.get::<_, i64>(6)? != 0,
             })
         },
     )
@@ -491,4 +501,80 @@ pub fn set_room_status(conn: &Connection, room_id: i64, status: &str) -> AppResu
         params![status, room_id],
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod room_scope_tests {
+    use super::*;
+
+    #[test]
+    fn fresh_database_seeds_confirmed_room_scope() -> AppResult<()> {
+        let conn = Connection::open_in_memory()?;
+        migrate(&conn)?;
+        seed_if_empty(&conn)?;
+        migrate(&conn)?;
+
+        let total: i64 = conn.query_row("SELECT COUNT(*) FROM rooms", [], |row| row.get(0))?;
+        let active: i64 = conn.query_row("SELECT COUNT(*) FROM rooms WHERE active = 1", [], |row| row.get(0))?;
+        let normal: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM rooms WHERE active = 1 AND room_type = 'Normal'",
+            [],
+            |row| row.get(0),
+        )?;
+        let jacuzzi: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM rooms WHERE active = 1 AND room_type = 'Jacuzzi'",
+            [],
+            |row| row.get(0),
+        )?;
+
+        assert_eq!(total, 23);
+        assert_eq!(active, 23);
+        assert_eq!(normal, 19);
+        assert_eq!(jacuzzi, 4);
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_scope_retires_only_safe_rooms_and_keeps_history() -> AppResult<()> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(MIGRATION_001)?;
+        apply_migration(&conn, "001_init")?;
+        conn.execute_batch(MIGRATION_002)?;
+        apply_migration(&conn, "002_products")?;
+
+        for number in 1..=27 {
+            conn.execute(
+                "INSERT INTO rooms (number, room_type, floor, status, created_at) VALUES (?1, 'Normal', 1, 'available', ?2)",
+                params![format!("{number:02}"), now_rfc3339()],
+            )?;
+        }
+        conn.execute(
+            "INSERT INTO rate_plans (name, kind, base_amount_cents, extra_hour_cents, included_hours, grace_minutes, night_cutoff_hour, active)
+             VALUES ('3 horas', 'hourly', 80000, 20000, 3, 10, 12, 1)",
+            [],
+        )?;
+        conn.execute(
+            "INSERT INTO guests (name, created_at) VALUES ('Huésped histórico', ?1)",
+            [now_rfc3339()],
+        )?;
+        conn.execute(
+            "INSERT INTO stays (room_id, guest_id, rate_plan_id, check_in_at, status)
+             VALUES (27, 1, 1, ?1, 'open')",
+            [now_rfc3339()],
+        )?;
+
+        conn.execute_batch(MIGRATION_003)?;
+        apply_migration(&conn, "003_rooms_scope")?;
+
+        let active: i64 = conn.query_row("SELECT COUNT(*) FROM rooms WHERE active = 1", [], |row| row.get(0))?;
+        let room_27_active: i64 = conn.query_row("SELECT active FROM rooms WHERE number = '27'", [], |row| row.get(0))?;
+        let room_26_active: i64 = conn.query_row("SELECT active FROM rooms WHERE number = '26'", [], |row| row.get(0))?;
+        let history_count: i64 = conn.query_row("SELECT COUNT(*) FROM stays WHERE room_id = 27", [], |row| row.get(0))?;
+
+        assert_eq!(active, 23);
+        assert_eq!(room_27_active, 1);
+        assert_eq!(room_26_active, 0);
+        assert_eq!(history_count, 1);
+        Ok(())
+    }
 }

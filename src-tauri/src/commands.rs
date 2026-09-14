@@ -90,7 +90,7 @@ fn persist_computed_charges(conn: &Connection, bill: &BillPreview) -> AppResult<
 pub fn list_board(state: State<AppState>) -> AppResult<Vec<BoardRoom>> {
     let conn = conn(&state);
     let mut stmt = conn.prepare(
-        "SELECT id, number, room_type, floor, status, notes FROM rooms ORDER BY floor, number",
+        "SELECT id, number, room_type, floor, status, notes, active FROM rooms WHERE active = 1 ORDER BY floor, number",
     )?;
     let rooms: Vec<Room> = stmt
         .query_map([], |row| {
@@ -101,6 +101,7 @@ pub fn list_board(state: State<AppState>) -> AppResult<Vec<BoardRoom>> {
                 floor: row.get(3)?,
                 status: row.get(4)?,
                 notes: row.get(5)?,
+                active: row.get::<_, i64>(6)? != 0,
             })
         })?
         .filter_map(|r| r.ok())
@@ -153,7 +154,7 @@ pub fn list_board(state: State<AppState>) -> AppResult<Vec<BoardRoom>> {
 pub fn list_rooms(state: State<AppState>) -> AppResult<Vec<Room>> {
     let conn = conn(&state);
     let mut stmt = conn.prepare(
-        "SELECT id, number, room_type, floor, status, notes FROM rooms ORDER BY floor, number",
+        "SELECT id, number, room_type, floor, status, notes, active FROM rooms WHERE active = 1 ORDER BY floor, number",
     )?;
     let rooms = stmt
         .query_map([], |row| {
@@ -164,6 +165,7 @@ pub fn list_rooms(state: State<AppState>) -> AppResult<Vec<Room>> {
                 floor: row.get(3)?,
                 status: row.get(4)?,
                 notes: row.get(5)?,
+                active: row.get::<_, i64>(6)? != 0,
             })
         })?
         .filter_map(|r| r.ok())
@@ -211,6 +213,10 @@ pub fn set_room_status(state: State<AppState>, room_id: i64, status: String) -> 
         return Err(AppError::msg("Estado de habitación inválido"));
     }
     let conn = conn(&state);
+    let room = db::get_room(&conn, room_id)?;
+    if !room.active {
+        return Err(AppError::msg("La habitación ya no está habilitada"));
+    }
     if db::open_stay_for_room(&conn, room_id)?.is_some() {
         return Err(AppError::msg("No se puede cambiar el estado de una habitación ocupada"));
     }
@@ -271,6 +277,9 @@ pub fn save_rate_plan(state: State<AppState>, payload: SaveRatePlanPayload) -> A
 pub fn check_in(state: State<AppState>, payload: CheckInPayload) -> AppResult<Stay> {
     let conn = conn(&state);
     let room = db::get_room(&conn, payload.room_id)?;
+    if !room.active {
+        return Err(AppError::msg("La habitación ya no está habilitada"));
+    }
     if db::open_stay_for_room(&conn, room.id)?.is_some() {
         return Err(AppError::msg("La habitación ya está ocupada"));
     }
@@ -527,6 +536,9 @@ pub fn list_reservations(state: State<AppState>) -> AppResult<Vec<Reservation>> 
 pub fn create_reservation(state: State<AppState>, payload: CreateReservationPayload) -> AppResult<Reservation> {
     let conn = conn(&state);
     let room = db::get_room(&conn, payload.room_id)?;
+    if !room.active {
+        return Err(AppError::msg("La habitación ya no está habilitada"));
+    }
     let _rate = db::get_rate_plan(&conn, payload.rate_plan_id)?;
     let _arrival = db::parse_dt(&payload.expected_arrival_at)?;
 

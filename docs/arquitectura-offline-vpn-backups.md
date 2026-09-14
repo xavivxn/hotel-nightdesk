@@ -24,7 +24,7 @@ Este documento reemplaza la restricción anterior de ausencia total de red. La o
 - El cierre actual utiliza una transacción; el ingreso necesita agrupar sus cambios en una transacción.
 - El navegador usa un mock en localStorage, independiente de SQLite.
 - No están implementados la API HTTP de red, VPN integrada, roles completos ni subida diaria de respaldos.
-- El seed aún crea 27 habitaciones. Corregir nuevas instalaciones y migrar instalaciones existentes sin borrar historiales.
+- La migración 003 deja las nuevas instalaciones en 23 habitaciones (19 normales y 4 con jacuzzi) y retira del tablero las habitaciones heredadas disponibles que excedan ese alcance, sin borrar historiales ni interrumpir estadías o reservas activas.
 
 ## 3. Arquitectura objetivo
 

@@ -34,6 +34,7 @@ pub struct Room {
     pub floor: i64,
     pub status: String,
     pub notes: Option<String>,
+    pub active: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

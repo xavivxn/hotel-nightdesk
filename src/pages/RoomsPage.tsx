@@ -44,7 +44,7 @@ export function RoomsPage({ settings }: { settings: AppSettings }) {
           })}>
             Nueva tarifa
           </Button>
-          <Button onClick={() => setRoomForm({ id: 0, number: "", room_type: "Estándar", floor: 1, status: "available", notes: null })}>
+          <Button onClick={() => setRoomForm({ id: 0, number: "", room_type: "Estándar", floor: 1, status: "available", notes: null, active: true })}>
             Nueva habitación
           </Button>
         </div>

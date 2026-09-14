@@ -31,19 +31,11 @@ export function BoardPage({ settings }: { settings: AppSettings }) {
   }, []);
 
   const filtered = useMemo(() => {
-    return board.filter((item) => !statusFilter.length || statusFilter.includes(item.display_status));
+    return board
+      .filter((item) => !statusFilter.length || statusFilter.includes(item.display_status))
+      .slice()
+      .sort((a, b) => a.room.number.localeCompare(b.room.number, undefined, { numeric: true }));
   }, [board, statusFilter]);
-
-  const grouped = useMemo(() => {
-    const map = new Map<number, BoardRoom[]>();
-    for (const item of filtered) {
-      const floor = item.room.floor;
-      const list = map.get(floor) ?? [];
-      list.push(item);
-      map.set(floor, list);
-    }
-    return [...map.entries()].sort((a, b) => a[0] - b[0]);
-  }, [filtered]);
 
   const occupied = board.filter((r) => r.display_status === "occupied").length;
   const occupancyPct = board.length ? Math.round((occupied / board.length) * 100) : 0;
@@ -76,36 +68,26 @@ export function BoardPage({ settings }: { settings: AppSettings }) {
         }}
       />
       {error ? <p className="mt-4 text-[var(--danger)]">{error}</p> : null}
-      <div className="mt-2">
-        {grouped.length === 0 && !error ? (
+      <div className="mt-6">
+        {filtered.length === 0 && !error ? (
           <p className="mt-8 text-sm text-[var(--muted)]">
             {statusFilter.length
               ? "No hay habitaciones para este filtro."
               : "No hay habitaciones."}
           </p>
-        ) : null}
-        {grouped.map(([floor, rooms]) => (
-          <section key={floor} className="mt-6">
-            <div className="floor-heading mb-3 flex items-center gap-3">
-              <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">
-                Piso {floor}
-              </p>
-              <div className="h-px flex-1 bg-[var(--line)]" />
-              <p className="font-mono text-[11px] tabular-nums text-[var(--muted)]">{rooms.length} habitaciones</p>
-            </div>
-            <div className="room-grid">
-              {rooms.map((item) => (
-                <RoomCard
-                  key={item.room.id}
-                  item={item}
-                  currency={settings.currency_symbol}
-                  baseRateCents={baseRateCents}
-                  onClick={() => setSelected(item)}
-                />
-              ))}
-            </div>
-          </section>
-        ))}
+        ) : (
+          <div className="room-grid">
+            {filtered.map((item) => (
+              <RoomCard
+                key={item.room.id}
+                item={item}
+                currency={settings.currency_symbol}
+                baseRateCents={baseRateCents}
+                onClick={() => setSelected(item)}
+              />
+            ))}
+          </div>
+        )}
       </div>
       <RoomDrawer
         item={selected}

@@ -10,6 +10,8 @@ La operación de recepción seguirá siendo local. Se incorporarán usuarios con
 
 Ver [Arquitectura, requisitos y criterios de aceptación](docs/arquitectura-offline-vpn-backups.md). Esta especificación reemplaza la restricción anterior de ausencia total de red; no implica que las funciones ya estén implementadas.
 
+Configuración de trabajo documentada en [N01 — Configuración operativa acordada](docs/configuracion-operativa.md): habitaciones, tarifas y catálogo inicial, usuarios, equipos, impresión, respaldos, capacidad del mes y datos pendientes para instalar.
+
 ## Qué incluye el MVP
 
 - Tablero visual de habitaciones (libre, ocupada, sucia, bloqueada, reservada)
