@@ -10,6 +10,7 @@ use std::path::Path;
 const MIGRATION_001: &str = include_str!("../migrations/001_init.sql");
 const MIGRATION_002: &str = include_str!("../migrations/002_products.sql");
 const MIGRATION_003: &str = include_str!("../migrations/003_rooms_scope.sql");
+const MIGRATION_004: &str = include_str!("../migrations/004_account_closure.sql");
 
 pub fn open(db_path: &Path) -> AppResult<Connection> {
     let conn = Connection::open(db_path)?;
@@ -28,6 +29,10 @@ fn migrate(conn: &Connection) -> AppResult<()> {
     if !migration_applied(conn, "003_rooms_scope")? {
         conn.execute_batch(MIGRATION_003)?;
         apply_migration(conn, "003_rooms_scope")?;
+    }
+    if !migration_applied(conn, "004_account_closure")? {
+        conn.execute_batch(MIGRATION_004)?;
+        apply_migration(conn, "004_account_closure")?;
     }
     Ok(())
 }

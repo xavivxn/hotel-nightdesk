@@ -4,7 +4,7 @@ use crate::error::{AppError, AppResult};
 use crate::models::*;
 use crate::printer;
 use crate::AppState;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager, State};
 
@@ -57,6 +57,53 @@ fn build_preview(conn: &Connection, stay: &Stay) -> AppResult<BillPreview> {
     }))
 }
 
+/// Once an account is closed, its persisted charge lines are the historical
+/// source of truth. Future rate or tax edits must not rewrite that history.
+fn bill_for_stay(conn: &Connection, stay: &Stay) -> AppResult<BillPreview> {
+    if stay.status != "closed" {
+        return build_preview(conn, stay);
+    }
+    let charges = db::list_charges(conn, stay.id)?;
+    let has_persisted_lines = charges
+        .iter()
+        .any(|charge| matches!(charge.kind.as_str(), "stay" | "extra_hour" | "tax"));
+    if !has_persisted_lines {
+        return build_preview(conn, stay);
+    }
+    let tax_percent = charges
+        .iter()
+        .find(|charge| charge.kind == "tax")
+        .and_then(|charge| charge.description.strip_prefix("IVA "))
+        .and_then(|value| value.trim_end_matches('%').parse::<f64>().ok())
+        .unwrap_or(0.0);
+    let tax_cents = charges
+        .iter()
+        .filter(|charge| charge.kind == "tax")
+        .map(|charge| charge.amount_cents)
+        .sum();
+    let lines: Vec<LineItem> = charges
+        .into_iter()
+        .filter(|charge| charge.kind != "tax")
+        .map(|charge| LineItem {
+            kind: charge.kind,
+            description: charge.description,
+            amount_cents: charge.amount_cents,
+        })
+        .collect();
+    let subtotal_cents = lines.iter().map(|line| line.amount_cents).sum();
+    Ok(BillPreview {
+        stay_id: stay.id,
+        lines,
+        subtotal_cents,
+        tax_percent,
+        tax_cents,
+        total_cents: subtotal_cents + tax_cents,
+        applied_kind: stay.rate_kind,
+        duration_label: "Cuenta cerrada".into(),
+        overnight_applied: stay.converted_to_overnight,
+    })
+}
+
 fn persist_computed_charges(conn: &Connection, bill: &BillPreview) -> AppResult<()> {
     conn.execute(
         "DELETE FROM charges WHERE stay_id = ?1 AND kind IN ('stay', 'extra_hour', 'tax')",
@@ -83,6 +130,29 @@ fn persist_computed_charges(conn: &Connection, bill: &BillPreview) -> AppResult<
             ],
         )?;
     }
+    Ok(())
+}
+
+fn close_account(
+    conn: &mut Connection,
+    stay: &Stay,
+    bill: &BillPreview,
+    checkout_at: &str,
+) -> AppResult<()> {
+    let tx = conn.transaction()?;
+    persist_computed_charges(&tx, bill)?;
+    tx.execute(
+        "UPDATE stays SET status = 'closed', check_out_at = ?1 WHERE id = ?2 AND status = 'open'",
+        params![checkout_at, stay.id],
+    )?;
+    if tx.changes() != 1 {
+        return Err(AppError::msg("La estadía ya está cerrada"));
+    }
+    tx.execute(
+        "UPDATE rooms SET status = 'dirty' WHERE id = ?1",
+        [stay.room_id],
+    )?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -130,7 +200,7 @@ pub fn list_board(state: State<AppState>) -> AppResult<Vec<BoardRoom>> {
         let mut estimated_total_cents = None;
         let mut elapsed_minutes = None;
         if let Some(stay_ref) = &stay {
-            if let Ok(bill) = build_preview(&conn, stay_ref) {
+            if let Ok(bill) = bill_for_stay(&conn, stay_ref) {
                 estimated_total_cents = Some(bill.total_cents);
             }
             if let Ok(check_in) = db::parse_dt(&stay_ref.check_in_at) {
@@ -286,6 +356,9 @@ pub fn check_in(state: State<AppState>, payload: CheckInPayload) -> AppResult<St
     if room.status == "blocked" {
         return Err(AppError::msg("La habitación está bloqueada"));
     }
+    if room.status == "dirty" {
+        return Err(AppError::msg("La habitación necesita limpieza antes del check-in"));
+    }
     if let Some(hold) = db::today_hold_for_room(&conn, room.id)? {
         if payload.reservation_id != Some(hold.id) {
             return Err(AppError::msg(format!(
@@ -303,6 +376,9 @@ pub fn check_in(state: State<AppState>, payload: CheckInPayload) -> AppResult<St
         let res = db::get_reservation(&conn, res_id)?;
         if res.status != "hold" {
             return Err(AppError::msg("La reserva ya no está vigente"));
+        }
+        if res.room_id != room.id || res.rate_plan_id != rate.id {
+            return Err(AppError::msg("La reserva no coincide con la habitación o tarifa seleccionada"));
         }
         conn.execute(
             "UPDATE reservations SET status = 'checked_in' WHERE id = ?1",
@@ -360,7 +436,7 @@ pub fn get_stay_detail(
 ) -> AppResult<(Stay, BillPreview, Vec<Charge>, Vec<Payment>)> {
     let conn = conn(&state);
     let stay = db::get_stay(&conn, stay_id)?;
-    let bill = build_preview(&conn, &stay)?;
+    let bill = bill_for_stay(&conn, &stay)?;
     let charges = db::list_charges(&conn, stay_id)?;
     let payments = db::list_payments(&conn, stay_id)?;
     Ok((stay, bill, charges, payments))
@@ -409,6 +485,9 @@ pub fn add_charge(state: State<AppState>, payload: AddChargePayload) -> AppResul
     if payload.description.trim().is_empty() {
         return Err(AppError::msg("La descripción del cargo es obligatoria"));
     }
+    if payload.amount_cents == 0 {
+        return Err(AppError::msg("El importe del cargo debe ser distinto de cero"));
+    }
     let now = now_rfc3339();
     conn.execute(
         "INSERT INTO charges (stay_id, kind, description, amount_cents, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -456,6 +535,13 @@ pub fn add_product_charge(state: State<AppState>, payload: AddProductChargePaylo
 #[tauri::command]
 pub fn delete_charge(state: State<AppState>, charge_id: i64) -> AppResult<()> {
     let conn = conn(&state);
+    let stay_id: i64 = conn
+        .query_row("SELECT stay_id FROM charges WHERE id = ?1", [charge_id], |row| row.get(0))
+        .map_err(|_| AppError::msg("Cargo no encontrado"))?;
+    let stay = db::get_stay(&conn, stay_id)?;
+    if stay.status != "open" {
+        return Err(AppError::msg("No se pueden modificar cargos de una cuenta cerrada"));
+    }
     conn.execute(
         "DELETE FROM charges WHERE id = ?1 AND kind IN ('surcharge', 'discount')",
         [charge_id],
@@ -474,37 +560,16 @@ pub fn check_out(
     if stay.status != "open" {
         return Err(AppError::msg("La estadía ya está cerrada"));
     }
-    let method = match payload.method.as_str() {
-        "card" | "transfer" | "cash" => payload.method.clone(),
-        _ => "cash".into(),
-    };
     let bill = build_preview(&conn, &stay)?;
-    if payload.amount_cents < bill.total_cents {
-        return Err(AppError::msg("El monto cobrado es menor al total"));
-    }
 
     let checkout_at = now_rfc3339();
-    let tx = conn.transaction()?;
-    persist_computed_charges(&tx, &bill)?;
-    tx.execute(
-        "UPDATE stays SET status = 'closed', check_out_at = ?1 WHERE id = ?2",
-        params![checkout_at, stay.id],
-    )?;
-    tx.execute(
-        "INSERT INTO payments (stay_id, method, amount_cents, created_at) VALUES (?1, ?2, ?3, ?4)",
-        params![stay.id, method, payload.amount_cents, checkout_at],
-    )?;
-    tx.execute(
-        "UPDATE rooms SET status = 'dirty' WHERE id = ?1",
-        [stay.room_id],
-    )?;
-    tx.commit()?;
+    close_account(&mut conn, &stay, &bill, &checkout_at)?;
 
     let stay = db::get_stay(&conn, stay.id)?;
     let mut print_error = None;
     if payload.print {
         let settings = db::load_settings(&conn)?;
-        let bytes = printer::build_receipt(&settings, &stay, &bill, &method);
+        let bytes = printer::build_receipt(&settings, &stay, &bill);
         let data_dir = app_data_dir(&app)?;
         print_error = printer::print_bytes(&bytes, &settings, &data_dir, &format!("stay-{}", stay.id))?;
     }
@@ -541,6 +606,9 @@ pub fn create_reservation(state: State<AppState>, payload: CreateReservationPayl
     }
     let _rate = db::get_rate_plan(&conn, payload.rate_plan_id)?;
     let _arrival = db::parse_dt(&payload.expected_arrival_at)?;
+    if payload.expected_nights < 1 {
+        return Err(AppError::msg("La reserva debe tener al menos una noche"));
+    }
 
     if let Some(open) = db::open_stay_for_room(&conn, room.id)? {
         let arrival_day = payload.expected_arrival_at.chars().take(10).collect::<String>();
@@ -548,6 +616,16 @@ pub fn create_reservation(state: State<AppState>, payload: CreateReservationPayl
         if arrival_day == stay_day {
             return Err(AppError::msg("La habitación está ocupada en esa fecha"));
         }
+    }
+    let duplicate: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM reservations WHERE room_id = ?1 AND status = 'hold' AND substr(expected_arrival_at, 1, 10) = substr(?2, 1, 10) LIMIT 1",
+            params![room.id, payload.expected_arrival_at],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if duplicate.is_some() {
+        return Err(AppError::msg("Ya existe una reserva vigente para esa habitación y fecha"));
     }
 
     let guest = db::insert_guest(
@@ -626,7 +704,7 @@ pub fn list_history(state: State<AppState>, date: Option<String>) -> AppResult<V
     for id in ids {
         let stay = db::get_stay(&conn, id)?;
         let payments = db::list_payments(&conn, id)?;
-        let bill = build_preview(&conn, &stay)?;
+        let bill = bill_for_stay(&conn, &stay)?;
         out.push(HistoryStay {
             stay,
             total_cents: bill.total_cents,
@@ -713,14 +791,57 @@ pub fn print_test(state: State<AppState>, app: AppHandle) -> AppResult<Option<St
 pub fn reprint_receipt(state: State<AppState>, app: AppHandle, stay_id: i64) -> AppResult<Option<String>> {
     let conn = conn(&state);
     let stay = db::get_stay(&conn, stay_id)?;
-    let bill = build_preview(&conn, &stay)?;
-    let payments = db::list_payments(&conn, stay_id)?;
-    let method = payments
-        .first()
-        .map(|p| p.method.as_str())
-        .unwrap_or("cash");
+    let bill = bill_for_stay(&conn, &stay)?;
     let settings = db::load_settings(&conn)?;
-    let bytes = printer::build_receipt(&settings, &stay, &bill, method);
+    let bytes = printer::build_receipt(&settings, &stay, &bill);
     let data_dir = app_data_dir(&app)?;
     printer::print_bytes(&bytes, &settings, &data_dir, &format!("stay-{}", stay.id))
+}
+
+#[cfg(test)]
+mod account_tests {
+    use super::*;
+    use std::path::Path;
+
+    fn open_stay_fixture() -> AppResult<(Connection, Stay)> {
+        let conn = db::open(Path::new(":memory:"))?;
+        let now = now_rfc3339();
+        conn.execute(
+            "INSERT INTO guests (name, created_at) VALUES ('Cuenta de prueba', ?1)",
+            [&now],
+        )?;
+        conn.execute(
+            "INSERT INTO stays (room_id, guest_id, rate_plan_id, check_in_at, status) VALUES (1, 1, 1, ?1, 'open')",
+            [&now],
+        )?;
+        let stay = db::get_stay(&conn, conn.last_insert_rowid())?;
+        Ok((conn, stay))
+    }
+
+    #[test]
+    fn closing_account_persists_total_and_does_not_create_payment() -> AppResult<()> {
+        let (mut conn, stay) = open_stay_fixture()?;
+        let bill = build_preview(&conn, &stay)?;
+        close_account(&mut conn, &stay, &bill, &now_rfc3339())?;
+
+        conn.execute("UPDATE rate_plans SET base_amount_cents = 9999999 WHERE id = 1", [])?;
+        let closed = db::get_stay(&conn, stay.id)?;
+        let historical = bill_for_stay(&conn, &closed)?;
+        assert_eq!(historical.total_cents, bill.total_cents);
+        assert_eq!(conn.query_row::<i64, _, _>("SELECT COUNT(*) FROM payments WHERE stay_id = ?1", [stay.id], |row| row.get(0))?, 0);
+        assert_eq!(conn.query_row::<String, _, _>("SELECT status FROM rooms WHERE id = 1", [], |row| row.get(0))?, "dirty");
+        Ok(())
+    }
+
+    #[test]
+    fn closing_same_account_twice_is_rejected_without_rewriting_history() -> AppResult<()> {
+        let (mut conn, stay) = open_stay_fixture()?;
+        let bill = build_preview(&conn, &stay)?;
+        close_account(&mut conn, &stay, &bill, &now_rfc3339())?;
+        let error = close_account(&mut conn, &stay, &bill, &now_rfc3339()).expect_err("duplicate close");
+        assert!(error.to_string().contains("ya está cerrada"));
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM charges WHERE stay_id = ?1 AND kind = 'stay'", [stay.id], |row| row.get(0))?;
+        assert_eq!(count, 1);
+        Ok(())
+    }
 }

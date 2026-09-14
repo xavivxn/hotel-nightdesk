@@ -142,8 +142,6 @@ export type CheckInPayload = {
 
 export type CheckOutPayload = {
   stay_id: number;
-  method: string;
-  amount_cents: number;
   print: boolean;
 };
 

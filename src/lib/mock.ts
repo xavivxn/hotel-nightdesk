@@ -25,6 +25,7 @@ type Db = {
   stays: Stay[];
   charges: Charge[];
   payments: Payment[];
+  closed_bills: Record<string, ReturnType<typeof previewBill>>;
   settings: AppSettings;
   ids: { room: number; rate: number; guest: number; reservation: number; stay: number; charge: number; payment: number };
 };
@@ -106,6 +107,7 @@ function seed(): Db {
     stays: [],
     charges: [],
     payments: [],
+    closed_bills: {},
     settings: {
       business_name: "Nightdesk Inn",
       address: "Av. Principal 100",
@@ -155,7 +157,9 @@ function load(): Db {
     return db;
   }
   try {
-    return normalizeRoomConfiguration(JSON.parse(raw) as Db);
+    const db = JSON.parse(raw) as Db;
+    db.closed_bills ??= {};
+    return normalizeRoomConfiguration(db);
   } catch {
     const db = seed();
     save(db);
@@ -183,6 +187,9 @@ function openStay(db: Db, roomId: number) {
 }
 
 function stayBill(db: Db, stay: Stay) {
+  if (stay.status === "closed" && db.closed_bills[String(stay.id)]) {
+    return db.closed_bills[String(stay.id)];
+  }
   const rate = db.rates.find((r) => r.id === stay.rate_plan_id) ?? fail("Tarifa no encontrada");
   const overnight = stay.overnight_rate_plan_id
     ? db.rates.find((r) => r.id === stay.overnight_rate_plan_id)
@@ -289,6 +296,7 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
       if (!room.active) fail("La habitación ya no está habilitada");
       if (openStay(db, room.id)) fail("La habitación ya está ocupada");
       if (room.status === "blocked") fail("La habitación está bloqueada");
+      if (room.status === "dirty") fail("La habitación necesita limpieza antes del check-in");
       const hold = todayHold(db, room.id);
       if (hold && payload.reservation_id !== hold.id) {
         fail(`La habitación ${room.number} tiene una reserva para hoy`);
@@ -298,6 +306,7 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
       let reservationId: number | null = null;
       if (payload.reservation_id) {
         const res = db.reservations.find((r) => r.id === payload.reservation_id) ?? fail("Reserva no encontrada");
+        if (res.room_id !== room.id || res.rate_plan_id !== rate.id) fail("La reserva no coincide con la habitación o tarifa seleccionada");
         res.status = "checked_in";
         guestId = res.guest_id;
         reservationId = res.id;
@@ -357,6 +366,7 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
       const payload = args.payload as { stay_id: number; kind: string; description: string; amount_cents: number };
       const kind = payload.kind === "discount" || payload.amount_cents < 0 ? "discount" : "surcharge";
       const amount = kind === "discount" ? -Math.abs(payload.amount_cents) : Math.abs(payload.amount_cents);
+      if (amount === 0) fail("El importe del cargo debe ser distinto de cero");
       db.ids.charge += 1;
       const charge: Charge = {
         id: db.ids.charge,
@@ -392,25 +402,23 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
       return charge;
     }
     case "delete_charge":
+      {
+        const stay = db.stays.find((item) => item.id === db.charges.find((charge) => charge.id === args.charge_id)?.stay_id);
+        if (!stay) fail("Cargo no encontrado");
+        if (stay.status !== "open") fail("No se pueden modificar cargos de una cuenta cerrada");
+      }
       db.charges = db.charges.filter((c) => c.id !== args.charge_id || (c.kind !== "surcharge" && c.kind !== "discount"));
       return null;
     case "check_out": {
       const payload = args.payload as CheckOutPayload;
       const stay = db.stays.find((s) => s.id === payload.stay_id) ?? fail("Estadía no encontrada");
+      if (stay.status !== "open") fail("La estadía ya está cerrada");
       const bill = stayBill(db, stay);
-      if (payload.amount_cents < bill.total_cents) fail("El monto cobrado es menor al total");
       stay.status = "closed";
       stay.check_out_at = nowIso();
       const room = db.rooms.find((r) => r.id === stay.room_id)!;
       room.status = "dirty";
-      db.ids.payment += 1;
-      db.payments.push({
-        id: db.ids.payment,
-        stay_id: stay.id,
-        method: payload.method,
-        amount_cents: payload.amount_cents,
-        created_at: stay.check_out_at,
-      });
+      db.closed_bills[String(stay.id)] = bill;
       const result: CheckOutResult = {
         stay,
         bill,
@@ -434,6 +442,10 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
       const room = db.rooms.find((r) => r.id === payload.room_id) ?? fail("Habitación no encontrada");
       if (!room.active) fail("La habitación ya no está habilitada");
       const rate = db.rates.find((r) => r.id === payload.rate_plan_id) ?? fail("Tarifa no encontrada");
+      if (payload.expected_nights < 1) fail("La reserva debe tener al menos una noche");
+      if (db.reservations.some((r) => r.room_id === room.id && r.status === "hold" && r.expected_arrival_at.slice(0, 10) === payload.expected_arrival_at.slice(0, 10))) {
+        fail("Ya existe una reserva vigente para esa habitación y fecha");
+      }
       db.ids.guest += 1;
       db.guests.push({
         id: db.ids.guest,

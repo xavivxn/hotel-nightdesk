@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Field";
 import { api } from "@/lib/api";
-import { formatDateTime, formatMoney, paymentLabel } from "@/lib/format";
+import { formatDateTime, formatMoney } from "@/lib/format";
 import type { AppSettings, HistoryStay } from "@/lib/types";
 import { useEffect, useState } from "react";
 
@@ -37,7 +37,7 @@ export function HistoryPage({ settings }: { settings: AppSettings }) {
         </div>
         <div className="flex items-center gap-3">
           <div className="rounded-lg border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-sm">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">Total cobrado</span>
+            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">Total del día</span>
             <p className="font-mono text-lg font-semibold tabular-nums">{formatMoney(total, settings.currency_symbol)}</p>
           </div>
           <Input type="date" className="w-44" value={date} onChange={(e) => setDate(e.target.value)} />
@@ -51,7 +51,7 @@ export function HistoryPage({ settings }: { settings: AppSettings }) {
             <tr>
               <th className="px-4 py-3">Habitación</th>
               <th className="px-4 py-3">Salida</th>
-              <th className="px-4 py-3">Pago</th>
+              <th className="px-4 py-3">Cuenta</th>
               <th className="px-4 py-3 text-right">Total</th>
               <th className="px-4 py-3"></th>
             </tr>
@@ -61,7 +61,7 @@ export function HistoryPage({ settings }: { settings: AppSettings }) {
               <tr key={item.stay.id} className="border-t border-[var(--line)]">
                 <td className="px-4 py-3 font-mono font-semibold tabular-nums">{item.stay.room_number}</td>
                 <td className="px-4 py-3">{item.stay.check_out_at ? formatDateTime(item.stay.check_out_at) : "—"}</td>
-                <td className="px-4 py-3">{paymentLabel(item.payment_method)}</td>
+                <td className="px-4 py-3 text-[var(--muted)]">Cerrada</td>
                 <td className="px-4 py-3 text-right font-mono font-medium tabular-nums">
                   {formatMoney(item.total_cents, settings.currency_symbol)}
                 </td>
@@ -72,7 +72,7 @@ export function HistoryPage({ settings }: { settings: AppSettings }) {
                     onClick={async () => {
                       setNotice(null);
                       const printError = await api.reprintReceipt(item.stay.id);
-                      setNotice(printError ? `Checkout cobrado. Impresora: ${printError}` : "Ticket reimpreso (o archivado en local).");
+                      setNotice(printError ? `Cuenta cerrada. Impresora: ${printError}` : "Ticket reimpreso o archivado localmente.");
                     }}
                   >
                     Reimprimir

@@ -1,14 +1,12 @@
 use crate::error::AppResult;
 use crate::models::{AppSettings, BillPreview, Stay};
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 pub fn build_receipt(
     settings: &AppSettings,
     stay: &Stay,
     bill: &BillPreview,
-    payment_method: &str,
 ) -> Vec<u8> {
     let width: usize = if settings.paper_width <= 58 { 32 } else { 48 };
     let mut out = Vec::new();
@@ -81,10 +79,7 @@ pub fn build_receipt(
         &kv_line(width, "TOTAL", bill.total_cents, &settings.currency_symbol),
     );
     out.extend_from_slice(&[0x1B, 0x45, 0]);
-    writeln_ascii(
-        &mut out,
-        &format!("Pago: {}", payment_label(payment_method)),
-    );
+    writeln_ascii(&mut out, "Cuenta interna - sin cobro");
     writeln_ascii(&mut out, &"-".repeat(width));
     out.extend_from_slice(&[0x1B, 0x61, 1]);
     writeln_ascii(&mut out, &sanitize(&settings.receipt_footer));
@@ -262,14 +257,6 @@ fn short_dt(rfc: &str) -> String {
     chrono::DateTime::parse_from_rfc3339(rfc)
         .map(|dt| dt.format("%d/%m %H:%M").to_string())
         .unwrap_or_else(|_| rfc.chars().take(16).collect())
-}
-
-fn payment_label(method: &str) -> &'static str {
-    match method {
-        "card" => "Tarjeta",
-        "transfer" => "Transferencia",
-        _ => "Efectivo",
-    }
 }
 
 #[cfg(test)]

@@ -211,8 +211,6 @@ pub struct CheckInPayload {
 #[derive(Debug, Deserialize)]
 pub struct CheckOutPayload {
     pub stay_id: i64,
-    pub method: String,
-    pub amount_cents: i64,
     pub print: bool,
 }
 

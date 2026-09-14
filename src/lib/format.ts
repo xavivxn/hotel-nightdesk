@@ -45,7 +45,13 @@ export function toDateTimeLocal(date = new Date()) {
 
 export function localInputToRfc3339(value: string) {
   const date = new Date(value);
-  return date.toISOString();
+  if (Number.isNaN(date.getTime())) return value;
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  const offset = -date.getTimezoneOffset();
+  const sign = offset >= 0 ? "+" : "-";
+  const hours = pad(Math.floor(Math.abs(offset) / 60));
+  const minutes = pad(Math.abs(offset) % 60);
+  return `${value}:00${sign}${hours}:${minutes}`;
 }
 
 export function paymentLabel(method?: string | null) {

@@ -191,14 +191,13 @@ function StayDrawer({
   const [lines, setLines] = useState<{ description: string; amount_cents: number }[]>([]);
   const [charges, setCharges] = useState<Charge[]>([]);
   const [overnight, setOvernight] = useState(stay.converted_to_overnight);
-  const [method, setMethod] = useState("cash");
-  const [received, setReceived] = useState("");
   const [extraDesc, setExtraDesc] = useState("Consumo");
   const [extraAmount, setExtraAmount] = useState("");
   const [print, setPrint] = useState(settings.auto_print_on_checkout);
   const [error, setError] = useState<string | null>(null);
   const [printError, setPrintError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [mutationBusy, setMutationBusy] = useState(false);
   const [closedStayId, setClosedStayId] = useState<number | null>(null);
 
   async function refresh() {
@@ -207,20 +206,17 @@ function StayDrawer({
     setLines(preview.lines);
     setCharges(currentCharges.filter((c) => c.kind === "surcharge" || c.kind === "discount"));
     setOvernight(preview.overnight_applied);
-    setReceived(String(preview.total_cents));
   }
 
   useEffect(() => {
     refresh().catch((e) => setError(String(e)));
+    if (closedStayId) return;
     const id = window.setInterval(() => refresh().catch(() => undefined), 15000);
     return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stay.id]);
+  }, [stay.id, closedStayId]);
 
   const total = bill ?? 0;
-  const receivedCents = parseGuaranies(received || "0");
-  const change = receivedCents - total;
-
   const subtitle = useMemo(() => `desde ${formatDateTime(stay.check_in_at)}`, [stay]);
 
   if (closedStayId) {
@@ -232,7 +228,7 @@ function StayDrawer({
       <Dialog open title={`Habitación ${item.room.number}`} subtitle="Estadía cerrada" onClose={finish}>
         <div className="space-y-4">
           <p className="font-mono text-3xl font-semibold tabular-nums">{formatMoney(total, settings.currency_symbol)}</p>
-          <p className="text-sm text-[var(--muted)]">El cobro quedó registrado. La habitación pasa a sucia.</p>
+          <p className="text-sm text-[var(--muted)]">La cuenta quedó cerrada y la habitación pasa a sucia. No se registra ningún pago.</p>
           {printError ? <p className="text-sm text-[var(--warn)]">Impresora: {printError}. Podés reintentar.</p> : null}
           <Button
             className="w-full"
@@ -287,10 +283,19 @@ function StayDrawer({
               variant="secondary"
               className="w-full"
               onClick={async () => {
-                await api.convertToOvernight(stay.id);
-                await refresh();
-                onChanged();
+                setMutationBusy(true);
+                setError(null);
+                try {
+                  await api.convertToOvernight(stay.id);
+                  await refresh();
+                  onChanged();
+                } catch (e) {
+                  setError(String(e));
+                } finally {
+                  setMutationBusy(false);
+                }
               }}
+              disabled={mutationBusy || busy}
             >
               Convertir a pernocte
             </Button>
@@ -299,6 +304,7 @@ function StayDrawer({
             stayId={stay.id}
             currency={settings.currency_symbol}
             charges={charges}
+            onBusyChange={setMutationBusy}
             onChanged={async () => {
               await refresh();
               onChanged();
@@ -315,15 +321,24 @@ function StayDrawer({
             <Button
               variant="secondary"
               onClick={async () => {
-                await api.addCharge({
-                  stay_id: stay.id,
-                  kind: parseGuaranies(extraAmount) < 0 ? "discount" : "surcharge",
-                  description: extraDesc,
-                  amount_cents: parseGuaranies(extraAmount),
-                });
-                setExtraAmount("");
-                await refresh();
+                setMutationBusy(true);
+                setError(null);
+                try {
+                  await api.addCharge({
+                    stay_id: stay.id,
+                    kind: parseGuaranies(extraAmount) < 0 ? "discount" : "surcharge",
+                    description: extraDesc,
+                    amount_cents: parseGuaranies(extraAmount),
+                  });
+                  setExtraAmount("");
+                  await refresh();
+                } catch (e) {
+                  setError(String(e));
+                } finally {
+                  setMutationBusy(false);
+                }
               }}
+              disabled={mutationBusy || busy}
             >
               Sumar
             </Button>
@@ -336,9 +351,18 @@ function StayDrawer({
               <button
                 className="text-[var(--danger)]"
                 onClick={async () => {
-                  await api.deleteCharge(charge.id);
-                  await refresh();
+                  setMutationBusy(true);
+                  setError(null);
+                  try {
+                    await api.deleteCharge(charge.id);
+                    await refresh();
+                  } catch (e) {
+                    setError(String(e));
+                  } finally {
+                    setMutationBusy(false);
+                  }
                 }}
+                disabled={mutationBusy || busy}
               >
                 Quitar
               </button>
@@ -347,23 +371,12 @@ function StayDrawer({
         </div>
         <div className="flex min-h-0 flex-col p-6">
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto scrollbar-thin">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">Cobrar</p>
-            <Field label="Medio de pago">
-              <Select value={method} onChange={(e) => setMethod(e.target.value)}>
-                <option value="cash">Efectivo</option>
-                <option value="card">Tarjeta</option>
-                <option value="transfer">Transferencia</option>
-              </Select>
-            </Field>
-            <Field label="Monto recibido">
-              <Input value={received} onChange={(e) => setReceived(e.target.value)} />
-            </Field>
-            {method === "cash" && change > 0 ? (
-              <p className="text-sm">
-                Vuelto:{" "}
-                <span className="font-mono tabular-nums">{formatMoney(change, settings.currency_symbol)}</span>
-              </p>
-            ) : null}
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">Cerrar cuenta</p>
+            <div className="rounded-lg border border-[var(--line)] bg-[var(--surface-2)] p-4 text-sm">
+              <p className="font-semibold">Total operativo</p>
+              <p className="mt-1 font-mono text-2xl font-semibold tabular-nums">{formatMoney(total, settings.currency_symbol)}</p>
+              <p className="mt-2 text-[var(--muted)]">El total se calcula en SQLite y queda guardado para el historial.</p>
+            </div>
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={print} onChange={(e) => setPrint(e.target.checked)} />
               Imprimir ticket al cerrar
@@ -376,18 +389,17 @@ function StayDrawer({
               className="w-full"
               variant="ok"
               size="lg"
-              disabled={busy}
+              disabled={busy || mutationBusy}
               onClick={async () => {
                 setBusy(true);
                 setError(null);
                 try {
                   const result = await api.checkOut({
                     stay_id: stay.id,
-                    method,
-                    amount_cents: receivedCents,
                     print,
                   });
                   setClosedStayId(result.stay.id);
+                  setBill(result.bill.total_cents);
                   if (result.print_error) setPrintError(result.print_error);
                 } catch (e) {
                   setError(String(e));
@@ -396,7 +408,7 @@ function StayDrawer({
                 }
               }}
             >
-              Cobrar y cerrar
+              Cerrar cuenta
             </Button>
           </div>
         </div>

@@ -12,6 +12,8 @@ Ver [Arquitectura, requisitos y criterios de aceptación](docs/arquitectura-offl
 
 Configuración de trabajo documentada en [N01 — Configuración operativa acordada](docs/configuracion-operativa.md): habitaciones, tarifas y catálogo inicial, usuarios, equipos, impresión, respaldos, capacidad del mes y datos pendientes para instalar.
 
+Recorrido de recepción documentado en [N02 — Control de cuentas](docs/recepcion-cuentas.md): cierre local, cargos, limpieza, historial y reimpresión.
+
 ## Qué incluye el MVP
 
 - Tablero visual de habitaciones (libre, ocupada, sucia, bloqueada, reservada)

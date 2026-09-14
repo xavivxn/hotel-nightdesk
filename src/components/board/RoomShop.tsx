@@ -10,11 +10,13 @@ export function RoomShop({
   currency,
   charges,
   onChanged,
+  onBusyChange,
 }: {
   stayId: number;
   currency: string;
   charges: Charge[];
   onChanged: () => Promise<void> | void;
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [category, setCategory] = useState<ProductCategory>("bebidas");
@@ -45,6 +47,7 @@ export function RoomShop({
 
   async function addProduct(product: Product) {
     setBusyId(product.id);
+    onBusyChange?.(true);
     setError(null);
     try {
       await api.addProductCharge({ stay_id: stayId, product_id: product.id });
@@ -53,6 +56,7 @@ export function RoomShop({
       setError(String(e));
     } finally {
       setBusyId(null);
+      onBusyChange?.(false);
     }
   }
 
@@ -88,7 +92,7 @@ export function RoomShop({
             <button
               key={product.id}
               type="button"
-              disabled={busyId === product.id}
+              disabled={busyId !== null}
               onClick={() => addProduct(product)}
               className={cn(
                 "rounded-lg border border-[var(--line)] bg-[var(--bg)] px-3 py-2.5 text-left transition-colors hover:bg-[var(--surface-2)]",
