@@ -70,17 +70,20 @@ fn bill_for_stay(conn: &Connection, stay: &Stay) -> AppResult<BillPreview> {
     if !has_persisted_lines {
         return build_preview(conn, stay);
     }
-    let tax_percent = charges
-        .iter()
-        .find(|charge| charge.kind == "tax")
-        .and_then(|charge| charge.description.strip_prefix("IVA "))
-        .and_then(|value| value.trim_end_matches('%').parse::<f64>().ok())
-        .unwrap_or(0.0);
     let tax_cents = charges
         .iter()
         .filter(|charge| charge.kind == "tax")
         .map(|charge| charge.amount_cents)
         .sum();
+    let snapshot = db::closed_snapshot(conn, stay.id)?;
+    let tax_percent = snapshot.tax_percent.unwrap_or_else(|| {
+        charges
+            .iter()
+            .find(|charge| charge.kind == "tax")
+            .and_then(|charge| charge.description.strip_prefix("IVA "))
+            .and_then(|value| value.trim_end_matches('%').parse::<f64>().ok())
+            .unwrap_or(0.0)
+    });
     let lines: Vec<LineItem> = charges
         .into_iter()
         .filter(|charge| charge.kind != "tax")
@@ -98,8 +101,14 @@ fn bill_for_stay(conn: &Connection, stay: &Stay) -> AppResult<BillPreview> {
         tax_percent,
         tax_cents,
         total_cents: subtotal_cents + tax_cents,
-        applied_kind: stay.rate_kind,
-        duration_label: "Cuenta cerrada".into(),
+        applied_kind: snapshot
+            .applied_kind
+            .as_deref()
+            .map(RateKind::parse)
+            .unwrap_or(stay.rate_kind),
+        duration_label: snapshot
+            .duration_label
+            .unwrap_or_else(|| "Cuenta cerrada".into()),
         overnight_applied: stay.converted_to_overnight,
     })
 }
@@ -142,8 +151,16 @@ fn close_account(
     let tx = conn.transaction()?;
     persist_computed_charges(&tx, bill)?;
     tx.execute(
-        "UPDATE stays SET status = 'closed', check_out_at = ?1 WHERE id = ?2 AND status = 'open'",
-        params![checkout_at, stay.id],
+        "UPDATE stays SET status = 'closed', check_out_at = ?1,
+                closed_applied_kind = ?2, closed_tax_percent = ?3, closed_duration_label = ?4
+         WHERE id = ?5 AND status = 'open'",
+        params![
+            checkout_at,
+            bill.applied_kind.as_str(),
+            bill.tax_percent,
+            bill.duration_label,
+            stay.id
+        ],
     )?;
     if tx.changes() != 1 {
         return Err(AppError::msg("La estadía ya está cerrada"));
@@ -352,12 +369,30 @@ pub fn save_rate_plan(state: State<AppState>, session_token: Option<String>, pay
 #[tauri::command]
 pub fn check_in(state: State<AppState>, session_token: Option<String>, payload: CheckInPayload) -> AppResult<Stay> {
     crate::auth::require(&state, session_token.as_deref(), false)?;
-    let conn = conn(&state);
-    let room = db::get_room(&conn, payload.room_id)?;
+    let mut conn = conn(&state);
+    check_in_on(&mut conn, payload)
+}
+
+fn check_in_on(conn: &mut Connection, payload: CheckInPayload) -> AppResult<Stay> {
+    let tx = conn.transaction()?;
+    let stay_id = check_in_in_tx(&tx, payload)?;
+    tx.commit()?;
+    db::get_stay(conn, stay_id)
+}
+
+#[cfg(test)]
+fn check_in_on_failing(conn: &mut Connection, payload: CheckInPayload) -> AppResult<Stay> {
+    let tx = conn.transaction()?;
+    let _stay_id = check_in_in_tx(&tx, payload)?;
+    Err(AppError::msg("fallo inyectado"))
+}
+
+fn check_in_in_tx(conn: &Connection, payload: CheckInPayload) -> AppResult<i64> {
+    let room = db::get_room(conn, payload.room_id)?;
     if !room.active {
         return Err(AppError::msg("La habitación ya no está habilitada"));
     }
-    if db::open_stay_for_room(&conn, room.id)?.is_some() {
+    if db::open_stay_for_room(conn, room.id)?.is_some() {
         return Err(AppError::msg("La habitación ya está ocupada"));
     }
     if room.status == "blocked" {
@@ -366,7 +401,7 @@ pub fn check_in(state: State<AppState>, session_token: Option<String>, payload: 
     if room.status == "dirty" {
         return Err(AppError::msg("La habitación necesita limpieza antes del check-in"));
     }
-    if let Some(hold) = db::today_hold_for_room(&conn, room.id)? {
+    if let Some(hold) = db::today_hold_for_room(conn, room.id)? {
         if payload.reservation_id != Some(hold.id) {
             return Err(AppError::msg(format!(
                 "La habitación {} tiene una reserva para hoy",
@@ -374,13 +409,13 @@ pub fn check_in(state: State<AppState>, session_token: Option<String>, payload: 
             )));
         }
     }
-    let rate = db::get_rate_plan(&conn, payload.rate_plan_id)?;
+    let rate = db::get_rate_plan(conn, payload.rate_plan_id)?;
     if !rate.active {
         return Err(AppError::msg("La tarifa no está activa"));
     }
 
     let (guest_id, reservation_id) = if let Some(res_id) = payload.reservation_id {
-        let res = db::get_reservation(&conn, res_id)?;
+        let res = db::get_reservation(conn, res_id)?;
         if res.status != "hold" {
             return Err(AppError::msg("La reserva ya no está vigente"));
         }
@@ -394,7 +429,7 @@ pub fn check_in(state: State<AppState>, session_token: Option<String>, payload: 
         (res.guest_id, Some(res_id))
     } else {
         let guest = db::insert_guest(
-            &conn,
+            conn,
             &payload.guest_name,
             payload.document.as_deref(),
             payload.phone.as_deref(),
@@ -402,14 +437,21 @@ pub fn check_in(state: State<AppState>, session_token: Option<String>, payload: 
         (guest.id, None)
     };
 
-    let check_in_at = chrono::Local::now();
+    let check_in_utc = chrono::Utc::now();
+    let check_in_local = check_in_utc.with_timezone(&chrono::Local);
     let expected = match rate.kind {
         RateKind::Hourly => {
             let hours = payload.expected_hours.unwrap_or(rate.included_hours);
-            Some(billing::expected_checkout_hourly(check_in_at, hours).to_rfc3339())
+            Some(
+                billing::expected_checkout_hourly(check_in_local, hours)
+                    .with_timezone(&chrono::Utc)
+                    .to_rfc3339(),
+            )
         }
         RateKind::Night | RateKind::Overnight => Some(
-            billing::expected_checkout_night(check_in_at, 1, rate.night_cutoff_hour).to_rfc3339(),
+            billing::expected_checkout_night(check_in_local, 1, rate.night_cutoff_hour)
+                .with_timezone(&chrono::Utc)
+                .to_rfc3339(),
         ),
     };
 
@@ -421,12 +463,19 @@ pub fn check_in(state: State<AppState>, session_token: Option<String>, payload: 
             guest_id,
             rate.id,
             reservation_id,
-            check_in_at.to_rfc3339(),
+            check_in_utc.to_rfc3339(),
             expected
         ],
-    )?;
-    db::set_room_status(&conn, room.id, "occupied")?;
-    db::get_stay(&conn, conn.last_insert_rowid())
+    )
+    .map_err(|error| {
+        if db::is_unique_violation(&error) {
+            AppError::msg("La habitación ya está ocupada")
+        } else {
+            error.into()
+        }
+    })?;
+    db::set_room_status(conn, room.id, "occupied")?;
+    Ok(conn.last_insert_rowid())
 }
 
 #[tauri::command]
@@ -434,7 +483,7 @@ pub fn preview_bill(state: State<AppState>, session_token: Option<String>, stay_
     crate::auth::require(&state, session_token.as_deref(), false)?;
     let conn = conn(&state);
     let stay = db::get_stay(&conn, stay_id)?;
-    build_preview(&conn, &stay)
+    bill_for_stay(&conn, &stay)
 }
 
 #[tauri::command]
@@ -638,20 +687,38 @@ pub fn list_reservations(state: State<AppState>, session_token: Option<String>) 
 #[tauri::command]
 pub fn create_reservation(state: State<AppState>, session_token: Option<String>, payload: CreateReservationPayload) -> AppResult<Reservation> {
     crate::auth::require(&state, session_token.as_deref(), false)?;
-    let conn = conn(&state);
-    let room = db::get_room(&conn, payload.room_id)?;
+    let mut conn = conn(&state);
+    create_reservation_on(&mut conn, payload)
+}
+
+fn create_reservation_on(conn: &mut Connection, payload: CreateReservationPayload) -> AppResult<Reservation> {
+    let tx = conn.transaction()?;
+    let reservation_id = create_reservation_in_tx(&tx, payload)?;
+    tx.commit()?;
+    db::get_reservation(conn, reservation_id)
+}
+
+#[cfg(test)]
+fn create_reservation_on_failing(conn: &mut Connection, payload: CreateReservationPayload) -> AppResult<Reservation> {
+    let tx = conn.transaction()?;
+    let _reservation_id = create_reservation_in_tx(&tx, payload)?;
+    Err(AppError::msg("fallo inyectado"))
+}
+
+fn create_reservation_in_tx(conn: &Connection, payload: CreateReservationPayload) -> AppResult<i64> {
+    let room = db::get_room(conn, payload.room_id)?;
     if !room.active {
         return Err(AppError::msg("La habitación ya no está habilitada"));
     }
-    let _rate = db::get_rate_plan(&conn, payload.rate_plan_id)?;
+    let _rate = db::get_rate_plan(conn, payload.rate_plan_id)?;
     let _arrival = db::parse_dt(&payload.expected_arrival_at)?;
     if payload.expected_nights < 1 {
         return Err(AppError::msg("La reserva debe tener al menos una noche"));
     }
 
-    if let Some(open) = db::open_stay_for_room(&conn, room.id)? {
-        let arrival_day = payload.expected_arrival_at.chars().take(10).collect::<String>();
-        let stay_day = open.check_in_at.chars().take(10).collect::<String>();
+    if let Some(open) = db::open_stay_for_room(conn, room.id)? {
+        let arrival_day = db::local_calendar_date(&payload.expected_arrival_at);
+        let stay_day = db::local_calendar_date(&open.check_in_at);
         if arrival_day == stay_day {
             return Err(AppError::msg("La habitación está ocupada en esa fecha"));
         }
@@ -668,7 +735,7 @@ pub fn create_reservation(state: State<AppState>, session_token: Option<String>,
     }
 
     let guest = db::insert_guest(
-        &conn,
+        conn,
         &payload.guest_name,
         payload.document.as_deref(),
         payload.phone.as_deref(),
@@ -686,7 +753,7 @@ pub fn create_reservation(state: State<AppState>, session_token: Option<String>,
             now_rfc3339()
         ],
     )?;
-    db::get_reservation(&conn, conn.last_insert_rowid())
+    Ok(conn.last_insert_rowid())
 }
 
 #[tauri::command]
@@ -734,14 +801,22 @@ pub fn check_in_reservation(state: State<AppState>, session_token: Option<String
 pub fn list_history(state: State<AppState>, session_token: Option<String>, date: Option<String>) -> AppResult<Vec<HistoryStay>> {
     crate::auth::require(&state, session_token.as_deref(), false)?;
     let conn = conn(&state);
-    let day = date.unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string());
+    let day = date.unwrap_or_else(db::local_today);
     let mut stmt = conn.prepare(
-        "SELECT s.id FROM stays s WHERE s.status = 'closed' AND substr(COALESCE(s.check_out_at, s.check_in_at), 1, 10) = ?1
+        "SELECT s.id, s.check_out_at, s.check_in_at FROM stays s WHERE s.status = 'closed'
          ORDER BY s.check_out_at DESC",
     )?;
-    let ids: Vec<i64> = stmt
-        .query_map([day], |row| row.get(0))?
+    let rows: Vec<(i64, Option<String>, String)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
         .filter_map(|r| r.ok())
+        .collect();
+    let ids: Vec<i64> = rows
+        .into_iter()
+        .filter(|(_, check_out_at, check_in_at)| {
+            let stamp = check_out_at.as_deref().unwrap_or(check_in_at.as_str());
+            db::local_calendar_date(stamp) == day
+        })
+        .map(|(id, _, _)| id)
         .collect();
     let mut out = Vec::new();
     for id in ids {
@@ -891,6 +966,91 @@ mod account_tests {
         assert!(error.to_string().contains("ya está cerrada"));
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM charges WHERE stay_id = ?1 AND kind = 'stay'", [stay.id], |row| row.get(0))?;
         assert_eq!(count, 1);
+        Ok(())
+    }
+
+    fn walk_in_payload(room_id: i64) -> CheckInPayload {
+        CheckInPayload {
+            room_id,
+            guest_name: "Huésped TX".into(),
+            document: None,
+            phone: None,
+            rate_plan_id: 1,
+            expected_hours: Some(3),
+            reservation_id: None,
+        }
+    }
+
+    #[test]
+    fn injected_check_in_failure_leaves_no_partial_state() -> AppResult<()> {
+        let mut conn = db::open(Path::new(":memory:"))?;
+        let guests_before: i64 = conn.query_row("SELECT COUNT(*) FROM guests", [], |row| row.get(0))?;
+        let stays_before: i64 = conn.query_row("SELECT COUNT(*) FROM stays", [], |row| row.get(0))?;
+        let error = check_in_on_failing(&mut conn, walk_in_payload(1)).expect_err("injected");
+        assert!(error.to_string().contains("fallo inyectado"));
+        let guests_after: i64 = conn.query_row("SELECT COUNT(*) FROM guests", [], |row| row.get(0))?;
+        let stays_after: i64 = conn.query_row("SELECT COUNT(*) FROM stays", [], |row| row.get(0))?;
+        let room_status: String = conn.query_row("SELECT status FROM rooms WHERE id = 1", [], |row| row.get(0))?;
+        assert_eq!(guests_after, guests_before);
+        assert_eq!(stays_after, stays_before);
+        assert_eq!(room_status, "available");
+        Ok(())
+    }
+
+    #[test]
+    fn injected_reservation_failure_leaves_no_partial_state() -> AppResult<()> {
+        let mut conn = db::open(Path::new(":memory:"))?;
+        let guests_before: i64 = conn.query_row("SELECT COUNT(*) FROM guests", [], |row| row.get(0))?;
+        let reservations_before: i64 =
+            conn.query_row("SELECT COUNT(*) FROM reservations", [], |row| row.get(0))?;
+        let payload = CreateReservationPayload {
+            guest_name: "Reserva TX".into(),
+            document: None,
+            phone: None,
+            room_id: 1,
+            rate_plan_id: 1,
+            expected_arrival_at: now_rfc3339(),
+            expected_nights: 1,
+            notes: None,
+        };
+        let error = create_reservation_on_failing(&mut conn, payload).expect_err("injected");
+        assert!(error.to_string().contains("fallo inyectado"));
+        let guests_after: i64 = conn.query_row("SELECT COUNT(*) FROM guests", [], |row| row.get(0))?;
+        let reservations_after: i64 =
+            conn.query_row("SELECT COUNT(*) FROM reservations", [], |row| row.get(0))?;
+        assert_eq!(guests_after, guests_before);
+        assert_eq!(reservations_after, reservations_before);
+        Ok(())
+    }
+
+    #[test]
+    fn check_in_rejects_second_open_stay_for_same_room() -> AppResult<()> {
+        let mut conn = db::open(Path::new(":memory:"))?;
+        check_in_on(&mut conn, walk_in_payload(1))?;
+        let error = check_in_on(&mut conn, walk_in_payload(1)).expect_err("occupied");
+        assert!(error.to_string().contains("ocupada"));
+        let open: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM stays WHERE room_id = 1 AND status = 'open'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(open, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn preview_bill_keeps_closed_snapshot_after_rate_and_tax_change() -> AppResult<()> {
+        let (mut conn, stay) = open_stay_fixture()?;
+        let bill = build_preview(&conn, &stay)?;
+        close_account(&mut conn, &stay, &bill, &now_rfc3339())?;
+        conn.execute("UPDATE rate_plans SET base_amount_cents = 9999999, kind = 'night' WHERE id = 1", [])?;
+        db::upsert_setting(&conn, "tax_percent", "21")?;
+        let closed = db::get_stay(&conn, stay.id)?;
+        let historical = bill_for_stay(&conn, &closed)?;
+        assert_eq!(historical.total_cents, bill.total_cents);
+        assert_eq!(historical.tax_percent, bill.tax_percent);
+        assert_eq!(historical.applied_kind, bill.applied_kind);
+        assert_eq!(historical.duration_label, bill.duration_label);
         Ok(())
     }
 }

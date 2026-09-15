@@ -1,7 +1,11 @@
 use crate::error::AppResult;
 use crate::models::{AppSettings, BillPreview, Stay};
+#[cfg(not(windows))]
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+#[cfg(not(windows))]
+use std::process::Stdio;
 
 pub fn build_receipt(
     settings: &AppSettings,

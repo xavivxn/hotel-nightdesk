@@ -24,9 +24,9 @@ Si cambia la fórmula:
 
 ## Preview
 
-`preview_bill` / `build_preview` en `commands.rs` arma `BillingContext` y llama `billing::preview`.
+`preview_bill` usa `bill_for_stay`. Stay **abierta**: `build_preview` arma `BillingContext` y llama `billing::preview` (tarifas/IVA actuales). Stay **cerrada**: reconstruye desde `charges` + snapshot en `stays`; no recalcular.
 
-- `now` = `check_out_at` si la stay está cerrada; si no, `Local::now()`.
+- `now` en `build_preview` = `check_out_at` si existe; si no, `Local::now()` (tras parsear UTC persistido).
 - Líneas manuales: cargos `surcharge` / `discount` de DB.
 - IVA: `tax_amount` redondea half-up; `total_cents = subtotal + tax`.
 

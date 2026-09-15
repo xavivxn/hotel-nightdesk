@@ -2,45 +2,154 @@ use crate::error::{AppError, AppResult};
 use crate::models::{
     AppSettings, Charge, Guest, Payment, Product, RateKind, RatePlan, Reservation, Room, Stay,
 };
-use chrono::{DateTime, Local};
-use rusqlite::{params, Connection, OptionalExtension};
+use chrono::{DateTime, Local, Utc};
+use rusqlite::{params, Connection, DatabaseName, OptionalExtension};
 use sha2::{Digest, Sha256};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const MIGRATION_001: &str = include_str!("../migrations/001_init.sql");
 const MIGRATION_002: &str = include_str!("../migrations/002_products.sql");
 const MIGRATION_003: &str = include_str!("../migrations/003_rooms_scope.sql");
 const MIGRATION_004: &str = include_str!("../migrations/004_account_closure.sql");
+const MIGRATION_005: &str = include_str!("../migrations/005_auth.sql");
+const MIGRATION_006: &str = include_str!("../migrations/006_stay_integrity.sql");
+
+struct Migration {
+    id: &'static str,
+    sql: &'static str,
+}
+
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        id: "001_init",
+        sql: MIGRATION_001,
+    },
+    Migration {
+        id: "002_products",
+        sql: MIGRATION_002,
+    },
+    Migration {
+        id: "003_rooms_scope",
+        sql: MIGRATION_003,
+    },
+    Migration {
+        id: "004_account_closure",
+        sql: MIGRATION_004,
+    },
+    Migration {
+        id: "005_auth",
+        sql: MIGRATION_005,
+    },
+    Migration {
+        id: "006_stay_integrity",
+        sql: MIGRATION_006,
+    },
+];
 
 pub fn open(db_path: &Path) -> AppResult<Connection> {
-    let conn = Connection::open(db_path)?;
+    let mut conn = Connection::open(db_path)?;
     conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
-    migrate(&conn)?;
+    let backup = (!is_memory_path(db_path)).then_some(db_path);
+    migrate(&mut conn, backup)?;
     seed_if_empty(&conn)?;
     seed_products_if_empty(&conn)?;
     Ok(conn)
 }
 
-fn migrate(conn: &Connection) -> AppResult<()> {
-    conn.execute_batch(MIGRATION_001)?;
-    apply_migration(conn, "001_init")?;
-    conn.execute_batch(MIGRATION_002)?;
-    apply_migration(conn, "002_products")?;
-    if !migration_applied(conn, "003_rooms_scope")? {
-        conn.execute_batch(MIGRATION_003)?;
-        apply_migration(conn, "003_rooms_scope")?;
+fn is_memory_path(db_path: &Path) -> bool {
+    db_path.as_os_str() == ":memory:"
+}
+
+fn migrate(conn: &mut Connection, db_path: Option<&Path>) -> AppResult<()> {
+    run_pending(conn, db_path, MIGRATIONS)
+}
+
+fn run_pending(
+    conn: &mut Connection,
+    db_path: Option<&Path>,
+    catalog: &[Migration],
+) -> AppResult<()> {
+    ensure_migrations_table(conn)?;
+    let mut pending = Vec::new();
+    for migration in catalog {
+        if !migration_applied(conn, migration.id)? {
+            pending.push(migration);
+        }
     }
-    if !migration_applied(conn, "004_account_closure")? {
-        conn.execute_batch(MIGRATION_004)?;
-        apply_migration(conn, "004_account_closure")?;
+    if pending.is_empty() {
+        return Ok(());
     }
-    if !migration_applied(conn, "005_auth")? {
-        let tx = conn.unchecked_transaction()?;
-        tx.execute_batch(include_str!("../migrations/005_auth.sql"))?;
-        apply_migration(&tx, "005_auth")?;
-        tx.commit()?;
+
+    let backup_file = if let Some(path) = db_path.filter(|path| !is_memory_path(path)) {
+        let bak = pre_migrate_backup_path(path, pending[0].id);
+        conn.backup(DatabaseName::Main, &bak, None)?;
+        Some(bak)
+    } else {
+        None
+    };
+
+    for migration in pending {
+        if let Err(error) = apply_pending(conn, migration) {
+            if let Some(bak) = &backup_file {
+                let _ = conn.restore(DatabaseName::Main, bak, None::<fn(_)>);
+                let _ = conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;");
+            }
+            return Err(error);
+        }
     }
     Ok(())
+}
+
+fn pre_migrate_backup_path(db_path: &Path, migration_id: &str) -> PathBuf {
+    let stem = db_path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy();
+    db_path.with_file_name(format!("{stem}.pre-migrate-{migration_id}.bak"))
+}
+
+fn ensure_migrations_table(conn: &Connection) -> AppResult<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS schema_migrations (
+            id TEXT PRIMARY KEY,
+            applied_at TEXT NOT NULL
+        );",
+    )?;
+    Ok(())
+}
+
+fn apply_pending(conn: &mut Connection, migration: &Migration) -> AppResult<()> {
+    if migration.id == "006_stay_integrity" {
+        reject_duplicate_open_stays(conn)?;
+    }
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(migration.sql)?;
+    apply_migration(&tx, migration.id)?;
+    tx.commit()?;
+    Ok(())
+}
+
+fn reject_duplicate_open_stays(conn: &Connection) -> AppResult<()> {
+    let mut stmt = conn.prepare(
+        "SELECT r.number, COUNT(*)
+         FROM stays s
+         JOIN rooms r ON r.id = s.room_id
+         WHERE s.status = 'open'
+         GROUP BY s.room_id
+         HAVING COUNT(*) > 1
+         ORDER BY r.number",
+    )?;
+    let rooms: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .filter_map(|row| row.ok())
+        .collect();
+    if rooms.is_empty() {
+        return Ok(());
+    }
+    Err(AppError::msg(format!(
+        "Hay más de una estadía abierta en: {}. Corregir antes de migrar.",
+        rooms.join(", ")
+    )))
 }
 
 fn migration_applied(conn: &Connection, id: &str) -> AppResult<bool> {
@@ -213,13 +322,44 @@ pub fn get_product(conn: &Connection, id: i64) -> AppResult<Product> {
 }
 
 pub fn now_rfc3339() -> String {
-    Local::now().to_rfc3339()
+    Utc::now().to_rfc3339()
 }
 
 pub fn parse_dt(value: &str) -> AppResult<DateTime<Local>> {
     DateTime::parse_from_rfc3339(value)
         .map(|dt| dt.with_timezone(&Local))
         .map_err(|e| AppError::msg(format!("Fecha inválida: {e}")))
+}
+
+pub fn local_today() -> String {
+    Local::now().format("%Y-%m-%d").to_string()
+}
+
+pub fn local_calendar_date(value: &str) -> String {
+    parse_dt(value)
+        .map(|dt| dt.format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|_| value.chars().take(10).collect())
+}
+
+pub struct ClosedSnapshot {
+    pub applied_kind: Option<String>,
+    pub tax_percent: Option<f64>,
+    pub duration_label: Option<String>,
+}
+
+pub fn closed_snapshot(conn: &Connection, stay_id: i64) -> AppResult<ClosedSnapshot> {
+    conn.query_row(
+        "SELECT closed_applied_kind, closed_tax_percent, closed_duration_label FROM stays WHERE id = ?1",
+        [stay_id],
+        |row| {
+            Ok(ClosedSnapshot {
+                applied_kind: row.get(0)?,
+                tax_percent: row.get(1)?,
+                duration_label: row.get(2)?,
+            })
+        },
+    )
+    .map_err(|_| AppError::msg("Estadía no encontrada"))
 }
 
 pub fn upsert_setting(conn: &Connection, key: &str, value: &str) -> AppResult<()> {
@@ -464,9 +604,9 @@ pub fn today_hold_for_room(conn: &Connection, room_id: i64) -> AppResult<Option<
          JOIN rooms r ON r.id = res.room_id
          JOIN rate_plans rp ON rp.id = res.rate_plan_id
          WHERE res.room_id = ?1 AND res.status = 'hold'
-           AND substr(res.expected_arrival_at, 1, 10) = substr(?2, 1, 10)
+           AND substr(res.expected_arrival_at, 1, 10) = ?2
          ORDER BY res.id LIMIT 1",
-        params![room_id, now_rfc3339()],
+        params![room_id, local_today()],
         map_reservation,
     )
     .optional()
@@ -520,10 +660,10 @@ mod room_scope_tests {
 
     #[test]
     fn fresh_database_seeds_confirmed_room_scope() -> AppResult<()> {
-        let conn = Connection::open_in_memory()?;
-        migrate(&conn)?;
+        let mut conn = Connection::open_in_memory()?;
+        migrate(&mut conn, None)?;
         seed_if_empty(&conn)?;
-        migrate(&conn)?;
+        migrate(&mut conn, None)?;
 
         let total: i64 = conn.query_row("SELECT COUNT(*) FROM rooms", [], |row| row.get(0))?;
         let active: i64 = conn.query_row("SELECT COUNT(*) FROM rooms WHERE active = 1", [], |row| row.get(0))?;
@@ -595,8 +735,8 @@ mod product_catalog_tests {
     use super::*;
 
     fn catalog_db() -> AppResult<Connection> {
-        let conn = Connection::open_in_memory()?;
-        migrate(&conn)?;
+        let mut conn = Connection::open_in_memory()?;
+        migrate(&mut conn, None)?;
         seed_if_empty(&conn)?;
         seed_products_if_empty(&conn)?;
         Ok(conn)
@@ -676,4 +816,183 @@ pub fn set_product_active(conn: &Connection, id: i64, active: bool) -> AppResult
         params![if active { 1 } else { 0 }, id],
     )?;
     get_product(conn, id)
+}
+
+pub fn is_unique_violation(error: &rusqlite::Error) -> bool {
+    match error {
+        rusqlite::Error::SqliteFailure(e, Some(message)) => {
+            e.code == rusqlite::ErrorCode::ConstraintViolation
+                || message.to_uppercase().contains("UNIQUE")
+        }
+        rusqlite::Error::SqliteFailure(e, None) => {
+            e.code == rusqlite::ErrorCode::ConstraintViolation
+        }
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod migration_runner_tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_db_dir() -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("nightdesk-mig-{nanos}"));
+        fs::create_dir_all(&dir).expect("temp dir");
+        dir
+    }
+
+    #[test]
+    fn now_rfc3339_is_utc_and_parses_to_matching_local() -> AppResult<()> {
+        let stored = now_rfc3339();
+        assert!(
+            stored.ends_with('Z') || stored.contains("+00:00"),
+            "expected UTC timestamp, got {stored}"
+        );
+        let parsed = parse_dt(&stored)?;
+        let utc = DateTime::parse_from_rfc3339(&stored).expect("rfc3339");
+        assert_eq!(parsed.timestamp(), utc.timestamp());
+        assert_eq!(
+            parsed.format("%Y-%m-%d %H:%M").to_string(),
+            utc.with_timezone(&Local).format("%Y-%m-%d %H:%M").to_string()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn second_migrate_does_not_reapply_sql() -> AppResult<()> {
+        let dir = temp_db_dir();
+        let db_path = dir.join("nightdesk.db");
+        let mut conn = Connection::open(&db_path)?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        migrate(&mut conn, Some(&db_path))?;
+        conn.execute_batch("DROP INDEX IF EXISTS idx_payments_stay;")?;
+        migrate(&mut conn, Some(&db_path))?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_payments_stay'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(count, 0);
+        let _ = fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    #[test]
+    fn migrate_writes_backup_before_pending() -> AppResult<()> {
+        let dir = temp_db_dir();
+        let db_path = dir.join("nightdesk.db");
+        let mut conn = Connection::open(&db_path)?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        migrate(&mut conn, Some(&db_path))?;
+        let bak = pre_migrate_backup_path(&db_path, "001_init");
+        assert!(bak.exists(), "missing backup at {}", bak.display());
+        let _ = fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    #[test]
+    fn failed_migration_rolls_back_and_restores_backup() -> AppResult<()> {
+        let dir = temp_db_dir();
+        let db_path = dir.join("nightdesk.db");
+        let mut conn = Connection::open(&db_path)?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        migrate(&mut conn, Some(&db_path))?;
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('probe', 'ok')",
+            [],
+        )?;
+        let failing = [Migration {
+            id: "999_fail",
+            sql: "CREATE TABLE intact (id INTEGER); CREATE TABLE intact (id INTEGER);",
+        }];
+        let error = run_pending(&mut conn, Some(&db_path), &failing).expect_err("must fail");
+        assert!(!error.to_string().is_empty());
+        let intact: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name = 'intact'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(intact, 0);
+        let probe: String = conn.query_row(
+            "SELECT value FROM settings WHERE key = 'probe'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(probe, "ok");
+        let _ = fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    #[test]
+    fn unique_partial_index_rejects_second_open_stay() -> AppResult<()> {
+        let mut conn = Connection::open_in_memory()?;
+        migrate(&mut conn, None)?;
+        seed_if_empty(&conn)?;
+        conn.execute(
+            "INSERT INTO guests (name, created_at) VALUES ('Uno', ?1)",
+            [now_rfc3339()],
+        )?;
+        conn.execute(
+            "INSERT INTO stays (room_id, guest_id, rate_plan_id, check_in_at, status) VALUES (1, 1, 1, ?1, 'open')",
+            [now_rfc3339()],
+        )?;
+        let error = conn
+            .execute(
+                "INSERT INTO stays (room_id, guest_id, rate_plan_id, check_in_at, status) VALUES (1, 1, 1, ?1, 'open')",
+                [now_rfc3339()],
+            )
+            .expect_err("duplicate open stay");
+        assert!(is_unique_violation(&error));
+        Ok(())
+    }
+
+    #[test]
+    fn migrate_rejects_duplicate_open_stays_without_silently_closing() -> AppResult<()> {
+        let mut conn = Connection::open_in_memory()?;
+        conn.execute_batch(MIGRATION_001)?;
+        apply_migration(&conn, "001_init")?;
+        conn.execute(
+            "INSERT INTO rooms (number, room_type, floor, status, created_at) VALUES ('01', 'Normal', 1, 'available', ?1)",
+            [now_rfc3339()],
+        )?;
+        conn.execute(
+            "INSERT INTO rate_plans (name, kind, base_amount_cents, extra_hour_cents, included_hours, grace_minutes, night_cutoff_hour, active)
+             VALUES ('3 horas', 'hourly', 80000, 20000, 3, 10, 12, 1)",
+            [],
+        )?;
+        conn.execute(
+            "INSERT INTO guests (name, created_at) VALUES ('Dup', ?1)",
+            [now_rfc3339()],
+        )?;
+        conn.execute(
+            "INSERT INTO stays (room_id, guest_id, rate_plan_id, check_in_at, status) VALUES (1, 1, 1, ?1, 'open')",
+            [now_rfc3339()],
+        )?;
+        conn.execute(
+            "INSERT INTO stays (room_id, guest_id, rate_plan_id, check_in_at, status) VALUES (1, 1, 1, ?1, 'open')",
+            [now_rfc3339()],
+        )?;
+        let error = apply_pending(
+            &mut conn,
+            &Migration {
+                id: "006_stay_integrity",
+                sql: MIGRATION_006,
+            },
+        )
+        .expect_err("duplicates must block 006");
+        assert!(error.to_string().contains("estadía abierta"));
+        let open: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM stays WHERE status = 'open'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(open, 2);
+        Ok(())
+    }
 }

@@ -38,7 +38,7 @@ El total y la distribución por tipo están confirmados. La siguiente numeració
 
 La pantalla «Habitaciones y tarifas» permite editar número, tipo, piso y notas. Antes de cargar datos reales se debe registrar la correspondencia con las habitaciones físicas. No se deduce del seed que el motel tenga tres pisos ni que los jacuzzi físicos sean 20–23.
 
-**Bases existentes:** la migración `003_rooms_scope.sql` añade `active` y desactiva excedentes sin estadía abierta ni reserva en espera, empezando por los números más altos. Conserva las filas y sus relaciones históricas. No cambia los tipos existentes ni garantiza que siempre se retiren 24–27; si alguna está en uso, puede seleccionar otra habitación. Si no hay suficientes candidatas, pueden quedar más de 23 activas. No hay retiro automático posterior en SQLite de las que se conservaron en uso. La conciliación del inventario real y las garantías de respaldo previo/transacción corresponden a I01 antes de actualizar una instalación operativa.
+**Bases existentes:** la migración `003_rooms_scope.sql` añade `active` y desactiva excedentes sin estadía abierta ni reserva en espera, empezando por los números más altos. Conserva las filas y sus relaciones históricas. No cambia los tipos existentes ni garantiza que siempre se retiren 24–27; si alguna está en uso, puede seleccionar otra habitación. Si no hay suficientes candidatas, pueden quedar más de 23 activas. No hay retiro automático posterior en SQLite de las que se conservaron en uso. I01 aplica solo migraciones pendientes, con respaldo local previo y transacción; la conciliación de carteles físicos sigue en D01. El respaldo diario externo es I05.
 
 El navegador utiliza una base de demostración separada en localStorage. La corrección del seed y del mock no constituye una actualización del equipo de recepción instalado.
 
@@ -58,11 +58,11 @@ La hora de corte representa las 12:00 en el comportamiento actual basado en la h
 
 | Regla operativa | Registro y alcance |
 |---|---|
-| Ocupación | Una estadía abierta por habitación; ingresar cambia a ocupada. La restricción de base y las transacciones completas pendientes se trabajan en I01. |
+| Ocupación | Una estadía abierta por habitación; ingresar cambia a ocupada. Índice UNIQUE parcial e ingreso/reserva transaccionales (I01). |
 | Cierre y limpieza | Cerrar deja la habitación sucia; luego recepción la marca limpia/disponible. |
 | Reservas | En espera, ingreso realizado, cancelada o no presentada; el tablero señala la reserva de llegada del día. |
 | Consumos y ajustes | Cargos, recargos y descuentos sobre la cuenta; conservar trazabilidad de correcciones. |
-| Histórico | Los importes definitivos y la reimpresión deben conservar lo aplicado al cerrar. Esa garantía sigue pendiente de fortalecer en I01/N05. |
+| Histórico | El cierre persiste importes, IVA y tipo aplicado; cambiar tarifas no recalcula cuentas cerradas. Reimpresión física sigue en N05. |
 | Datos de huésped | Nombre, documento y teléfono disponibles en el código. Exigir nombre está desactivado por defecto; obligatoriedad y conservación reales no están documentadas. |
 | Impuesto | `tax_percent = 10` es un valor inicial del programa, no una política comercial validada para el motel. |
 

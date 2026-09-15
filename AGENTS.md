@@ -19,7 +19,7 @@ src/lib/billing.ts         preview mock; la autoridad es billing.rs
 src-tauri/src/commands.rs  24 comandos Tauri
 src-tauri/src/billing.rs   cobro (fuente de verdad + tests)
 src-tauri/src/db.rs        SQLite, seed, queries
-src-tauri/migrations/      schema (hoy 001_init.sql)
+src-tauri/migrations/      schema (001_init … 006_stay_integrity)
 ```
 
 ## Skills

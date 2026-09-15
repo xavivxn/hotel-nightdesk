@@ -12,16 +12,18 @@ SQLite local (`nightdesk.db` en el data dir). `PRAGMA foreign_keys=ON` y `journa
 
 ## Migraciones
 
-Hoy: `src-tauri/migrations/001_init.sql`, cargada con `include_str!` en `db.rs` y registrada en `schema_migrations`.
+Archivos en `src-tauri/migrations/` (`001_init` … `006_stay_integrity`), cargados en el catálogo de `db.rs` y registrados en `schema_migrations`.
 
-Migración nueva (no reescribir `001_init` en installs existentes):
+`migrate` ejecuta **solo** ids no aplicados, cada uno en transacción. Si hay pendientes, copia la DB con SQLite Online Backup API a `{stem}.pre-migrate-{id}.bak` junto al archivo. Fallo: rollback de la TX y restauración del `.bak`. No reescribir `001_init.sql` en instalaciones existentes. En `:memory:` no hay backup de archivo.
 
-1. Archivo `src-tauri/migrations/002_descripcion.sql`
-2. Constante `include_str!` en `db.rs`
-3. Ejecutar el SQL **solo** si ese `id` no está en `schema_migrations`, luego `INSERT` el id
+Migración nueva:
+
+1. Archivo `src-tauri/migrations/00N_descripcion.sql`
+2. Entrada en el catálogo de `db.rs`
+3. El runner aplica el SQL solo si ese `id` no está en `schema_migrations`, luego `INSERT` el id
 4. Seed: `seed_if_empty` corre solo si `COUNT(rooms) = 0`. No duplicar seed.
 
-Tablas: `rooms`, `rate_plans`, `guests`, `reservations`, `stays`, `charges`, `payments`, `settings`.
+Tablas: `rooms`, `rate_plans`, `guests`, `reservations`, `stays`, `charges`, `payments`, `settings`, `products`, `users`, `login_attempts`.
 
 ## Habitación
 
@@ -41,10 +43,12 @@ Tablas: `rooms`, `rate_plans`, `guests`, `reservations`, `stays`, `charges`, `pa
 
 ## Stay
 
-- Una estadía `open` por habitación (`open_stay_for_room`). Check-in rechaza ocupada o `blocked`.
+- Una estadía `open` por habitación: índice UNIQUE parcial `idx_stays_one_open_per_room` y `open_stay_for_room`. Check-in rechaza ocupada o `blocked`.
+- Check-in y alta de reserva van en una transacción (huésped + stay/reserva + estado de habitación).
 - Check-in → `rooms.status = occupied`.
 - Checkout → `rooms.status = dirty` (nunca `available` directo).
-- Status stay: `open` | `closed`. Cerrada: inmutable para cargos.
+- Status stay: `open` | `closed`. Cerrada: inmutable para cargos. El cierre guarda snapshot (`closed_applied_kind`, `closed_tax_percent`, `closed_duration_label`) y líneas en `charges`. `preview_bill` usa ese historial.
+- Fechas persistidas en UTC (RFC3339); cobro y UI convierten a hora local.
 
 Walk-in: si hay `today_hold_for_room`, exige el `reservation_id` de esa reserva.
 

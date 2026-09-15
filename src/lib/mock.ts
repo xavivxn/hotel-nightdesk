@@ -34,13 +34,14 @@ type Db = {
 const KEY = "nightdesk.mock.v4";
 
 function nowIso() {
-  const date = new Date();
+  return new Date().toISOString();
+}
+
+function localDay(iso?: string) {
+  const date = iso ? new Date(iso) : new Date();
+  if (Number.isNaN(date.getTime()) && iso) return iso.slice(0, 10);
   const pad = (n: number) => n.toString().padStart(2, "0");
-  const offset = -date.getTimezoneOffset();
-  const sign = offset >= 0 ? "+" : "-";
-  const hours = pad(Math.floor(Math.abs(offset) / 60));
-  const minutes = pad(Math.abs(offset) % 60);
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}${sign}${hours}:${minutes}`;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 function seedRooms(): Array<[string, string, number]> {
@@ -180,7 +181,7 @@ function fail(message: string): never {
 }
 
 function todayHold(db: Db, roomId: number) {
-  const day = nowIso().slice(0, 10);
+  const day = localDay();
   return db.reservations.find(
     (r) => r.room_id === roomId && r.status === "hold" && r.expected_arrival_at.slice(0, 10) === day,
   );
@@ -521,11 +522,9 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
       });
     }
     case "list_history": {
-      const day =
-        (args.date as string | undefined) ??
-        nowIso().slice(0, 10);
+      const day = (args.date as string | undefined) ?? localDay();
       return db.stays
-        .filter((s) => s.status === "closed" && (s.check_out_at ?? s.check_in_at).slice(0, 10) === day)
+        .filter((s) => s.status === "closed" && localDay(s.check_out_at ?? s.check_in_at) === day)
         .map((stay) => {
           const item: HistoryStay = {
             stay,
