@@ -1,4 +1,5 @@
 import { previewBill } from "./billing";
+import { mockAuth } from "./mock-auth";
 import { buildSeedProducts } from "./products";
 import type {
   AppSettings,
@@ -219,6 +220,8 @@ function hashPin(pin: string) {
 }
 
 export async function mockInvoke<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
+  const authResult = await mockAuth(name, args);
+  if (name.startsWith("auth_")) return authResult as T;
   const db = load();
   const result = handle(db, name, args) as T;
   save(db);

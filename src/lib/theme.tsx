@@ -1,4 +1,4 @@
-import { createContext, createElement, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, createElement, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
 type Theme = "light" | "dark";
 
@@ -27,13 +27,15 @@ export function ThemeProvider({ children, initial = "dark" }: { children: ReactN
     localStorage.setItem("nightdesk.theme", theme);
   }, [theme]);
 
+  const setTheme = useCallback((next: Theme) => setThemeState(next), []);
+  const toggle = useCallback(() => setThemeState(current => current === "dark" ? "light" : "dark"), []);
   const value = useMemo(
     () => ({
       theme,
-      setTheme: (next: Theme) => setThemeState(next),
-      toggle: () => setThemeState((current) => (current === "dark" ? "light" : "dark")),
+      setTheme,
+      toggle,
     }),
-    [theme],
+    [theme, setTheme, toggle],
   );
 
   return createElement(ThemeContext.Provider, { value }, children);

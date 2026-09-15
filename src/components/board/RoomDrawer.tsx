@@ -1,3 +1,5 @@
+import { useContext } from "react";
+import { RoleContext } from "@/lib/permissions";
 import { api } from "@/lib/api";
 import { formatDateTime, formatMoney, parseGuaranies, rateKindLabel } from "@/lib/format";
 import type { AppSettings, BoardRoom, Charge, RatePlan } from "@/lib/types";
@@ -191,6 +193,7 @@ function StayDrawer({
   const [lines, setLines] = useState<{ description: string; amount_cents: number }[]>([]);
   const [charges, setCharges] = useState<Charge[]>([]);
   const [overnight, setOvernight] = useState(stay.converted_to_overnight);
+  const admin = useContext(RoleContext) === "admin";
   const [extraDesc, setExtraDesc] = useState("Consumo");
   const [extraAmount, setExtraAmount] = useState("");
   const [print, setPrint] = useState(settings.auto_print_on_checkout);
@@ -310,7 +313,7 @@ function StayDrawer({
               onChanged();
             }}
           />
-          <div className="grid grid-cols-[1fr_120px_auto] gap-2">
+          {admin && <div className="grid grid-cols-[1fr_120px_auto] gap-2">
             <Input value={extraDesc} onChange={(e) => setExtraDesc(e.target.value)} placeholder="Otro cargo" />
             <Input
               value={extraAmount}
@@ -342,13 +345,13 @@ function StayDrawer({
             >
               Sumar
             </Button>
-          </div>
+          </div>}
           {charges.map((charge) => (
             <div key={charge.id} className="flex items-center justify-between text-sm">
               <span>
                 {charge.description} · {formatMoney(charge.amount_cents, settings.currency_symbol)}
               </span>
-              <button
+              {admin && <button
                 className="text-[var(--danger)]"
                 onClick={async () => {
                   setMutationBusy(true);
@@ -365,7 +368,7 @@ function StayDrawer({
                 disabled={mutationBusy || busy}
               >
                 Quitar
-              </button>
+              </button>}
             </div>
           ))}
         </div>

@@ -1,28 +1,19 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/layout/AppShell";
-import { BootSplash } from "@/components/layout/BootSplash";
 import { BoardPage } from "@/pages/BoardPage";
 import { HistoryPage } from "@/pages/HistoryPage";
 import { ReservationsPage } from "@/pages/ReservationsPage";
 import { RoomsPage } from "@/pages/RoomsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { CatalogPage } from "@/pages/CatalogPage";
+import { LoginPage } from "@/pages/LoginPage";
+import { UsersPage } from "@/pages/UsersPage";
 import { api } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
-import type { AppSettings } from "@/lib/types";
+import type { AppSettings, SessionInfo } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Field";
-
-/** Seconds the splash holds after boot. Integers like 10, 8, 5. */
-const BOOT_SPLASH_SECONDS = 2;
-const BOOT_FADE_MS = 180;
-
-function wait(ms: number) {
-  return new Promise<void>((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
-}
+import { RoleContext } from "@/lib/permissions";
 
 const fallbackSettings: AppSettings = {
   business_name: "Nightdesk Inn",
@@ -42,104 +33,67 @@ const fallbackSettings: AppSettings = {
   has_pin: false,
 };
 
+
 export default function App() {
   const { setTheme } = useTheme();
   const [settings, setSettings] = useState<AppSettings>(fallbackSettings);
-  const [locked, setLocked] = useState(false);
-  const [pin, setPin] = useState("");
-  const [pinError, setPinError] = useState<string | null>(null);
-  const [ready, setReady] = useState(false);
-  const [leaving, setLeaving] = useState(false);
+  const [session, setSession] = useState<SessionInfo | null>(null);
+  const [setup, setSetup] = useState<boolean | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
-  async function loadSettings() {
-    const current = await api.getSettings();
-    setSettings(current);
-    if (current.theme === "light" || current.theme === "dark") {
-      setTheme(current.theme);
-    }
-    const needsPin = await api.pinRequired();
-    setLocked(needsPin);
+  async function initialize() {
+    setError(null);
+    try { setSetup(await api.setupRequired()); }
+    catch(e) { setError(String(e)); }
   }
-
+  useEffect(() => { document.getElementById("boot-splash")?.remove(); void initialize(); }, []);
   useEffect(() => {
-    let cancelled = false;
-    document.getElementById("boot-splash")?.remove();
-
-    void (async () => {
-      await loadSettings().catch(() => undefined);
-      if (cancelled) return;
-      await wait(BOOT_SPLASH_SECONDS * 1000);
-      if (cancelled) return;
-      setLeaving(true);
-      await wait(BOOT_FADE_MS);
-      if (cancelled) return;
-      setReady(true);
-    })();
-
-    return () => {
-      cancelled = true;
-    };
+    function expire() { api.clearSession(); setSession(null); setLoaded(false); setNotice("Tu sesión terminó. Volvé a ingresar."); }
+    window.addEventListener("nightdesk-session-expired", expire);
+    return () => window.removeEventListener("nightdesk-session-expired", expire);
   }, []);
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    async function refresh() {
+      try {
+        await api.session();
+        if (!cancelled) setError(null);
+      } catch(e) { if (!cancelled) setError(String(e)); }
+    }
+    void api.getSettings().then(current => {
+      if (cancelled) return;
+      setSettings(current);
+      if (current.theme === "light" || current.theme === "dark") setTheme(current.theme);
+      setLoaded(true);
+    }).catch(e => { if (!cancelled) setError(String(e)); });
+    const timer = window.setInterval(refresh, 15000);
+    const expiration = window.setTimeout(() => { api.clearSession(); window.dispatchEvent(new Event("nightdesk-session-expired")); }, Math.max(0, session.expires_at * 1000 - Date.now()));
+    window.addEventListener("focus", refresh);
+    return () => { cancelled = true; clearInterval(timer); clearTimeout(expiration); window.removeEventListener("focus", refresh); };
+  }, [session, setTheme]);
 
-  if (!ready) {
-    return <BootSplash leaving={leaving} holdSeconds={BOOT_SPLASH_SECONDS} />;
+  async function logout() {
+    try { await api.logout(); } catch { /* The local session is always cleared. */ }
+    setSession(null); setLoaded(false); setError(null); setNotice("Sesión cerrada.");
   }
-
-  if (locked) {
-    return (
-      <div className="grid min-h-screen place-items-center px-6">
-        <form
-          className="card w-full max-w-sm rounded-lg p-8"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            const ok = await api.verifyPin(pin);
-            if (ok) {
-              setLocked(false);
-              setPin("");
-              setPinError(null);
-            } else {
-              setPinError("PIN incorrecto");
-            }
-          }}
-        >
-          <p className="font-mono text-xs font-semibold tracking-[0.22em] text-[var(--accent)]">NIGHTDESK</p>
-          <p className="mt-3 text-xl font-semibold tracking-tight">Desbloqueo</p>
-          <p className="mt-2 text-sm text-[var(--muted)]">Ingresá el PIN para abrir la recepción.</p>
-          <div className="mt-6">
-            <Input
-              type="password"
-              inputMode="numeric"
-              autoFocus
-              value={pin}
-              onChange={(e) => setPin(e.target.value)}
-              placeholder="PIN"
-            />
-          </div>
-          {pinError ? <p className="mt-3 text-sm text-[var(--danger)]">{pinError}</p> : null}
-          <Button className="mt-5 w-full" type="submit">
-            Entrar
-          </Button>
-        </form>
-      </div>
-    );
-  }
-
-  return (
-    <BrowserRouter>
-      <Routes>
-        <Route element={<AppShell />}>
-          <Route path="/" element={<BoardPage settings={settings} />} />
-          <Route path="/reservas" element={<ReservationsPage />} />
-          <Route path="/habitaciones" element={<RoomsPage settings={settings} />} />
-          <Route path="/historial" element={<HistoryPage settings={settings} />} />
-          <Route path="/catalogo" element={<CatalogPage settings={settings} />} />
-          <Route
-            path="/ajustes"
-            element={<SettingsPage settings={settings} onSaved={setSettings} />}
-          />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
-  );
+  if (setup === null) return <div className="p-8"><p role="alert">{error || "Preparando acceso…"}</p>{error && <Button onClick={initialize}>Reintentar</Button>}</div>;
+  if (!session) return <LoginPage setup={setup} notice={notice} onLogin={s => { setSession(s); setSetup(false); setError(null); setNotice(null); }} />;
+  if (!loaded) return <div className="p-8"><p role="alert">{error || "Cargando tu espacio…"}</p><Button onClick={logout}>Volver al acceso</Button></div>;
+  const admin = session.user.role === "admin";
+  return <RoleContext.Provider value={session.user.role}><BrowserRouter>
+    {error && <div role="alert" className="bg-[var(--danger-soft)] p-3 text-[var(--danger)]">No se pudo verificar la conexión: {error}</div>}
+    <Routes><Route element={<AppShell user={session.user} onLogout={logout} />}>
+      <Route path="/" element={<BoardPage settings={settings} />} />
+      <Route path="/reservas" element={<ReservationsPage />} />
+      <Route path="/historial" element={<HistoryPage settings={settings} />} />
+      <Route path="/habitaciones" element={admin ? <RoomsPage settings={settings} /> : <Navigate to="/" replace />} />
+      <Route path="/catalogo" element={admin ? <CatalogPage settings={settings} /> : <Navigate to="/" replace />} />
+      <Route path="/usuarios" element={admin ? <UsersPage /> : <Navigate to="/" replace />} />
+      <Route path="/ajustes" element={admin ? <SettingsPage settings={settings} onSaved={setSettings} /> : <Navigate to="/" replace />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Route></Routes>
+  </BrowserRouter></RoleContext.Provider>;
 }

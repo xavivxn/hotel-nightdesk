@@ -4,6 +4,9 @@ import { DutyClock } from "@/components/layout/DutyClock";
 import { TitleBar } from "@/components/layout/TitleBar";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
+import type { SessionUser } from "@/lib/types";
+import { ADMIN_ROUTES } from "@/lib/permissions";
+import { Button } from "@/components/ui/Button";
 
 const links = [
   { to: "/", label: "Tablero", icon: LayoutGrid },
@@ -12,9 +15,10 @@ const links = [
   { to: "/historial", label: "Historial", icon: History },
   { to: "/catalogo", label: "Catálogo admin", icon: Package },
   { to: "/ajustes", label: "Ajustes", icon: Settings2 },
+  { to: "/usuarios", label: "Usuarios", icon: Settings2 },
 ];
 
-export function AppShell() {
+export function AppShell({ user, onLogout }: { user: SessionUser; onLogout: () => void }) {
   const { theme, toggle } = useTheme();
 
   return (
@@ -28,7 +32,7 @@ export function AppShell() {
           </div>
           <p className="nav-section hidden lg:block">OPERACIÓN</p>
           <nav aria-label="Navegación principal" className="flex flex-1 flex-col gap-1">
-            {links.map((link) => (
+            {links.filter(link => user.role === "admin" || !ADMIN_ROUTES.has(link.to)).map((link) => (
               <NavLink
                 key={link.to}
                 to={link.to}
@@ -48,6 +52,8 @@ export function AppShell() {
             ))}
           </nav>
           <div className="space-y-3 px-1">
+            <p className="truncate text-xs" title={`${user.username} · ${user.role}`}>{user.username} · {user.role === "admin" ? "Admin" : "Recepción"}</p>
+            <Button variant="secondary" className="w-full" onClick={onLogout}>Salir</Button>
             <DutyClock />
             <button
               onClick={toggle}

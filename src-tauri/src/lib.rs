@@ -1,4 +1,5 @@
 mod billing;
+mod auth;
 mod commands;
 mod db;
 mod error;
@@ -11,6 +12,7 @@ use tauri::Manager;
 
 pub struct AppState {
     pub db: Mutex<Connection>,
+    pub auth: Mutex<auth::AuthState>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -23,10 +25,17 @@ pub fn run() {
             let conn = db::open(&db_path).map_err(|e| e.to_string())?;
             app.manage(AppState {
                 db: Mutex::new(conn),
+                auth: Mutex::new(auth::AuthState::default()),
             });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            auth::auth_setup_required,
+            auth::auth_setup,
+            auth::auth_create_user,
+            auth::auth_login,
+            auth::auth_session,
+            auth::auth_logout,
             commands::list_board,
             commands::list_rooms,
             commands::save_room,

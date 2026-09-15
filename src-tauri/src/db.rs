@@ -34,6 +34,12 @@ fn migrate(conn: &Connection) -> AppResult<()> {
         conn.execute_batch(MIGRATION_004)?;
         apply_migration(conn, "004_account_closure")?;
     }
+    if !migration_applied(conn, "005_auth")? {
+        let tx = conn.unchecked_transaction()?;
+        tx.execute_batch(include_str!("../migrations/005_auth.sql"))?;
+        apply_migration(&tx, "005_auth")?;
+        tx.commit()?;
+    }
     Ok(())
 }
 

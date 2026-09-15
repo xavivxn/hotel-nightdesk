@@ -1,4 +1,5 @@
 import type {
+  SessionInfo, SessionUser, LoginPayload, CreateUserPayload,
   AppSettings,
   BillPreview,
   BoardRoom,
@@ -31,15 +32,38 @@ function toTauriArgs(args?: Record<string, unknown>) {
 }
 
 export async function cmd<T>(name: string, args?: Record<string, unknown>): Promise<T> {
+  const requestToken = sessionToken;
+  const requestArgs = { ...args, session_token: requestToken };
+  try {
   if (isTauri()) {
     const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<T>(name, toTauriArgs(args));
+    return await invoke<T>(name, toTauriArgs(requestArgs));
   }
   const { mockInvoke } = await import("./mock");
-  return mockInvoke<T>(name, args ?? {});
+  return await mockInvoke<T>(name, requestArgs);
+  } catch (error) {
+    if (String(error).includes("SESSION_EXPIRED") && requestToken === sessionToken) {
+      sessionToken = null;
+      window.dispatchEvent(new Event("nightdesk-session-expired"));
+    }
+    throw error;
+  }
 }
 
+let sessionToken: string | null = null;
+
 export const api = {
+  setupRequired: () => cmd<boolean>("auth_setup_required"),
+  setupAdmin: (payload: LoginPayload, legacy_pin?: string) => cmd<SessionUser>("auth_setup", { payload, legacy_pin }),
+  login: async (payload: LoginPayload) => {
+    const session = await cmd<SessionInfo>("auth_login", { payload });
+    sessionToken = session.token;
+    return session;
+  },
+  session: () => cmd<SessionInfo>("auth_session"),
+  logout: async () => { try { await cmd<void>("auth_logout"); } finally { sessionToken = null; } },
+  clearSession: () => { sessionToken = null; },
+  createUser: (payload: CreateUserPayload) => cmd<SessionUser>("auth_create_user", { payload }),
   listBoard: () => cmd<BoardRoom[]>("list_board"),
   listRooms: () => cmd<Room[]>("list_rooms"),
   saveRoom: (payload: unknown) => cmd<Room>("save_room", { payload }),

@@ -15,7 +15,7 @@ export function BootSplash({
       aria-live="polite"
     >
       <div className="boot-splash-inner">
-        <p className="boot-wordmark">NIGHTDESK</p>
+        <p className="boot-wordmark">ACCESO LOCAL</p>
         <p className="boot-kicker">Abriendo recepción</p>
         <div className="boot-cells" aria-hidden="true">
           <span className="boot-cell">

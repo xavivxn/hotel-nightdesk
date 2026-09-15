@@ -80,6 +80,14 @@
   box-sizing: border-box;
 }
 
+/* Dejamos visible solamente el control de contraseña de la interfaz. */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear,
+input[type="text"]::-ms-reveal,
+input[type="text"]::-ms-clear {
+  display: none;
+}
+
 html,
 body,
 #root {

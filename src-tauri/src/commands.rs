@@ -157,7 +157,8 @@ fn close_account(
 }
 
 #[tauri::command]
-pub fn list_board(state: State<AppState>) -> AppResult<Vec<BoardRoom>> {
+pub fn list_board(state: State<AppState>, session_token: Option<String>) -> AppResult<Vec<BoardRoom>> {
+    crate::auth::require(&state, session_token.as_deref(), false)?;
     let conn = conn(&state);
     let mut stmt = conn.prepare(
         "SELECT id, number, room_type, floor, status, notes, active FROM rooms WHERE active = 1 ORDER BY floor, number",
@@ -221,7 +222,8 @@ pub fn list_board(state: State<AppState>) -> AppResult<Vec<BoardRoom>> {
 }
 
 #[tauri::command]
-pub fn list_rooms(state: State<AppState>) -> AppResult<Vec<Room>> {
+pub fn list_rooms(state: State<AppState>, session_token: Option<String>) -> AppResult<Vec<Room>> {
+    crate::auth::require(&state, session_token.as_deref(), false)?;
     let conn = conn(&state);
     let mut stmt = conn.prepare(
         "SELECT id, number, room_type, floor, status, notes, active FROM rooms WHERE active = 1 ORDER BY floor, number",
@@ -244,7 +246,8 @@ pub fn list_rooms(state: State<AppState>) -> AppResult<Vec<Room>> {
 }
 
 #[tauri::command]
-pub fn save_room(state: State<AppState>, payload: SaveRoomPayload) -> AppResult<Room> {
+pub fn save_room(state: State<AppState>, session_token: Option<String>, payload: SaveRoomPayload) -> AppResult<Room> {
+    crate::auth::require(&state, session_token.as_deref(), true)?;
     let conn = conn(&state);
     if payload.number.trim().is_empty() {
         return Err(AppError::msg("El número de habitación es obligatorio"));
@@ -277,7 +280,8 @@ pub fn save_room(state: State<AppState>, payload: SaveRoomPayload) -> AppResult<
 }
 
 #[tauri::command]
-pub fn set_room_status(state: State<AppState>, room_id: i64, status: String) -> AppResult<Room> {
+pub fn set_room_status(state: State<AppState>, session_token: Option<String>, room_id: i64, status: String) -> AppResult<Room> {
+    crate::auth::require(&state, session_token.as_deref(), false)?;
     let allowed = ["available", "dirty", "blocked"];
     if !allowed.contains(&status.as_str()) {
         return Err(AppError::msg("Estado de habitación inválido"));
@@ -295,13 +299,15 @@ pub fn set_room_status(state: State<AppState>, room_id: i64, status: String) -> 
 }
 
 #[tauri::command]
-pub fn list_rate_plans(state: State<AppState>, active_only: Option<bool>) -> AppResult<Vec<RatePlan>> {
+pub fn list_rate_plans(state: State<AppState>, session_token: Option<String>, active_only: Option<bool>) -> AppResult<Vec<RatePlan>> {
+    crate::auth::require(&state, session_token.as_deref(), false)?;
     let conn = conn(&state);
     db::list_rate_plans(&conn, active_only.unwrap_or(false))
 }
 
 #[tauri::command]
-pub fn save_rate_plan(state: State<AppState>, payload: SaveRatePlanPayload) -> AppResult<RatePlan> {
+pub fn save_rate_plan(state: State<AppState>, session_token: Option<String>, payload: SaveRatePlanPayload) -> AppResult<RatePlan> {
+    crate::auth::require(&state, session_token.as_deref(), true)?;
     let conn = conn(&state);
     if payload.name.trim().is_empty() {
         return Err(AppError::msg("El nombre de la tarifa es obligatorio"));
@@ -344,7 +350,8 @@ pub fn save_rate_plan(state: State<AppState>, payload: SaveRatePlanPayload) -> A
 }
 
 #[tauri::command]
-pub fn check_in(state: State<AppState>, payload: CheckInPayload) -> AppResult<Stay> {
+pub fn check_in(state: State<AppState>, session_token: Option<String>, payload: CheckInPayload) -> AppResult<Stay> {
+    crate::auth::require(&state, session_token.as_deref(), false)?;
     let conn = conn(&state);
     let room = db::get_room(&conn, payload.room_id)?;
     if !room.active {
@@ -423,7 +430,8 @@ pub fn check_in(state: State<AppState>, payload: CheckInPayload) -> AppResult<St
 }
 
 #[tauri::command]
-pub fn preview_bill(state: State<AppState>, stay_id: i64) -> AppResult<BillPreview> {
+pub fn preview_bill(state: State<AppState>, session_token: Option<String>, stay_id: i64) -> AppResult<BillPreview> {
+    crate::auth::require(&state, session_token.as_deref(), false)?;
     let conn = conn(&state);
     let stay = db::get_stay(&conn, stay_id)?;
     build_preview(&conn, &stay)
@@ -431,9 +439,10 @@ pub fn preview_bill(state: State<AppState>, stay_id: i64) -> AppResult<BillPrevi
 
 #[tauri::command]
 pub fn get_stay_detail(
-    state: State<AppState>,
+    state: State<AppState>, session_token: Option<String>,
     stay_id: i64,
 ) -> AppResult<(Stay, BillPreview, Vec<Charge>, Vec<Payment>)> {
+    crate::auth::require(&state, session_token.as_deref(), false)?;
     let conn = conn(&state);
     let stay = db::get_stay(&conn, stay_id)?;
     let bill = bill_for_stay(&conn, &stay)?;
@@ -443,7 +452,8 @@ pub fn get_stay_detail(
 }
 
 #[tauri::command]
-pub fn convert_to_overnight(state: State<AppState>, stay_id: i64) -> AppResult<Stay> {
+pub fn convert_to_overnight(state: State<AppState>, session_token: Option<String>, stay_id: i64) -> AppResult<Stay> {
+    crate::auth::require(&state, session_token.as_deref(), false)?;
     let conn = conn(&state);
     let stay = db::get_stay(&conn, stay_id)?;
     if stay.status != "open" {
@@ -460,13 +470,15 @@ pub fn convert_to_overnight(state: State<AppState>, stay_id: i64) -> AppResult<S
 }
 
 #[tauri::command]
-pub fn list_products(state: State<AppState>, active_only: Option<bool>) -> AppResult<Vec<Product>> {
+pub fn list_products(state: State<AppState>, session_token: Option<String>, active_only: Option<bool>) -> AppResult<Vec<Product>> {
+    crate::auth::require(&state, session_token.as_deref(), false)?;
     let conn = conn(&state);
     db::list_products(&conn, active_only.unwrap_or(true))
 }
 
 #[tauri::command]
-pub fn save_product(state: State<AppState>, payload: SaveProductPayload) -> AppResult<Product> {
+pub fn save_product(state: State<AppState>, session_token: Option<String>, payload: SaveProductPayload) -> AppResult<Product> {
+    crate::auth::require(&state, session_token.as_deref(), true)?;
     let conn = conn(&state);
     db::save_product(
         &conn,
@@ -480,13 +492,15 @@ pub fn save_product(state: State<AppState>, payload: SaveProductPayload) -> AppR
 }
 
 #[tauri::command]
-pub fn set_product_active(state: State<AppState>, product_id: i64, active: bool) -> AppResult<Product> {
+pub fn set_product_active(state: State<AppState>, session_token: Option<String>, product_id: i64, active: bool) -> AppResult<Product> {
+    crate::auth::require(&state, session_token.as_deref(), true)?;
     let conn = conn(&state);
     db::set_product_active(&conn, product_id, active)
 }
 
 #[tauri::command]
-pub fn add_charge(state: State<AppState>, payload: AddChargePayload) -> AppResult<Charge> {
+pub fn add_charge(state: State<AppState>, session_token: Option<String>, payload: AddChargePayload) -> AppResult<Charge> {
+    crate::auth::require(&state, session_token.as_deref(), true)?;
     let conn = conn(&state);
     let stay = db::get_stay(&conn, payload.stay_id)?;
     if stay.status != "open" {
@@ -524,7 +538,8 @@ pub fn add_charge(state: State<AppState>, payload: AddChargePayload) -> AppResul
 }
 
 #[tauri::command]
-pub fn add_product_charge(state: State<AppState>, payload: AddProductChargePayload) -> AppResult<Charge> {
+pub fn add_product_charge(state: State<AppState>, session_token: Option<String>, payload: AddProductChargePayload) -> AppResult<Charge> {
+    crate::auth::require(&state, session_token.as_deref(), false)?;
     let conn = conn(&state);
     let stay = db::get_stay(&conn, payload.stay_id)?;
     if stay.status != "open" {
@@ -553,7 +568,8 @@ pub fn add_product_charge(state: State<AppState>, payload: AddProductChargePaylo
 }
 
 #[tauri::command]
-pub fn delete_charge(state: State<AppState>, charge_id: i64) -> AppResult<()> {
+pub fn delete_charge(state: State<AppState>, session_token: Option<String>, charge_id: i64) -> AppResult<()> {
+    crate::auth::require(&state, session_token.as_deref(), true)?;
     let conn = conn(&state);
     let stay_id: i64 = conn
         .query_row("SELECT stay_id FROM charges WHERE id = ?1", [charge_id], |row| row.get(0))
@@ -571,10 +587,11 @@ pub fn delete_charge(state: State<AppState>, charge_id: i64) -> AppResult<()> {
 
 #[tauri::command]
 pub fn check_out(
-    state: State<AppState>,
+    state: State<AppState>, session_token: Option<String>,
     app: AppHandle,
     payload: CheckOutPayload,
 ) -> AppResult<CheckOutResult> {
+    crate::auth::require(&state, session_token.as_deref(), false)?;
     let mut conn = conn(&state);
     let stay = db::get_stay(&conn, payload.stay_id)?;
     if stay.status != "open" {
@@ -602,7 +619,8 @@ pub fn check_out(
 }
 
 #[tauri::command]
-pub fn list_reservations(state: State<AppState>) -> AppResult<Vec<Reservation>> {
+pub fn list_reservations(state: State<AppState>, session_token: Option<String>) -> AppResult<Vec<Reservation>> {
+    crate::auth::require(&state, session_token.as_deref(), false)?;
     let conn = conn(&state);
     let mut stmt = conn.prepare(
         "SELECT res.id, res.guest_id, g.name, g.document, g.phone, res.room_id, r.number,
@@ -618,7 +636,8 @@ pub fn list_reservations(state: State<AppState>) -> AppResult<Vec<Reservation>> 
 }
 
 #[tauri::command]
-pub fn create_reservation(state: State<AppState>, payload: CreateReservationPayload) -> AppResult<Reservation> {
+pub fn create_reservation(state: State<AppState>, session_token: Option<String>, payload: CreateReservationPayload) -> AppResult<Reservation> {
+    crate::auth::require(&state, session_token.as_deref(), false)?;
     let conn = conn(&state);
     let room = db::get_room(&conn, payload.room_id)?;
     if !room.active {
@@ -671,7 +690,8 @@ pub fn create_reservation(state: State<AppState>, payload: CreateReservationPayl
 }
 
 #[tauri::command]
-pub fn set_reservation_status(state: State<AppState>, reservation_id: i64, status: String) -> AppResult<Reservation> {
+pub fn set_reservation_status(state: State<AppState>, session_token: Option<String>, reservation_id: i64, status: String) -> AppResult<Reservation> {
+    crate::auth::require(&state, session_token.as_deref(), false)?;
     let allowed = ["cancelled", "no_show"];
     if !allowed.contains(&status.as_str()) {
         return Err(AppError::msg("Estado de reserva inválido"));
@@ -689,13 +709,15 @@ pub fn set_reservation_status(state: State<AppState>, reservation_id: i64, statu
 }
 
 #[tauri::command]
-pub fn check_in_reservation(state: State<AppState>, reservation_id: i64) -> AppResult<Stay> {
+pub fn check_in_reservation(state: State<AppState>, session_token: Option<String>, reservation_id: i64) -> AppResult<Stay> {
+    crate::auth::require(&state, session_token.as_deref(), false)?;
     let reservation = {
         let conn = conn(&state);
         db::get_reservation(&conn, reservation_id)?
     };
     check_in(
         state,
+        session_token,
         CheckInPayload {
             room_id: reservation.room_id,
             guest_name: reservation.guest_name,
@@ -709,7 +731,8 @@ pub fn check_in_reservation(state: State<AppState>, reservation_id: i64) -> AppR
 }
 
 #[tauri::command]
-pub fn list_history(state: State<AppState>, date: Option<String>) -> AppResult<Vec<HistoryStay>> {
+pub fn list_history(state: State<AppState>, session_token: Option<String>, date: Option<String>) -> AppResult<Vec<HistoryStay>> {
+    crate::auth::require(&state, session_token.as_deref(), false)?;
     let conn = conn(&state);
     let day = date.unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string());
     let mut stmt = conn.prepare(
@@ -735,7 +758,8 @@ pub fn list_history(state: State<AppState>, date: Option<String>) -> AppResult<V
 }
 
 #[tauri::command]
-pub fn get_settings(state: State<AppState>) -> AppResult<AppSettings> {
+pub fn get_settings(state: State<AppState>, session_token: Option<String>) -> AppResult<AppSettings> {
+    crate::auth::require(&state, session_token.as_deref(), false)?;
     let conn = conn(&state);
     let mut settings = db::load_settings(&conn)?;
     settings.pin_hash = String::new();
@@ -743,7 +767,8 @@ pub fn get_settings(state: State<AppState>) -> AppResult<AppSettings> {
 }
 
 #[tauri::command]
-pub fn save_settings(state: State<AppState>, payload: AppSettings, new_pin: Option<String>) -> AppResult<AppSettings> {
+pub fn save_settings(state: State<AppState>, session_token: Option<String>, payload: AppSettings, new_pin: Option<String>) -> AppResult<AppSettings> {
+    crate::auth::require(&state, session_token.as_deref(), true)?;
     let conn = conn(&state);
     db::upsert_setting(&conn, "business_name", payload.business_name.trim())?;
     db::upsert_setting(&conn, "address", payload.address.trim())?;
@@ -783,7 +808,8 @@ pub fn save_settings(state: State<AppState>, payload: AppSettings, new_pin: Opti
 }
 
 #[tauri::command]
-pub fn verify_pin(state: State<AppState>, pin: String) -> AppResult<bool> {
+pub fn verify_pin(state: State<AppState>, session_token: Option<String>, pin: String) -> AppResult<bool> {
+    crate::auth::require(&state, session_token.as_deref(), false)?;
     let conn = conn(&state);
     let hash = db::get_setting(&conn, "pin_hash", "")?;
     if hash.is_empty() {
@@ -793,13 +819,15 @@ pub fn verify_pin(state: State<AppState>, pin: String) -> AppResult<bool> {
 }
 
 #[tauri::command]
-pub fn pin_required(state: State<AppState>) -> AppResult<bool> {
+pub fn pin_required(state: State<AppState>, session_token: Option<String>) -> AppResult<bool> {
+    crate::auth::require(&state, session_token.as_deref(), false)?;
     let conn = conn(&state);
     Ok(!db::get_setting(&conn, "pin_hash", "")?.is_empty())
 }
 
 #[tauri::command]
-pub fn print_test(state: State<AppState>, app: AppHandle) -> AppResult<Option<String>> {
+pub fn print_test(state: State<AppState>, session_token: Option<String>, app: AppHandle) -> AppResult<Option<String>> {
+    crate::auth::require(&state, session_token.as_deref(), true)?;
     let conn = conn(&state);
     let settings = db::load_settings(&conn)?;
     let bytes = printer::build_test_receipt(&settings);
@@ -808,7 +836,8 @@ pub fn print_test(state: State<AppState>, app: AppHandle) -> AppResult<Option<St
 }
 
 #[tauri::command]
-pub fn reprint_receipt(state: State<AppState>, app: AppHandle, stay_id: i64) -> AppResult<Option<String>> {
+pub fn reprint_receipt(state: State<AppState>, session_token: Option<String>, app: AppHandle, stay_id: i64) -> AppResult<Option<String>> {
+    crate::auth::require(&state, session_token.as_deref(), false)?;
     let conn = conn(&state);
     let stay = db::get_stay(&conn, stay_id)?;
     let bill = bill_for_stay(&conn, &stay)?;

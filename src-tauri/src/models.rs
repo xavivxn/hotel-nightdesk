@@ -1,5 +1,32 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionUser {
+    pub id: i64,
+    pub username: String,
+    pub role: String,
+}
+
+#[derive(Clone, Serialize)]
+pub struct SessionInfo {
+    pub token: String,
+    pub user: SessionUser,
+    pub expires_at: i64,
+}
+
+#[derive(Deserialize)]
+pub struct LoginPayload {
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Deserialize)]
+pub struct CreateUserPayload {
+    pub username: String,
+    pub password: String,
+    pub role: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RateKind {
