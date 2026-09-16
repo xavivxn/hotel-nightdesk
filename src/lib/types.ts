@@ -230,3 +230,13 @@ export type HistoryStay = {
   total_cents: number;
   payment_method: string | null;
 };
+
+export type DailyAccount = {
+  stay_id: number; room_number: string; check_in_at: string; check_out_at: string | null;
+  closed_on_day: boolean; open_at_cutoff: boolean; total_cents: number | null;
+};
+export type DailyReport = {
+  date: string; generated_at: string; cutoff_at: string; timezone: string;
+  occupied_rooms: number; closed_total_cents: number; adjustments_total_cents: number;
+  accounts: DailyAccount[]; adjustments: Charge[];
+};

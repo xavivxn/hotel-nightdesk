@@ -73,6 +73,14 @@ try {
   assert.equal(String(error), 'Esta operación requiere administración');
   assert.notEqual(String(error), '[object Object]');
 }
+const today = new Date();
+const day = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+const report = await call('daily_report', {...args, date:day});
+const history = await call('list_history', {...args, date:day});
+assert.equal(report.closed_total_cents, history.reduce((sum,row)=>sum+row.total_cents,0));
+assert.ok(report.accounts.some(a=>a.open_at_cutoff));
+await rejectsCode(call('daily_report', {...args,date:'2026-02-30'}),'validation');
+await rejectsCode(call('list_printers', args),'forbidden');
 const originalNow = Date.now;
 Date.now = () => originalNow() + 28801000;
 await rejectsCode(call('list_board', args), 'session_expired');

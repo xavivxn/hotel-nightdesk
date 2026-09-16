@@ -1,4 +1,5 @@
 import type {
+  DailyReport,
   SessionInfo, SessionUser, LoginPayload, CreateUserPayload,
   AddChargePayload,
   AddProductChargePayload,
@@ -106,11 +107,24 @@ export const api = {
     cmd<Reservation>("set_reservation_status", { reservation_id, status }),
   checkInReservation: (reservation_id: number) => cmd<Stay>("check_in_reservation", { reservation_id }),
   listHistory: (date?: string) => cmd<HistoryStay[]>("list_history", { date }),
+  dailyReport: (date: string) => cmd<DailyReport>("daily_report", { date }),
+  exportDailyPdf: async (date: string) => {
+    const report = await cmd<DailyReport>("daily_report", { date });
+    const { buildDailyPdf } = await import("./daily-pdf");
+    const bytes = buildDailyPdf(report);
+    if (isTauri()) return cmd<string>("save_daily_pdf", { date, bytes: Array.from(bytes) });
+    const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: "application/pdf" }));
+    const link = document.createElement("a");
+    link.href = url; link.download = `resumen-${date}.pdf`; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    return "Carpeta de descargas del navegador (datos de demostración)";
+  },
   getSettings: () => cmd<AppSettings>("get_settings"),
   saveSettings: (payload: AppSettings, new_pin?: string) =>
     cmd<AppSettings>("save_settings", new_pin === undefined ? { payload } : { payload, new_pin }),
   verifyPin: (pin: string) => cmd<boolean>("verify_pin", { pin }),
   pinRequired: () => cmd<boolean>("pin_required"),
   printTest: () => cmd<string | null>("print_test"),
+  listPrinters: () => cmd<string[]>("list_printers"),
   reprintReceipt: (stay_id: number) => cmd<string | null>("reprint_receipt", { stay_id }),
 };

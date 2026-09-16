@@ -69,6 +69,22 @@ Autorización duplicada a propósito: `auth::require(..., admin)` en el adaptado
 
 ## Comandos → ruta HTTP propuesta → rol
 
+### Ampliación MOT-3 (16/09/2026)
+
+| Comando | Transporte | Rol |
+|---|---|---|
+| `daily_report` | IPC; futuro `GET /reports/daily?date=YYYY-MM-DD` | autenticado |
+| `save_daily_pdf` | Solo IPC local, sin ruta HTTP | autenticado |
+| `list_printers` | Solo IPC local, sin ruta HTTP | admin |
+
+`daily_report {date}` devuelve `DailyReport`: `date`, `generated_at`, `cutoff_at`, `timezone`, `occupied_rooms`, `closed_total_cents`, `adjustments_total_cents`, `accounts` y `adjustments`. Cada cuenta tiene `stay_id`, `room_number`, `check_in_at`, `check_out_at`, `closed_on_day`, `open_at_cutoff` y `total_cents` (null si no cerró ese día). Movimientos: `Charge[]` de consumos/recargos/descuentos del día. No sumar el subtotal de movimientos al total cerrado.
+
+`save_daily_pdf {date, bytes}` guarda el documento generado por la interfaz local en `informes/` con nombre único y devuelve la ruta. Requiere fecha válida no futura, firma PDF, terminador y máximo 20 MB. No acepta rutas proporcionadas por el cliente. El PDF es un archivo exportado, no una fuente de datos operativos.
+
+`list_printers {}` devuelve nombres de colas Windows. En mock devuelve lista vacía. El guardado de PDF en navegador usa descarga local. Impresión/reimpresión no tendrán ruta HTTP; están limitadas al equipo de recepción. `print_error` distingue envío fallido/desactivado; null significa aceptación por la cola, no confirmación de papel.
+
+Migración `007_receipts`: bytes del ticket definitivo en `receipt_snapshots`, guardados atómicamente al cerrar. Reimpresión fiel sin cambiar la cuenta. Ver [uso y evidencia](tickets-informes.md).
+
 Prefijo futuro: `/api/v1`.
 
 | Comando | Método y ruta | Rol |

@@ -6,6 +6,7 @@ mod error;
 mod models;
 mod printer;
 mod service;
+mod reports;
 
 use rusqlite::Connection;
 use std::sync::Mutex;
@@ -60,11 +61,14 @@ pub fn run() {
             commands::set_reservation_status,
             commands::check_in_reservation,
             commands::list_history,
+            commands::daily_report,
+            commands::save_daily_pdf,
             commands::get_settings,
             commands::save_settings,
             commands::verify_pin,
             commands::pin_required,
             commands::print_test,
+            commands::list_printers,
             commands::reprint_receipt,
         ])
         .run(tauri::generate_context!())

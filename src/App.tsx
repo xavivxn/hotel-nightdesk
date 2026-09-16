@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/Button";
 import { RoleContext } from "@/lib/permissions";
 
 const fallbackSettings: AppSettings = {
-  business_name: "Nightdesk Inn",
+  business_name: "MotelApp",
   address: "",
   phone: "",
   tax_percent: 10,

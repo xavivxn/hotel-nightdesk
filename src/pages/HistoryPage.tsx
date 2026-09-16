@@ -16,14 +16,17 @@ export function HistoryPage({ settings }: { settings: AppSettings }) {
   const [items, setItems] = useState<HistoryStay[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-
-  async function load(nextDate = date) {
-    const rows = await api.listHistory(nextDate);
-    setItems(rows);
-  }
+  const [exporting, setExporting] = useState(false);
+  const [printing, setPrinting] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    load().catch((e) => setError(String(e)));
+    let current = true;
+    setLoading(true); setItems([]); setError(null); setNotice(null);
+    api.listHistory(date).then(rows => { if (current) setItems(rows); })
+      .catch(e => { if (current) setError(String(e)); })
+      .finally(() => { if (current) setLoading(false); });
+    return () => { current = false; };
   }, [date]);
 
   const total = items.reduce((sum, item) => sum + item.total_cents, 0);
@@ -41,6 +44,12 @@ export function HistoryPage({ settings }: { settings: AppSettings }) {
             <p className="font-mono text-lg font-semibold tabular-nums">{formatMoney(total, settings.currency_symbol)}</p>
           </div>
           <Input type="date" className="w-44" value={date} onChange={(e) => setDate(e.target.value)} />
+          <Button disabled={exporting || !date || loading} onClick={async () => {
+            setExporting(true); setNotice(null); setError(null);
+            try { const path = await api.exportDailyPdf(date); setNotice(`PDF guardado: ${path}`); }
+            catch (e) { setError(String(e)); }
+            finally { setExporting(false); }
+          }}>{exporting ? "Generando PDF…" : "Exportar PDF diario"}</Button>
         </div>
       </header>
       {error ? <p className="mt-4 text-[var(--danger)]">{error}</p> : null}
@@ -69,13 +78,17 @@ export function HistoryPage({ settings }: { settings: AppSettings }) {
                   <Button
                     size="sm"
                     variant="secondary"
+                    disabled={printing !== null}
                     onClick={async () => {
-                      setNotice(null);
-                      const printError = await api.reprintReceipt(item.stay.id);
-                      setNotice(printError ? `Cuenta cerrada. Impresora: ${printError}` : "Ticket reimpreso o archivado localmente.");
+                      setNotice(null); setError(null); setPrinting(item.stay.id);
+                      try {
+                        const printError = await api.reprintReceipt(item.stay.id);
+                        setNotice(printError ? `Cuenta cerrada. ${printError}` : "Ticket enviado a la cola de recepción. Verificá la salida en papel.");
+                      } catch (e) { setError(String(e)); }
+                      finally { setPrinting(null); }
                     }}
                   >
-                    Reimprimir
+                    {printing === item.stay.id ? "Enviando…" : "Reimprimir"}
                   </Button>
                 </td>
               </tr>
@@ -83,7 +96,7 @@ export function HistoryPage({ settings }: { settings: AppSettings }) {
             {items.length === 0 ? (
               <tr>
                 <td className="px-4 py-10 text-center text-[var(--muted)]" colSpan={5}>
-                  No hay estadías cerradas en esta fecha.
+                  {loading ? "Cargando cuentas…" : "No hay estadías cerradas en esta fecha."}
                 </td>
               </tr>
             ) : null}

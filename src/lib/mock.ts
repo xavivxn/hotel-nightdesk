@@ -3,6 +3,7 @@ import { mockAuth } from "./mock-auth";
 import { buildSeedProducts } from "./products";
 import { fail as throwApi } from "./errors";
 import type {
+  DailyReport,
   AppSettings,
   BoardRoom,
   Charge,
@@ -114,7 +115,7 @@ function seed(): Db {
     payments: [],
     closed_bills: {},
     settings: {
-      business_name: "Nightdesk Inn",
+      business_name: "MotelApp",
       address: "Av. Principal 100",
       phone: "",
       tax_percent: 10,
@@ -244,6 +245,24 @@ export async function mockInvoke<T>(name: string, args: Record<string, unknown> 
 
 function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
   switch (name) {
+    case "daily_report": {
+      const date = String(args.date ?? "");
+      const start = new Date(`${date}T00:00:00`);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(+start) || localDay(start.toISOString()) !== date || date > localDay()) fail("Elegí una fecha válida, no futura");
+      const end = new Date(start); end.setDate(end.getDate() + 1);
+      const now = new Date(), cutoff = new Date(Math.min(+end, +now));
+      const stays = db.stays.filter(s => +new Date(s.check_in_at) < +cutoff && (!s.check_out_at || +new Date(s.check_out_at) > +start) || !!s.check_out_at && localDay(s.check_out_at) === date);
+      const accounts = stays.map(s => {
+        const closed = !!s.check_out_at && +new Date(s.check_out_at) >= +start && +new Date(s.check_out_at) < +end && +new Date(s.check_out_at) <= +now;
+        return { stay_id: s.id, room_number: s.room_number, check_in_at: s.check_in_at, check_out_at: s.check_out_at,
+          closed_on_day: closed, open_at_cutoff: +new Date(s.check_in_at) < +cutoff && (!s.check_out_at || +new Date(s.check_out_at) >= +cutoff), total_cents: closed ? stayBill(db, s).total_cents : null };
+      });
+      const adjustments = db.charges.filter(c => (c.kind === "surcharge" || c.kind === "discount") && localDay(c.created_at) === date && +new Date(c.created_at) <= +now);
+      return { date, generated_at: now.toISOString(), cutoff_at: cutoff.toISOString(), timezone: "Hora local del navegador (demostración)",
+        occupied_rooms: new Set(stays.filter(s => +new Date(s.check_in_at) < +cutoff && (!s.check_out_at || +new Date(s.check_out_at) > +start)).map(s => s.room_id)).size,
+        closed_total_cents: accounts.reduce((sum, a) => sum + (a.total_cents ?? 0), 0),
+        adjustments_total_cents: adjustments.reduce((sum, c) => sum + c.amount_cents, 0), accounts, adjustments } satisfies DailyReport;
+    }
     case "contract_info": {
       const info: ContractInfo = {
         contract_version: 1,
@@ -583,7 +602,10 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
       return Boolean(db.settings.pin_hash);
     case "print_test":
       return db.settings.printer_enabled ? "Simulación: ticket de prueba archivado" : null;
+    case "list_printers":
+      return [];
     case "reprint_receipt":
+      if (!db.stays.some(s => s.id === Number(args.stay_id) && s.status === "closed")) fail("Solo se reimprimen cuentas cerradas");
       return db.settings.printer_enabled ? "Simulación: reimpresión en el navegador" : null;
     default:
       fail(`Comando no implementado: ${name}`);

@@ -18,6 +18,7 @@ export function SettingsPage({
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [printers, setPrinters] = useState<string[]>([]);
 
   async function save(clearPin = false) {
     setBusy(true);
@@ -29,8 +30,10 @@ export function SettingsPage({
       if (next.theme === "light" || next.theme === "dark") setTheme(next.theme);
       setPin("");
       setNotice("Ajustes guardados en este equipo.");
+      return true;
     } catch (e) {
       setError(String(e));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -98,7 +101,7 @@ export function SettingsPage({
               checked={form.auto_print_on_checkout}
               onChange={(e) => setForm({ ...form, auto_print_on_checkout: e.target.checked })}
             />
-            Imprimir al cobrar (si falla, el cobro igual se cierra)
+            Imprimir al cerrar la cuenta (un fallo no revierte el cierre)
           </label>
           <Field label="Ancho">
             <Select
@@ -116,6 +119,16 @@ export function SettingsPage({
               placeholder="POS-80"
             />
           </Field>
+          <Button variant="secondary" disabled={busy} onClick={async () => {
+            setBusy(true); setError(null);
+            try { const names = await api.listPrinters(); setPrinters(names); if (!names.length) setNotice("No se encontraron colas. La detección requiere la app Windows y el controlador instalado."); }
+            catch (e) { setError(String(e)); }
+            finally { setBusy(false); }
+          }}>Buscar impresoras instaladas</Button>
+          {printers.length > 0 && <Field label="Colas de Windows"><Select value={form.printer_name} onChange={e => setForm({...form, printer_name: e.target.value, printer_path: ""})}>
+            <option value="">Seleccionar impresora</option>
+            {printers.map(name => <option key={name} value={name}>{name}</option>)}
+          </Select></Field>}
           <Field label="Ruta del puerto (USB/serial)">
             <Input
               value={form.printer_path}
@@ -126,14 +139,18 @@ export function SettingsPage({
           <Button
             variant="secondary"
             className="w-full"
+            disabled={busy}
             onClick={async () => {
               setError(null);
               try {
-                await save();
+                if (!await save()) return;
+                setBusy(true);
                 const printError = await api.printTest();
-                setNotice(printError ? `Prueba archivada. Impresora: ${printError}` : "Ticket de prueba enviado o archivado en local.");
+                setNotice(printError ? printError : "Prueba enviada a la cola de recepción. Verificá márgenes, legibilidad y corte en papel.");
               } catch (e) {
                 setError(String(e));
+              } finally {
+                setBusy(false);
               }
             }}
           >

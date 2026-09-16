@@ -40,7 +40,7 @@ Alias `@/` → `src/`. Estado local (`useState`); no agregar store global.
 
 - Identificadores y JSON: `check_in`, `amount_cents`, `display_status`, `rate_plan_id`.
 - UI y `AppError::msg(...)`: español. Labels vía `statusLabel` / `rateKindLabel` / `paymentLabel` en `format.ts`.
-- Recibos impresos: ASCII sin tildes (lo hace `printer.rs`).
+- Recibos impresos: PC850 (`ESC t 2`), con áéíóúñ en bytes que también lee la página 0 de la TM-T20. Controles, incluido ESC, salen como `?`.
 
 ## Dinero en UI
 

@@ -193,8 +193,16 @@ mod tests {
         for section in source.split("#[tauri::command]").skip(1) {
             let name = section.split("pub fn ").nth(1).unwrap().split('(').next().unwrap();
             let guard = section.find("crate::auth::require").expect("missing authorization");
-            let lock = section.find("conn(&state)").unwrap();
-            assert!(guard < lock, "{name} accesses data before authorization");
+            if let Some(lock) = section.find("conn(&state)") {
+                assert!(guard < lock, "{name} accesses data before authorization");
+            } else {
+                let effect = match name {
+                    "save_daily_pdf" => "std::fs::",
+                    "list_printers" => "printer::list_printers",
+                    _ => panic!("Unexpected command without a database access check: {name}"),
+                };
+                assert!(guard < section.find(effect).unwrap());
+            }
             if admins.contains(&name) { assert!(section[guard..].starts_with("crate::auth::require(&state, session_token.as_deref(), true)?;"), "{name} allows reception"); }
         }
     }

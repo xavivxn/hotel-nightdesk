@@ -157,10 +157,13 @@ pub fn check_out(
     let (stay, bill) = service::check_out(&mut conn, &payload)?;
     let mut print_error = None;
     if payload.print {
-        let settings = db::load_settings(&conn)?;
-        let bytes = printer::build_receipt(&settings, &stay, &bill);
-        let data_dir = app_data_dir(&app)?;
-        print_error = printer::print_bytes(&bytes, &settings, &data_dir, &format!("stay-{}", stay.id))?;
+        let attempt = (|| -> AppResult<Option<String>> {
+            let settings = db::load_settings(&conn)?;
+            let bytes = service::receipt_bytes(&conn, stay.id)?;
+            let data_dir = app_data_dir(&app)?;
+            printer::print_bytes(&bytes, &settings, &data_dir, &format!("stay-{}", stay.id))
+        })();
+        print_error = attempt.unwrap_or_else(|e| Some(e.to_string()));
     }
     Ok(CheckOutResult {
         stay,
@@ -205,6 +208,32 @@ pub fn list_history(state: State<AppState>, session_token: Option<String>, date:
 }
 
 #[tauri::command]
+pub fn daily_report(state: State<AppState>, session_token: Option<String>, date: String) -> AppResult<DailyReport> {
+    crate::auth::require(&state, session_token.as_deref(), false)?;
+    crate::reports::daily_report(&conn(&state), &date)
+}
+
+#[tauri::command]
+pub fn save_daily_pdf(state: State<AppState>, session_token: Option<String>, app: AppHandle, date: String, bytes: Vec<u8>) -> AppResult<String> {
+    crate::auth::require(&state, session_token.as_deref(), false)?;
+    crate::reports::validate_date(&date)?;
+    if bytes.len() > 20_000_000 || !bytes.starts_with(b"%PDF-") || !bytes.ends_with(b"%%EOF\n") {
+        return Err(AppError::msg("El archivo PDF no es válido o supera 20 MB"));
+    }
+    let dir = app_data_dir(&app)?.join("informes");
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("resumen-{date}-{}.pdf", chrono::Local::now().format("%H%M%S-%f")));
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&path)?;
+    if let Err(e) = file.write_all(&bytes).and_then(|_| file.sync_all()) {
+        drop(file);
+        let _ = std::fs::remove_file(&path);
+        return Err(e.into());
+    }
+    Ok(path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
 pub fn get_settings(state: State<AppState>, session_token: Option<String>) -> AppResult<AppSettings> {
     crate::auth::require(&state, session_token.as_deref(), false)?;
     let conn = conn(&state);
@@ -244,13 +273,18 @@ pub fn print_test(state: State<AppState>, session_token: Option<String>, app: Ap
 }
 
 #[tauri::command]
+pub fn list_printers(state: State<AppState>, session_token: Option<String>) -> AppResult<Vec<String>> {
+    let user = crate::auth::require(&state, session_token.as_deref(), true)?;
+    service::authorize(&actor_from(&user), service::Operation::PrintTest)?;
+    printer::list_printers()
+}
+
+#[tauri::command]
 pub fn reprint_receipt(state: State<AppState>, session_token: Option<String>, app: AppHandle, stay_id: i64) -> AppResult<Option<String>> {
     crate::auth::require(&state, session_token.as_deref(), false)?;
     let conn = conn(&state);
-    let stay = db::get_stay(&conn, stay_id)?;
-    let bill = service::bill_for_stay(&conn, &stay)?;
     let settings = db::load_settings(&conn)?;
-    let bytes = printer::build_receipt(&settings, &stay, &bill);
+    let bytes = service::receipt_bytes(&conn, stay_id)?;
     let data_dir = app_data_dir(&app)?;
-    printer::print_bytes(&bytes, &settings, &data_dir, &format!("stay-{}", stay.id))
+    printer::print_bytes(&bytes, &settings, &data_dir, &format!("reprint-{stay_id}"))
 }

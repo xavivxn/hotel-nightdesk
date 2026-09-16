@@ -233,7 +233,7 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            business_name: "Nightdesk Inn".into(),
+            business_name: "MotelApp".into(),
             address: "Av. Principal 100".into(),
             phone: "".into(),
             tax_percent: 10.0,
@@ -359,6 +359,30 @@ pub struct HistoryStay {
     pub stay: Stay,
     pub total_cents: i64,
     pub payment_method: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DailyAccount {
+    pub stay_id: i64,
+    pub room_number: String,
+    pub check_in_at: String,
+    pub check_out_at: Option<String>,
+    pub closed_on_day: bool,
+    pub open_at_cutoff: bool,
+    pub total_cents: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DailyReport {
+    pub date: String,
+    pub generated_at: String,
+    pub cutoff_at: String,
+    pub timezone: String,
+    pub occupied_rooms: usize,
+    pub closed_total_cents: i64,
+    pub adjustments_total_cents: i64,
+    pub accounts: Vec<DailyAccount>,
+    pub adjustments: Vec<Charge>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

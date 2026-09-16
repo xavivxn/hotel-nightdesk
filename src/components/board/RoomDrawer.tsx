@@ -237,11 +237,14 @@ function StayDrawer({
             className="w-full"
             variant="secondary"
             onClick={async () => {
-              const nextError = await api.reprintReceipt(closedStayId);
-              setPrintError(nextError);
+              setBusy(true);
+              try { setPrintError(await api.reprintReceipt(closedStayId)); }
+              catch (e) { setPrintError(String(e)); }
+              finally { setBusy(false); }
             }}
+            disabled={busy}
           >
-            Reimprimir ticket
+            {busy ? "Enviando…" : "Reimprimir ticket"}
           </Button>
           <Button className="w-full" onClick={finish}>
             Volver al tablero

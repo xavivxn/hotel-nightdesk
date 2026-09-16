@@ -44,6 +44,18 @@ const MIGRATIONS: &[Migration] = &[
         id: "006_stay_integrity",
         sql: MIGRATION_006,
     },
+    Migration {
+        id: "007_receipts",
+        sql: include_str!("../migrations/007_receipts.sql"),
+    },
+    Migration {
+        id: "008_ticket_header",
+        sql: include_str!("../migrations/008_ticket_header.sql"),
+    },
+    Migration {
+        id: "009_ticket_header_name",
+        sql: include_str!("../migrations/009_ticket_header_name.sql"),
+    },
 ];
 
 pub fn open(db_path: &Path) -> AppResult<Connection> {

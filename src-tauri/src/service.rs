@@ -129,8 +129,8 @@ pub fn bill_for_stay(conn: &Connection, stay: &Stay) -> AppResult<BillPreview> {
     let has_persisted_lines = charges
         .iter()
         .any(|charge| matches!(charge.kind.as_str(), "stay" | "extra_hour" | "tax"));
-    if !has_persisted_lines {
-        return build_preview(conn, stay);
+    if !has_persisted_lines && db::closed_snapshot(conn, stay.id)?.applied_kind.is_none() {
+        return Err(AppError::storage("Cuenta antigua sin detalle de cierre; requiere revisión, no se recalcula con tarifas actuales"));
     }
     let tax_cents = charges
         .iter()
@@ -231,6 +231,13 @@ pub fn close_account(
         "UPDATE rooms SET status = 'dirty' WHERE id = ?1",
         [stay.room_id],
     )?;
+    let mut closed = stay.clone();
+    closed.status = "closed".into();
+    closed.check_out_at = Some(checkout_at.into());
+    let settings = db::load_settings(&tx)?;
+    let bytes = crate::printer::build_receipt(&settings, &closed, bill);
+    tx.execute("INSERT INTO receipt_snapshots(stay_id, bytes, created_at) VALUES (?1, ?2, ?3)",
+        params![stay.id, bytes, checkout_at])?;
     tx.commit()?;
     Ok(())
 }
@@ -678,8 +685,22 @@ pub fn check_out(conn: &mut Connection, payload: &CheckOutPayload) -> AppResult<
     let bill = build_preview(conn, &stay)?;
     let checkout_at = now_rfc3339();
     close_account(conn, &stay, &bill, &checkout_at)?;
-    let stay = db::get_stay(conn, stay.id)?;
+    let mut stay = stay;
+    stay.status = "closed".into();
+    stay.check_out_at = Some(checkout_at);
     Ok((stay, bill))
+}
+
+pub fn receipt_bytes(conn: &Connection, stay_id: i64) -> AppResult<Vec<u8>> {
+    let stay = db::get_stay(conn, stay_id)?;
+    if stay.status != "closed" { return Err(AppError::conflict("Solo se reimprimen cuentas cerradas")); }
+    if let Some(bytes) = conn.query_row("SELECT bytes FROM receipt_snapshots WHERE stay_id=?1", [stay_id], |r| r.get(0)).optional()? {
+        return Ok(bytes);
+    }
+    // Legacy accounts: freeze the first reconstruction, without recalculating amounts.
+    let bytes = crate::printer::build_receipt(&db::load_settings(conn)?, &stay, &bill_for_stay(conn, &stay)?);
+    conn.execute("INSERT INTO receipt_snapshots(stay_id, bytes, created_at) VALUES (?1, ?2, ?3)", params![stay_id, bytes, now_rfc3339()])?;
+    Ok(bytes)
 }
 
 pub fn list_reservations(conn: &Connection) -> AppResult<Vec<Reservation>> {
@@ -919,6 +940,34 @@ mod tests {
     use super::*;
     use crate::error::ErrorCode;
     use std::path::Path;
+
+    #[test]
+    fn receipt_is_frozen_and_reprint_does_not_change_account() -> AppResult<()> {
+        let (mut conn, stay) = open_stay_fixture()?;
+        assert!(receipt_bytes(&conn, stay.id).is_err());
+        let bill = build_preview(&conn, &stay)?;
+        close_account(&mut conn, &stay, &bill, &now_rfc3339())?;
+        let original = receipt_bytes(&conn, stay.id)?;
+        conn.execute("UPDATE rate_plans SET base_amount_cents=999999", [])?;
+        conn.execute("UPDATE rooms SET number='CAMBIADA' WHERE id=1", [])?;
+        conn.execute("UPDATE settings SET value='OTRO HOTEL' WHERE key='business_name'", [])?;
+        assert_eq!(original, receipt_bytes(&conn, stay.id)?);
+        assert_eq!(original, receipt_bytes(&conn, stay.id)?);
+        assert_eq!(conn.query_row::<i64, _, _>("SELECT COUNT(*) FROM payments", [], |r| r.get(0))?, 0);
+        assert_eq!(conn.query_row::<i64, _, _>("SELECT COUNT(*) FROM receipt_snapshots", [], |r| r.get(0))?, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn failed_receipt_snapshot_rolls_back_closure() -> AppResult<()> {
+        let (mut conn, stay) = open_stay_fixture()?;
+        conn.execute_batch("CREATE TRIGGER fail_receipt BEFORE INSERT ON receipt_snapshots BEGIN SELECT RAISE(ABORT, 'injected'); END;")?;
+        let bill = build_preview(&conn, &stay)?;
+        assert!(close_account(&mut conn, &stay, &bill, &now_rfc3339()).is_err());
+        assert_eq!(db::get_stay(&conn, stay.id)?.status, "open");
+        assert_eq!(conn.query_row::<i64, _, _>("SELECT COUNT(*) FROM charges", [], |r| r.get(0))?, 0);
+        Ok(())
+    }
 
     fn reception_actor() -> Actor {
         Actor {
