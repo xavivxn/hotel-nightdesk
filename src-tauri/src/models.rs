@@ -1,10 +1,38 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Role {
+    Admin,
+    Recepcion,
+}
+
+impl Role {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Admin => "admin",
+            Self::Recepcion => "recepcion",
+        }
+    }
+
+    pub fn parse(value: &str) -> Self {
+        if value == "admin" {
+            Self::Admin
+        } else {
+            Self::Recepcion
+        }
+    }
+
+    pub fn is_admin(self) -> bool {
+        matches!(self, Self::Admin)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionUser {
     pub id: i64,
     pub username: String,
-    pub role: String,
+    pub role: Role,
 }
 
 #[derive(Clone, Serialize)]
@@ -233,12 +261,20 @@ pub struct CheckInPayload {
     pub rate_plan_id: i64,
     pub expected_hours: Option<i64>,
     pub reservation_id: Option<i64>,
+    #[serde(default)]
+    pub operation_id: Option<String>,
+    #[serde(default)]
+    pub expected_version: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct CheckOutPayload {
     pub stay_id: i64,
     pub print: bool,
+    #[serde(default)]
+    pub operation_id: Option<String>,
+    #[serde(default)]
+    pub expected_version: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -273,6 +309,10 @@ pub struct CreateReservationPayload {
     pub expected_arrival_at: String,
     pub expected_nights: i64,
     pub notes: Option<String>,
+    #[serde(default)]
+    pub operation_id: Option<String>,
+    #[serde(default)]
+    pub expected_version: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -281,12 +321,20 @@ pub struct AddChargePayload {
     pub kind: String,
     pub description: String,
     pub amount_cents: i64,
+    #[serde(default)]
+    pub operation_id: Option<String>,
+    #[serde(default)]
+    pub expected_version: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct AddProductChargePayload {
     pub stay_id: i64,
     pub product_id: i64,
+    #[serde(default)]
+    pub operation_id: Option<String>,
+    #[serde(default)]
+    pub expected_version: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -311,4 +359,11 @@ pub struct HistoryStay {
     pub stay: Stay,
     pub total_cents: i64,
     pub payment_method: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractInfo {
+    pub contract_version: u32,
+    pub app_version: String,
+    pub schema_migrations: Vec<String>,
 }

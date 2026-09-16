@@ -17,26 +17,68 @@ registerHooks({
 const storage = new Map();
 globalThis.localStorage = { getItem: k => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, v) };
 const { mockInvoke: call } = await import('../src/lib/mock.ts');
-await assert.rejects(call('list_board'), /SESSION_EXPIRED/);
+
+async function rejectsCode(promise, code) {
+  try {
+    await promise;
+    assert.fail(`esperaba código ${code}`);
+  } catch (error) {
+    assert.equal(error.code, code, error.message);
+  }
+}
+
+await rejectsCode(call('list_board'), 'session_expired');
 assert.equal(await call('auth_setup_required'), true);
 await call('auth_setup', { payload: { username: 'admin', password: 'Prueba-segura-123' } });
-await assert.rejects(call('auth_setup', { payload: { username: 'otro', password: 'Prueba-segura-123' } }), /FORBIDDEN/);
+await rejectsCode(call('auth_setup', { payload: { username: 'otro', password: 'Prueba-segura-123' } }), 'forbidden');
 const admin = await call('auth_login', { payload: { username: 'admin', password: 'Prueba-segura-123' } });
 await call('auth_create_user', { session_token: admin.token, payload: { username: 'recepcion', password: 'Prueba-segura-456', role: 'recepcion' } });
 const reception = await call('auth_login', { payload: { username: 'recepcion', password: 'Prueba-segura-456' } });
 const args = { session_token: reception.token };
 for (const command of ['save_room', 'save_rate_plan', 'save_product', 'set_product_active', 'add_charge', 'delete_charge', 'save_settings', 'print_test', 'auth_create_user']) {
-  await assert.rejects(call(command, args), /FORBIDDEN/, command);
+  await rejectsCode(call(command, args), 'forbidden');
 }
 assert.equal((await call('list_board', args)).length, 23);
+assert.equal((await call('contract_info', args)).contract_version, 1);
 const product = await call('save_product', { session_token: admin.token, payload: { name: 'Prueba', category: 'bebidas', price_cents: 15000, active: true } });
 assert.equal(product.price_cents, 15000);
+const stay = await call('check_in', { session_token: reception.token, payload: { room_id: 1, guest_name: 'Huésped demo', rate_plan_id: 1, expected_hours: 3 } });
+const charge = await call('add_product_charge', { session_token: reception.token, payload: { stay_id: stay.id, product_id: product.id } });
+assert.equal(charge.description, 'Prueba');
+const preview = await call('preview_bill', { session_token: reception.token, stay_id: stay.id });
+const closed = await call('check_out', { session_token: reception.token, payload: { stay_id: stay.id, print: false } });
+assert.equal(closed.stay.status, 'closed');
+assert.equal(closed.bill.total_cents, preview.total_cents);
+assert.equal(closed.bill.applied_kind, preview.applied_kind);
+try {
+  await call('check_in', { session_token: reception.token, payload: { room_id: 1, guest_name: 'Otro', rate_plan_id: 1 } });
+  assert.fail('esperaba conflicto de check-in');
+} catch (error) {
+  assert.equal(error.code, 'validation');
+  assert.equal(String(error), 'La habitación necesita limpieza antes del check-in');
+  assert.notEqual(String(error), '[object Object]');
+}
+await call('check_in', { session_token: reception.token, payload: { room_id: 2, guest_name: 'Segundo', rate_plan_id: 1, expected_hours: 3 } });
+try {
+  await call('check_in', { session_token: reception.token, payload: { room_id: 2, guest_name: 'Duplicado', rate_plan_id: 1 } });
+  assert.fail('esperaba habitación ocupada');
+} catch (error) {
+  assert.equal(error.code, 'conflict');
+  assert.equal(String(error), 'La habitación ya está ocupada');
+}
+try {
+  await call('delete_charge', args);
+  assert.fail('esperaba forbidden');
+} catch (error) {
+  assert.equal(String(error), 'Esta operación requiere administración');
+  assert.notEqual(String(error), '[object Object]');
+}
 const originalNow = Date.now;
 Date.now = () => originalNow() + 28801000;
-await assert.rejects(call('list_board', args), /SESSION_EXPIRED/);
+await rejectsCode(call('list_board', args), 'session_expired');
 Date.now = originalNow;
 await call('auth_logout', { session_token: admin.token });
-await assert.rejects(call('save_product', { session_token: admin.token }), /SESSION_EXPIRED/);
-for (let i = 0; i < 5; i++) await assert.rejects(call('auth_login', { payload: { username: 'admin', password: 'incorrecta' } }), /INVALID_CREDENTIALS/);
-await assert.rejects(call('auth_login', { payload: { username: 'admin', password: 'Prueba-segura-123' } }), /RATE_LIMITED/);
+await rejectsCode(call('save_product', { session_token: admin.token }), 'session_expired');
+for (let i = 0; i < 5; i++) await rejectsCode(call('auth_login', { payload: { username: 'admin', password: 'incorrecta' } }), 'invalid_credentials');
+await rejectsCode(call('auth_login', { payload: { username: 'admin', password: 'Prueba-segura-123' } }), 'rate_limited');
 console.log('OK: setup único, login, permisos, acceso operativo, expiración, logout y bloqueo de intentos (mock).');

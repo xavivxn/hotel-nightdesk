@@ -1,6 +1,7 @@
 import { previewBill } from "./billing";
 import { mockAuth } from "./mock-auth";
 import { buildSeedProducts } from "./products";
+import { fail as throwApi } from "./errors";
 import type {
   AppSettings,
   BoardRoom,
@@ -8,6 +9,8 @@ import type {
   CheckInPayload,
   CheckOutPayload,
   CheckOutResult,
+  ContractInfo,
+  CreateReservationPayload,
   HistoryStay,
   Payment,
   Product,
@@ -176,8 +179,18 @@ function save(db: Db) {
   localStorage.setItem(KEY, JSON.stringify(db));
 }
 
-function fail(message: string): never {
-  throw message;
+function fail(codeOrMessage: string, message?: string): never {
+  if (message === undefined) throwApi("validation", codeOrMessage);
+  throwApi(codeOrMessage, message);
+}
+
+function acceptReserved(payload: { operation_id?: string | null; expected_version?: number | null }) {
+  if (payload.operation_id != null && payload.operation_id.trim() === "") {
+    fail("validation", "operation_id no puede estar vacío");
+  }
+  if (payload.expected_version != null && payload.expected_version < 0) {
+    fail("validation", "expected_version no puede ser negativo");
+  }
 }
 
 function todayHold(db: Db, roomId: number) {
@@ -231,6 +244,14 @@ export async function mockInvoke<T>(name: string, args: Record<string, unknown> 
 
 function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
   switch (name) {
+    case "contract_info": {
+      const info: ContractInfo = {
+        contract_version: 1,
+        app_version: "0.1.0",
+        schema_migrations: ["001_init", "002_products", "003_rooms_scope", "004_account_closure", "005_auth", "006_stay_integrity"],
+      };
+      return info;
+    }
     case "list_board":
       return db.rooms.filter((room) => room.active).map((room) => {
         const stay = openStay(db, room.id) ?? null;
@@ -299,16 +320,17 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
     }
     case "check_in": {
       const payload = args.payload as CheckInPayload;
-      const room = db.rooms.find((r) => r.id === payload.room_id) ?? fail("Habitación no encontrada");
+      acceptReserved(payload);
+      const room = db.rooms.find((r) => r.id === payload.room_id) ?? fail("not_found", "Habitación no encontrada");
       if (!room.active) fail("La habitación ya no está habilitada");
-      if (openStay(db, room.id)) fail("La habitación ya está ocupada");
+      if (openStay(db, room.id)) fail("conflict", "La habitación ya está ocupada");
       if (room.status === "blocked") fail("La habitación está bloqueada");
       if (room.status === "dirty") fail("La habitación necesita limpieza antes del check-in");
       const hold = todayHold(db, room.id);
       if (hold && payload.reservation_id !== hold.id) {
-        fail(`La habitación ${room.number} tiene una reserva para hoy`);
+        fail("conflict", `La habitación ${room.number} tiene una reserva para hoy`);
       }
-      const rate = db.rates.find((r) => r.id === payload.rate_plan_id) ?? fail("Tarifa no encontrada");
+      const rate = db.rates.find((r) => r.id === payload.rate_plan_id) ?? fail("not_found", "Tarifa no encontrada");
       let guestId = 0;
       let reservationId: number | null = null;
       if (payload.reservation_id) {
@@ -370,9 +392,13 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
       return stay;
     }
     case "add_charge": {
-      const payload = args.payload as { stay_id: number; kind: string; description: string; amount_cents: number };
+      const payload = args.payload as { stay_id: number; kind: string; description: string; amount_cents: number; operation_id?: string | null; expected_version?: number | null };
+      acceptReserved(payload);
+      const stay = db.stays.find((s) => s.id === payload.stay_id) ?? fail("not_found", "Estadía no encontrada");
+      if (stay.status !== "open") fail("conflict", "No se pueden agregar cargos a una estadía cerrada");
       const kind = payload.kind === "discount" || payload.amount_cents < 0 ? "discount" : "surcharge";
       const amount = kind === "discount" ? -Math.abs(payload.amount_cents) : Math.abs(payload.amount_cents);
+      if (!payload.description.trim()) fail("La descripción del cargo es obligatoria");
       if (amount === 0) fail("El importe del cargo debe ser distinto de cero");
       db.ids.charge += 1;
       const charge: Charge = {
@@ -415,10 +441,11 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
       return product;
     }
     case "add_product_charge": {
-      const payload = args.payload as { stay_id: number; product_id: number };
-      const stay = db.stays.find((s) => s.id === payload.stay_id) ?? fail("Estadía no encontrada");
-      if (stay.status !== "open") fail("No se pueden agregar cargos a una estadía cerrada");
-      const product = (db.products ?? []).find((p) => p.id === payload.product_id) ?? fail("Producto no encontrado");
+      const payload = args.payload as { stay_id: number; product_id: number; operation_id?: string | null; expected_version?: number | null };
+      acceptReserved(payload);
+      const stay = db.stays.find((s) => s.id === payload.stay_id) ?? fail("not_found", "Estadía no encontrada");
+      if (stay.status !== "open") fail("conflict", "No se pueden agregar cargos a una estadía cerrada");
+      const product = (db.products ?? []).find((p) => p.id === payload.product_id) ?? fail("not_found", "Producto no encontrado");
       if (!product.active) fail("El producto no está activo");
       db.ids.charge += 1;
       const charge: Charge = {
@@ -435,15 +462,16 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
     case "delete_charge":
       {
         const stay = db.stays.find((item) => item.id === db.charges.find((charge) => charge.id === args.charge_id)?.stay_id);
-        if (!stay) fail("Cargo no encontrado");
-        if (stay.status !== "open") fail("No se pueden modificar cargos de una cuenta cerrada");
+        if (!stay) fail("not_found", "Cargo no encontrado");
+        if (stay.status !== "open") fail("conflict", "No se pueden modificar cargos de una cuenta cerrada");
       }
       db.charges = db.charges.filter((c) => c.id !== args.charge_id || (c.kind !== "surcharge" && c.kind !== "discount"));
       return null;
     case "check_out": {
       const payload = args.payload as CheckOutPayload;
-      const stay = db.stays.find((s) => s.id === payload.stay_id) ?? fail("Estadía no encontrada");
-      if (stay.status !== "open") fail("La estadía ya está cerrada");
+      acceptReserved(payload);
+      const stay = db.stays.find((s) => s.id === payload.stay_id) ?? fail("not_found", "Estadía no encontrada");
+      if (stay.status !== "open") fail("conflict", "La estadía ya está cerrada");
       const bill = stayBill(db, stay);
       stay.status = "closed";
       stay.check_out_at = nowIso();
@@ -460,22 +488,18 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
     case "list_reservations":
       return [...db.reservations].sort((a, b) => b.expected_arrival_at.localeCompare(a.expected_arrival_at));
     case "create_reservation": {
-      const payload = args.payload as {
-        guest_name: string;
-        document?: string | null;
-        phone?: string | null;
-        room_id: number;
-        rate_plan_id: number;
-        expected_arrival_at: string;
-        expected_nights: number;
-        notes?: string | null;
-      };
-      const room = db.rooms.find((r) => r.id === payload.room_id) ?? fail("Habitación no encontrada");
+      const payload = args.payload as CreateReservationPayload;
+      acceptReserved(payload);
+      const room = db.rooms.find((r) => r.id === payload.room_id) ?? fail("not_found", "Habitación no encontrada");
       if (!room.active) fail("La habitación ya no está habilitada");
-      const rate = db.rates.find((r) => r.id === payload.rate_plan_id) ?? fail("Tarifa no encontrada");
+      const rate = db.rates.find((r) => r.id === payload.rate_plan_id) ?? fail("not_found", "Tarifa no encontrada");
       if (payload.expected_nights < 1) fail("La reserva debe tener al menos una noche");
+      const open = openStay(db, room.id);
+      if (open && localDay(payload.expected_arrival_at) === localDay(open.check_in_at)) {
+        fail("conflict", "La habitación está ocupada en esa fecha");
+      }
       if (db.reservations.some((r) => r.room_id === room.id && r.status === "hold" && r.expected_arrival_at.slice(0, 10) === payload.expected_arrival_at.slice(0, 10))) {
-        fail("Ya existe una reserva vigente para esa habitación y fecha");
+        fail("conflict", "Ya existe una reserva vigente para esa habitación y fecha");
       }
       db.ids.guest += 1;
       db.guests.push({

@@ -21,10 +21,12 @@ App de recepción **offline**. Código en inglés; UI y errores de dominio en es
 | Layout y nav | `src/components/layout/AppShell.tsx` |
 | Tipos TS | `src/lib/types.ts` (espejo de `models.rs`) |
 | IPC | `src/lib/api.ts` → `api.*()` |
+| Errores | `src/lib/errors.ts` (`ApiError`) |
 | Mock browser | `src/lib/mock.ts` |
-| Preview mock | `src/lib/billing.ts` |
+| Preview mock | `src/lib/billing.ts` (solo mock; autoridad: `billing.rs`) |
 | Dinero / fechas / labels | `src/lib/format.ts` |
-| Comando Tauri | `src-tauri/src/commands.rs` + registro en `lib.rs` |
+| Comando Tauri | adaptador en `commands.rs` + registro en `lib.rs` |
+| Negocio | `src-tauri/src/service.rs` |
 | Queries / seed | `src-tauri/src/db.rs` |
 | Cobro | `src-tauri/src/billing.rs` |
 | ESC/POS | `src-tauri/src/printer.rs` |

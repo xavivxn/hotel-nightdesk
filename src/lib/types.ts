@@ -134,7 +134,71 @@ export type AppSettings = {
   has_pin: boolean;
 };
 
-export type CheckInPayload = {
+export type Guest = {
+  id: number;
+  name: string;
+  document: string | null;
+  phone: string | null;
+};
+
+export type MutationMeta = {
+  operation_id?: string | null;
+  expected_version?: number | null;
+};
+
+export type SaveRoomPayload = MutationMeta & {
+  id?: number | null;
+  number: string;
+  room_type: string;
+  floor: number;
+  notes?: string | null;
+};
+
+export type SaveRatePlanPayload = MutationMeta & {
+  id?: number | null;
+  name: string;
+  kind: RateKind;
+  base_amount_cents: number;
+  extra_hour_cents: number;
+  included_hours: number;
+  grace_minutes: number;
+  night_cutoff_hour: number;
+  active: boolean;
+};
+
+export type SaveProductPayload = MutationMeta & {
+  id?: number | null;
+  name: string;
+  category: string;
+  price_cents: number;
+  active: boolean;
+  sort_order?: number | null;
+};
+
+export type CreateReservationPayload = MutationMeta & {
+  guest_name: string;
+  document?: string | null;
+  phone?: string | null;
+  room_id: number;
+  rate_plan_id: number;
+  expected_arrival_at: string;
+  expected_nights: number;
+  notes?: string | null;
+};
+
+export type AddChargePayload = MutationMeta & {
+  stay_id: number;
+  kind: string;
+  description: string;
+  amount_cents: number;
+};
+
+export type AddProductChargePayload = MutationMeta & {
+  stay_id: number;
+  product_id: number;
+};
+
+export type CheckInPayload = MutationMeta & {
   room_id: number;
   guest_name: string;
   document?: string | null;
@@ -144,9 +208,15 @@ export type CheckInPayload = {
   reservation_id?: number | null;
 };
 
-export type CheckOutPayload = {
+export type CheckOutPayload = MutationMeta & {
   stay_id: number;
   print: boolean;
+};
+
+export type ContractInfo = {
+  contract_version: number;
+  app_version: string;
+  schema_migrations: string[];
 };
 
 export type CheckOutResult = {

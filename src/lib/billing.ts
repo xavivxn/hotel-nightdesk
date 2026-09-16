@@ -1,3 +1,4 @@
+/** Mock-only preview for `npm run dev`. Authority is `src-tauri/src/billing.rs`. */
 import type { BillPreview, LineItem, RateKind, RatePlan } from "./types";
 
 function extraHoursAfter(includedMinutes: number, elapsedMinutes: number, graceMinutes: number) {

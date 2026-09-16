@@ -1,5 +1,7 @@
 import type {
   SessionInfo, SessionUser, LoginPayload, CreateUserPayload,
+  AddChargePayload,
+  AddProductChargePayload,
   AppSettings,
   BillPreview,
   BoardRoom,
@@ -7,14 +9,20 @@ import type {
   CheckInPayload,
   CheckOutPayload,
   CheckOutResult,
+  ContractInfo,
+  CreateReservationPayload,
   HistoryStay,
   Payment,
   Product,
   RatePlan,
   Reservation,
   Room,
+  SaveProductPayload,
+  SaveRatePlanPayload,
+  SaveRoomPayload,
   Stay,
 } from "./types";
+import { toApiError } from "./errors";
 
 function isTauri() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -31,22 +39,28 @@ function toTauriArgs(args?: Record<string, unknown>) {
   return out;
 }
 
+function withOperationId<T extends { operation_id?: string | null }>(payload: T): T {
+  if (payload.operation_id) return payload;
+  return { ...payload, operation_id: crypto.randomUUID() };
+}
+
 export async function cmd<T>(name: string, args?: Record<string, unknown>): Promise<T> {
   const requestToken = sessionToken;
   const requestArgs = { ...args, session_token: requestToken };
   try {
-  if (isTauri()) {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return await invoke<T>(name, toTauriArgs(requestArgs));
-  }
-  const { mockInvoke } = await import("./mock");
-  return await mockInvoke<T>(name, requestArgs);
+    if (isTauri()) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      return await invoke<T>(name, toTauriArgs(requestArgs));
+    }
+    const { mockInvoke } = await import("./mock");
+    return await mockInvoke<T>(name, requestArgs);
   } catch (error) {
-    if (String(error).includes("SESSION_EXPIRED") && requestToken === sessionToken) {
+    const apiError = toApiError(error);
+    if (apiError.code === "session_expired" && requestToken === sessionToken) {
       sessionToken = null;
       window.dispatchEvent(new Event("nightdesk-session-expired"));
     }
-    throw error;
+    throw apiError;
   }
 }
 
@@ -64,28 +78,30 @@ export const api = {
   logout: async () => { try { await cmd<void>("auth_logout"); } finally { sessionToken = null; } },
   clearSession: () => { sessionToken = null; },
   createUser: (payload: CreateUserPayload) => cmd<SessionUser>("auth_create_user", { payload }),
+  contractInfo: () => cmd<ContractInfo>("contract_info"),
   listBoard: () => cmd<BoardRoom[]>("list_board"),
   listRooms: () => cmd<Room[]>("list_rooms"),
-  saveRoom: (payload: unknown) => cmd<Room>("save_room", { payload }),
+  saveRoom: (payload: SaveRoomPayload) => cmd<Room>("save_room", { payload }),
   setRoomStatus: (room_id: number, status: string) => cmd<Room>("set_room_status", { room_id, status }),
   listRatePlans: (active_only = false) => cmd<RatePlan[]>("list_rate_plans", { active_only }),
-  saveRatePlan: (payload: unknown) => cmd<RatePlan>("save_rate_plan", { payload }),
-  checkIn: (payload: CheckInPayload) => cmd<Stay>("check_in", { payload }),
+  saveRatePlan: (payload: SaveRatePlanPayload) => cmd<RatePlan>("save_rate_plan", { payload }),
+  checkIn: (payload: CheckInPayload) => cmd<Stay>("check_in", { payload: withOperationId(payload) }),
   previewBill: (stay_id: number) => cmd<BillPreview>("preview_bill", { stay_id }),
   getStayDetail: (stay_id: number) =>
     cmd<[Stay, BillPreview, Charge[], Payment[]]>("get_stay_detail", { stay_id }),
   convertToOvernight: (stay_id: number) => cmd<Stay>("convert_to_overnight", { stay_id }),
   listProducts: (active_only = true) => cmd<Product[]>("list_products", { active_only }),
-  saveProduct: (payload: unknown) => cmd<Product>("save_product", { payload }),
+  saveProduct: (payload: SaveProductPayload) => cmd<Product>("save_product", { payload }),
   setProductActive: (product_id: number, active: boolean) =>
     cmd<Product>("set_product_active", { product_id, active }),
-  addCharge: (payload: unknown) => cmd<Charge>("add_charge", { payload }),
-  addProductCharge: (payload: { stay_id: number; product_id: number }) =>
-    cmd<Charge>("add_product_charge", { payload }),
+  addCharge: (payload: AddChargePayload) => cmd<Charge>("add_charge", { payload: withOperationId(payload) }),
+  addProductCharge: (payload: AddProductChargePayload) =>
+    cmd<Charge>("add_product_charge", { payload: withOperationId(payload) }),
   deleteCharge: (charge_id: number) => cmd<void>("delete_charge", { charge_id }),
-  checkOut: (payload: CheckOutPayload) => cmd<CheckOutResult>("check_out", { payload }),
+  checkOut: (payload: CheckOutPayload) => cmd<CheckOutResult>("check_out", { payload: withOperationId(payload) }),
   listReservations: () => cmd<Reservation[]>("list_reservations"),
-  createReservation: (payload: unknown) => cmd<Reservation>("create_reservation", { payload }),
+  createReservation: (payload: CreateReservationPayload) =>
+    cmd<Reservation>("create_reservation", { payload: withOperationId(payload) }),
   setReservationStatus: (reservation_id: number, status: string) =>
     cmd<Reservation>("set_reservation_status", { reservation_id, status }),
   checkInReservation: (reservation_id: number) => cmd<Stay>("check_in_reservation", { reservation_id }),

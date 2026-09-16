@@ -10,7 +10,23 @@ pub const SESSION_SECONDS: i64 = 8 * 60 * 60;
 pub struct ActiveSession { pub user_id: i64, pub deadline: Instant, pub expires_at: i64 }
 #[derive(Default)]
 pub struct AuthState { pub sessions: HashMap<String, ActiveSession> }
-fn error(code: &str, message: &str) -> AppError { AppError::msg(format!("{code}: {message}")) }
+fn error(code: &str, message: &str) -> AppError {
+    match code {
+        "FORBIDDEN" => AppError::forbidden(message),
+        "SESSION_EXPIRED" => AppError::session_expired(message),
+        "RATE_LIMITED" => AppError::rate_limited(message),
+        "INVALID_CREDENTIALS" => AppError::invalid_credentials(message),
+        _ => AppError::msg(message),
+    }
+}
+
+fn map_user(id: i64, username: String, role: String) -> SessionUser {
+    SessionUser {
+        id,
+        username,
+        role: Role::parse(&role),
+    }
+}
 fn key(token: &str) -> String { hex::encode(Sha256::digest(token.as_bytes())) }
 
 pub fn require(state: &AppState, token: Option<&str>, admin: bool) -> AppResult<SessionUser> {
@@ -23,12 +39,12 @@ pub fn require(state: &AppState, token: Option<&str>, admin: bool) -> AppResult<
         auth.sessions.remove(&session_key);
         return Err(error("SESSION_EXPIRED", "La sesión venció. Volvé a ingresar"));
     }
-    let user = conn.query_row("SELECT id, username, role FROM users WHERE id = ?1 AND active = 1", [session.user_id], |row| Ok(SessionUser { id: row.get(0)?, username: row.get(1)?, role: row.get(2)? })).optional()?;
+    let user = conn.query_row("SELECT id, username, role FROM users WHERE id = ?1 AND active = 1", [session.user_id], |row| Ok(map_user(row.get(0)?, row.get(1)?, row.get(2)?))).optional()?;
     let Some(user) = user else {
         auth.sessions.remove(&session_key);
         return Err(error("SESSION_EXPIRED", "La cuenta ya no está habilitada"));
     };
-    if admin && user.role != "admin" { return Err(error("FORBIDDEN", "Esta operación requiere administración")); }
+    if admin && !user.role.is_admin() { return Err(error("FORBIDDEN", "Esta operación requiere administración")); }
     Ok(user)
 }
 
@@ -41,8 +57,8 @@ fn insert_user(conn: &rusqlite::Connection, payload: &CreateUserPayload) -> AppR
     if exists { return Err(AppError::msg("Ese usuario ya existe")); }
     let salt = SaltString::generate(&mut OsRng);
     let hash = Argon2::default().hash_password(payload.password.as_bytes(), &salt).map_err(|_| AppError::msg("No se pudo proteger la contraseña"))?.to_string();
-    conn.execute("INSERT INTO users(username, password_hash, role) VALUES (?1, ?2, ?3)", params![username, hash, payload.role])?;
-    Ok(SessionUser { id: conn.last_insert_rowid(), username, role: payload.role.clone() })
+    conn.execute("INSERT INTO users(username, password_hash, role) VALUES (?1, ?2, ?3)", params![username, hash, Role::parse(&payload.role).as_str()])?;
+    Ok(SessionUser { id: conn.last_insert_rowid(), username, role: Role::parse(&payload.role) })
 }
 
 #[tauri::command]
@@ -68,7 +84,8 @@ pub fn auth_setup(state: State<AppState>, payload: LoginPayload, legacy_pin: Opt
 
 #[tauri::command]
 pub fn auth_create_user(state: State<AppState>, session_token: Option<String>, payload: CreateUserPayload) -> AppResult<SessionUser> {
-    require(&state, session_token.as_deref(), true)?;
+    let user = require(&state, session_token.as_deref(), true)?;
+    crate::service::authorize(&crate::service::Actor::from(&user), crate::service::Operation::CreateUser)?;
     insert_user(&state.db.lock().unwrap(), &payload)
 }
 
@@ -84,7 +101,7 @@ fn login(state: &AppState, payload: LoginPayload) -> AppResult<SessionInfo> {
     let now = chrono::Utc::now().timestamp();
     let (failures, blocked_until): (i64, i64) = conn.query_row("SELECT failures, blocked_until FROM login_attempts WHERE username = ?1", [&username], |r| Ok((r.get(0)?, r.get(1)?))).optional()?.unwrap_or((0, 0));
     if now < blocked_until { return Err(error("RATE_LIMITED", "Demasiados intentos. Esperá 5 minutos")); }
-    let row: Option<(SessionUser, String, bool)> = conn.query_row("SELECT id, username, role, password_hash, active FROM users WHERE username = ?1", [&username], |r| Ok((SessionUser { id: r.get(0)?, username: r.get(1)?, role: r.get(2)? }, r.get(3)?, r.get(4)?))).optional()?;
+    let row: Option<(SessionUser, String, bool)> = conn.query_row("SELECT id, username, role, password_hash, active FROM users WHERE username = ?1", [&username], |r| Ok((map_user(r.get(0)?, r.get(1)?, r.get(2)?), r.get(3)?, r.get(4)?))).optional()?;
     let valid = row.as_ref().map(|(_, hash, active)| *active && PasswordHash::new(hash).map(|parsed| Argon2::default().verify_password(payload.password.as_bytes(), &parsed).is_ok()).unwrap_or(false)).unwrap_or(false);
     if !valid {
         let failures = if blocked_until != 0 { 1 } else { failures + 1 };
@@ -122,6 +139,7 @@ pub fn auth_logout(state: State<AppState>, session_token: Option<String>) -> App
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::ErrorCode;
     use std::{path::Path, sync::Mutex};
     fn fixture() -> AppState {
         let conn = db::open(Path::new(":memory:")).unwrap();
@@ -134,10 +152,10 @@ mod tests {
     #[test]
     fn login_role_and_revocation_are_enforced() {
         let state = fixture();
-        assert!(require(&state, None, false).unwrap_err().to_string().contains("SESSION_EXPIRED"));
+        assert_eq!(require(&state, None, false).unwrap_err().code(), ErrorCode::SessionExpired);
         let session = login(&state, credentials("RECEPCION", "Prueba-segura-456")).unwrap();
-        assert_eq!(require(&state, Some(&session.token), false).unwrap().role, "recepcion");
-        assert!(require(&state, Some(&session.token), true).unwrap_err().to_string().contains("FORBIDDEN"));
+        assert_eq!(require(&state, Some(&session.token), false).unwrap().role, Role::Recepcion);
+        assert_eq!(require(&state, Some(&session.token), true).unwrap_err().code(), ErrorCode::Forbidden);
         state.auth.lock().unwrap().sessions.remove(&key(&session.token));
         assert!(require(&state, Some(&session.token), false).is_err());
         let admin = login(&state, credentials("admin", "Prueba-segura-123")).unwrap();
@@ -159,7 +177,7 @@ mod tests {
     fn bad_passwords_lock_temporarily_and_hashes_are_argon2id() {
         let state = fixture();
         for _ in 0..5 { assert!(login(&state, credentials("admin", "incorrecta")).is_err()); }
-        assert!(login(&state, credentials("admin", "Prueba-segura-123")).err().unwrap().to_string().contains("RATE_LIMITED"));
+        assert_eq!(login(&state, credentials("admin", "Prueba-segura-123")).err().unwrap().code(), ErrorCode::RateLimited);
         let conn = state.db.lock().unwrap();
         let hash: String = conn.query_row("SELECT password_hash FROM users WHERE username='admin'", [], |r| r.get(0)).unwrap();
         assert!(hash.starts_with("$argon2id$"));

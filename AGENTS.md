@@ -16,10 +16,13 @@ src/lib/api.ts             único puente IPC (nunca invoke desde UI)
 src/lib/mock.ts            fallback browser (`npm run dev`)
 src/lib/types.ts           espejo de models.rs
 src/lib/billing.ts         preview mock; la autoridad es billing.rs
-src-tauri/src/commands.rs  24 comandos Tauri
+src/lib/errors.ts          ApiError { code, message }
+src-tauri/src/service.rs   reglas de negocio + SQL + TX (sin Tauri)
+src-tauri/src/commands.rs  29 comandos de negocio + 6 de acceso (adaptadores)
 src-tauri/src/billing.rs   cobro (fuente de verdad + tests)
 src-tauri/src/db.rs        SQLite, seed, queries
 src-tauri/migrations/      schema (001_init … 006_stay_integrity)
+docs/contrato-ipc-api.md   contrato IPC/API v1
 ```
 
 ## Skills
@@ -41,4 +44,4 @@ No hay tests de frontend.
 - Montos: enteros en **guaraníes** (campos `*_cents` heredan el nombre, 1 = 1 Gs). `billing.rs` manda; `billing.ts` y sus tests se actualizan juntos.
 - Una estadía `open` por habitación. Check-in → `occupied`. Checkout → `dirty` (nunca `available`).
 - Checkout atómico. Fallo de impresora **no** revierte el cobro.
-- Dual-mode: cada comando nuevo vive en `models.rs` + `types.ts` + `commands.rs` + `lib.rs` + `api.ts` + `mock.ts`.
+- Dual-mode: cada comando nuevo vive en `models.rs` + `types.ts` + `service.rs` + `commands.rs` + `lib.rs` + `api.ts` + `mock.ts`. `billing.ts` solo alimenta el mock.

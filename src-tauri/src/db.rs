@@ -173,6 +173,12 @@ fn apply_migration(conn: &Connection, id: &str) -> AppResult<()> {
     Ok(())
 }
 
+pub fn list_applied_migrations(conn: &Connection) -> AppResult<Vec<String>> {
+    let mut stmt = conn.prepare("SELECT id FROM schema_migrations ORDER BY id")?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+    Ok(rows.filter_map(|row| row.ok()).collect())
+}
+
 fn seed_if_empty(conn: &Connection) -> AppResult<()> {
     let count: i64 = conn.query_row("SELECT COUNT(*) FROM rooms", [], |row| row.get(0))?;
     if count > 0 {

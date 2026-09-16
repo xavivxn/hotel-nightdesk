@@ -5,6 +5,7 @@ mod db;
 mod error;
 mod models;
 mod printer;
+mod service;
 
 use rusqlite::Connection;
 use std::sync::Mutex;
@@ -36,6 +37,7 @@ pub fn run() {
             auth::auth_login,
             auth::auth_session,
             auth::auth_logout,
+            commands::contract_info,
             commands::list_board,
             commands::list_rooms,
             commands::save_room,
