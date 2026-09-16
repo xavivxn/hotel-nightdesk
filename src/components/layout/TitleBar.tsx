@@ -12,8 +12,6 @@ export function TitleBar() {
     setActive(isTauri());
   }, []);
 
-  if (!active) return null;
-
   async function win() {
     const { getCurrentWindow } = await import("@tauri-apps/api/window");
     return getCurrentWindow();
@@ -22,13 +20,16 @@ export function TitleBar() {
   return (
     <div
       data-tauri-drag-region
-      className="flex h-9 shrink-0 items-stretch justify-end border-b border-[var(--line)] bg-[var(--surface)]"
+      className="app-chrome relative z-50 flex h-11 shrink-0 items-center justify-end border-b border-[var(--line)] bg-[var(--surface)]"
     >
+      <div data-tauri-drag-region className="h-full min-w-0 flex-1" />
+      {active && (
+      <>
       <button
         type="button"
         aria-label="Minimizar"
         data-tauri-drag-region="false"
-        className="flex w-11 items-center justify-center text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)]"
+        className="flex h-full w-11 cursor-pointer items-center justify-center text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)]"
         onClick={async () => {
           await (await win()).minimize();
         }}
@@ -39,7 +40,7 @@ export function TitleBar() {
         type="button"
         aria-label="Maximizar"
         data-tauri-drag-region="false"
-        className="flex w-11 items-center justify-center text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)]"
+        className="flex h-full w-11 cursor-pointer items-center justify-center text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)]"
         onClick={async () => {
           await (await win()).toggleMaximize();
         }}
@@ -50,13 +51,15 @@ export function TitleBar() {
         type="button"
         aria-label="Cerrar"
         data-tauri-drag-region="false"
-        className="flex w-11 items-center justify-center text-[var(--muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"
+        className="flex h-full w-11 cursor-pointer items-center justify-center text-[var(--muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"
         onClick={async () => {
           await (await win()).close();
         }}
       >
         <X size={14} />
       </button>
+      </>
+      )}
     </div>
   );
 }

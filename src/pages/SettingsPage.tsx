@@ -80,8 +80,8 @@ export function SettingsPage({
               value={form.theme}
               onChange={(e) => setForm({ ...form, theme: e.target.value })}
             >
-              <option value="dark">Oscuro</option>
               <option value="light">Claro</option>
+              <option value="dark">Oscuro</option>
             </Select>
           </Field>
         </section>

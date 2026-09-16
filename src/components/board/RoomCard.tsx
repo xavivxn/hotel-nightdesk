@@ -1,7 +1,7 @@
 import { formatDuration, formatMoney, statusLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { BoardRoom } from "@/lib/types";
-import { Ban, BrushCleaning, CalendarClock, Check, Crown, Hourglass, Timer } from "lucide-react";
+import { Ban, Bath, BrushCleaning, CalendarClock, Check, Crown, Hourglass, Timer } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 const fills: Record<string, string> = {
@@ -15,8 +15,8 @@ const fills: Record<string, string> = {
 const stamps: Record<string, string> = {
   available: "border-0 bg-[var(--ok)] text-[var(--ok-ink)]",
   occupied: "border-0 bg-[var(--warn)] text-[var(--warn-ink)]",
-  dirty: "border-0 bg-[var(--dirty)] text-[var(--dirty-ink)]",
-  blocked: "border-0 bg-[var(--danger)] text-[var(--danger-ink)]",
+  dirty: "stamp-dirty",
+  blocked: "stamp-blocked",
   reserved: "border-0 bg-[var(--info)] text-[var(--info-ink)]",
 };
 
@@ -36,7 +36,6 @@ function timeStatus(item: BoardRoom): TimeStatus | null {
   const stay = item.stay;
   if (!stay) return null;
   const elapsed = { label: "Lleva", value: formatDuration(item.elapsed_minutes ?? 0), overdue: false };
-  // Al convertir a pernocte no se recalcula expected_checkout_at: el límite por hora deja de aplicar.
   if (stay.converted_to_overnight || !stay.expected_checkout_at) return elapsed;
   const end = new Date(stay.expected_checkout_at).getTime();
   if (Number.isNaN(end)) return elapsed;
@@ -46,34 +45,17 @@ function timeStatus(item: BoardRoom): TimeStatus | null {
     : { label: "Excedido", value: formatDuration(-minutes), overdue: true };
 }
 
-export function RoomStatusLegend({
-  active,
-  onToggle,
-}: {
-  active: string[];
-  onToggle: (status: string) => void;
-}) {
-  const filtering = active.length > 0;
+export function RoomStatusLegend() {
   return (
-    <ul className="mt-4 flex flex-wrap gap-2" aria-label="Filtrar por estado">
+    <ul className="mt-3 flex flex-wrap gap-2" aria-label="Leyenda de estados">
       {legendStatuses.map((status) => {
         const Icon = icons[status];
-        const selected = active.includes(status);
         return (
           <li key={status}>
-            <button
-              type="button"
-              aria-pressed={selected}
-              onClick={() => onToggle(status)}
-              className={cn(
-                "stamp status-filter cursor-pointer transition-opacity focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]",
-                stamps[status],
-                filtering && !selected && "opacity-35",
-              )}
-            >
+            <span className={cn("stamp status-key", stamps[status])}>
               <Icon size={14} />
               {statusLabel(status)}
-            </button>
+            </span>
           </li>
         );
       })}
@@ -88,36 +70,62 @@ const notes: Record<string, string> = {
   reserved: "Llegada reservada",
 };
 
+function roomKind(type: string) {
+  const value = type.trim().toLowerCase();
+  const isJacuzzi = /jacc?uz+i/.test(value);
+  const isStandard = value === "estándar" || value === "estandar" || value === "normal";
+  return { isJacuzzi, isSuite: !isStandard && !isJacuzzi };
+}
+
 export function RoomCard({
   item,
   currency,
-  baseRateCents,
   onClick,
 }: {
   item: BoardRoom;
   currency: string;
-  baseRateCents: number | null;
   onClick: () => void;
 }) {
   const status = item.display_status;
   const Icon = icons[status] ?? Check;
   const time = timeStatus(item);
-  const isSuite = item.room.room_type.trim().toLowerCase() !== "estándar";
-  const amount = item.stay ? item.estimated_total_cents : baseRateCents;
+  const { isJacuzzi, isSuite } = roomKind(item.room.room_type);
+  const showJacuzzi = isJacuzzi && !item.stay;
+  const total = item.stay && Number.isFinite(Number(item.estimated_total_cents))
+    ? Number(item.estimated_total_cents)
+    : null;
   return (
     <button
       onClick={onClick}
       className={cn(
         "room-card focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]",
         fills[status] ?? fills.available,
-        isSuite && "room-suite",
       )}
     >
+      {status === "dirty" ? <span className="room-dirty-sheen" aria-hidden="true" /> : null}
+      {isJacuzzi && item.stay ? <span className="sr-only">Jacuzzi</span> : null}
       <div className="room-head">
-        <span className="room-head-number">{item.room.number}</span>
+        <span className="room-head-main">
+          <span className="room-head-number">{item.room.number}</span>
+          {showJacuzzi || isSuite ? (
+            <span className="room-head-attr">
+              {showJacuzzi ? (
+                <span className="room-jacuzzi-label">
+                  <Bath size={10} className="shrink-0" aria-hidden="true" />
+                  Jacuzzi
+                </span>
+              ) : (
+                <span className="room-suite-label">
+                  <Crown size={10} className="shrink-0" aria-hidden="true" />
+                  {item.room.room_type}
+                </span>
+              )}
+            </span>
+          ) : null}
+        </span>
         <span className="room-head-status">
           <Icon size={12} className="shrink-0" />
-          <span className="truncate">{statusLabel(status)}</span>
+          <span>{statusLabel(status)}</span>
         </span>
       </div>
       <div className="room-body">
@@ -125,30 +133,24 @@ export function RoomCard({
           <div className={cn("room-panel", time?.overdue && "is-overdue")}>
             <p className="room-timer-label">{time?.label}</p>
             <p className="room-timer">
-              <Hourglass size={14} className="shrink-0" />
-              <span className="truncate">{time?.value}</span>
+              <Hourglass size={14} className="room-hourglass shrink-0" />
+              <span>{time?.value}</span>
             </p>
             <p className="room-sub">
-              {item.stay.converted_to_overnight ? "Pernocte" : item.stay.rate_plan_name}
+              {item.stay.converted_to_overnight ? "Dormida" : item.stay.rate_plan_name}
             </p>
-          </div>
-        ) : (
-          <>
-            <Icon className="room-watermark" size={40} aria-hidden="true" />
-            {isSuite ? (
-              <p className="room-suite-label">
-                <Crown size={13} className="shrink-0" />
-                {item.room.room_type}
+            {total != null ? (
+              <p className="room-tariff">
+                Total <b>{formatMoney(total, currency)}</b>
               </p>
             ) : null}
-            <p className="room-note">{notes[status] ?? notes.available}</p>
-          </>
-        )}
-        {amount != null ? (
-          <p className="room-tariff">
-            {item.stay ? "Total" : "Tarifa"} <b>{formatMoney(amount, currency)}</b>
+          </div>
+        ) : (
+          <p className="room-note">
+            <Icon size={15} className="room-status-icon shrink-0" />
+            <span>{notes[status] ?? notes.available}</span>
           </p>
-        ) : null}
+        )}
       </div>
     </button>
   );

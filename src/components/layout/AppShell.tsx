@@ -1,7 +1,7 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { BedDouble, CalendarClock, History, LayoutGrid, Moon, Package, Settings2, Sun } from "lucide-react";
+import { LoveNestLogo } from "@/components/layout/BrandLogo";
 import { DutyClock } from "@/components/layout/DutyClock";
-import { TitleBar } from "@/components/layout/TitleBar";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import type { SessionUser } from "@/lib/types";
@@ -22,13 +22,10 @@ export function AppShell({ user, onLogout }: { user: SessionUser; onLogout: () =
   const { theme, toggle } = useTheme();
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden">
-      <TitleBar />
-      <div className="flex min-h-0 flex-1">
-        <aside className="app-sidebar flex h-full w-[88px] flex-col border-r border-[var(--line)] bg-[var(--surface)] px-3 py-5 lg:w-56 lg:px-4">
+    <div className="flex h-full min-h-0 overflow-hidden">
+        <aside className="app-sidebar flex h-full w-[88px] flex-col border-r border-[var(--line)] bg-[var(--surface)] px-2 py-5 lg:w-56 lg:px-4">
           <div className="sidebar-brand">
-            <div className="brand-symbol"><LayoutGrid size={23} /></div>
-            <div className="hidden lg:block"><p className="brand-caption">CONTROL DE<br />RECEPCIÓN</p></div>
+            <LoveNestLogo />
           </div>
           <p className="nav-section hidden lg:block">OPERACIÓN</p>
           <nav aria-label="Navegación principal" className="flex flex-1 flex-col gap-1">
@@ -51,23 +48,24 @@ export function AppShell({ user, onLogout }: { user: SessionUser; onLogout: () =
               </NavLink>
             ))}
           </nav>
-          <div className="space-y-3 px-1">
+          <div className="sidebar-foot">
             <p className="truncate text-xs" title={`${user.username} · ${user.role}`}>{user.username} · {user.role === "admin" ? "Admin" : "Recepción"}</p>
             <Button variant="secondary" className="w-full" onClick={onLogout}>Salir</Button>
-            <DutyClock />
-            <button
-              onClick={toggle}
-              className="flex w-full items-center justify-center gap-2 rounded-lg border border-[var(--line)] px-3 py-2 text-sm hover:bg-[var(--surface-2)] lg:justify-start"
-            >
-              {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
-              <span className="hidden lg:inline">{theme === "dark" ? "Modo claro" : "Modo oscuro"}</span>
-            </button>
+            <div className="sidebar-dock">
+              <DutyClock />
+              <button
+                onClick={toggle}
+                className="theme-toggle flex w-full items-center justify-center gap-2 rounded-lg border border-[var(--line)] px-3 py-2 text-sm hover:bg-[var(--surface-2)] lg:justify-start"
+              >
+                {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+                <span className="hidden lg:inline">{theme === "dark" ? "Modo claro" : "Modo oscuro"}</span>
+              </button>
+            </div>
           </div>
         </aside>
         <main className="min-w-0 flex-1 overflow-auto">
           <Outlet />
         </main>
-      </div>
     </div>
   );
 }

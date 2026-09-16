@@ -38,14 +38,15 @@ export function BoardPage({ settings }: { settings: AppSettings }) {
   }, [board, statusFilter]);
 
   const occupied = board.filter((r) => r.display_status === "occupied").length;
-  const occupancyPct = board.length ? Math.round((occupied / board.length) * 100) : 0;
-  const baseRateCents = rates[0]?.base_amount_cents ?? null;
 
   return (
     <div className="board-page px-6 py-6 lg:px-8">
       <header className="board-header">
-        <div><p className="page-kicker">Recepción / Vista general</p><h1 className="page-title">Tablero de habitaciones</h1><p className="page-description">Cada habitación, cada movimiento. Todo bajo control.</p></div>
-        <div className="occupancy-overview"><span className="occupancy-number">{occupancyPct}<small>%</small></span><div><p>Ocupación actual</p><span>{occupied} de {board.length} habitaciones</span><div className="occupancy-track"><div style={{ width: `${occupancyPct}%` }} /></div></div></div>
+        <div>
+          <p className="page-kicker">Recepción / Vista general</p>
+          <h1 className="page-title">Tablero de habitaciones</h1>
+        </div>
+        <p className="occupancy-compact">{occupied} de {board.length} ocupadas</p>
       </header>
       <div className="board-stats" aria-label="Resumen de habitaciones">
         {[
@@ -59,14 +60,7 @@ export function BoardPage({ settings }: { settings: AppSettings }) {
         <span className="toolbar-count">{filtered.length} habitaciones</span>
         {statusFilter.length > 0 ? <button className="clear-filters" onClick={() => { setStatusFilter([]); }}><X size={14} /> Limpiar filtros</button> : null}
       </div>
-      <RoomStatusLegend
-        active={statusFilter}
-        onToggle={(status) => {
-          setStatusFilter((current) =>
-            current.includes(status) ? current.filter((item) => item !== status) : [...current, status],
-          );
-        }}
-      />
+      <RoomStatusLegend />
       {error ? <p className="mt-4 text-[var(--danger)]">{error}</p> : null}
       <div className="mt-6">
         {filtered.length === 0 && !error ? (
@@ -82,7 +76,6 @@ export function BoardPage({ settings }: { settings: AppSettings }) {
                 key={item.room.id}
                 item={item}
                 currency={settings.currency_symbol}
-                baseRateCents={baseRateCents}
                 onClick={() => setSelected(item)}
               />
             ))}

@@ -1,4 +1,4 @@
-import { previewBill } from "./billing";
+import { previewBill, theoreticalNightEnd, dormidaWindowOpen, dormidaUnavailableMessage } from "./billing";
 import { mockAuth } from "./mock-auth";
 import { buildSeedProducts } from "./products";
 import { fail as throwApi } from "./errors";
@@ -35,7 +35,7 @@ type Db = {
   ids: { room: number; rate: number; product: number; guest: number; reservation: number; stay: number; charge: number; payment: number };
 };
 
-const KEY = "nightdesk.mock.v4";
+const KEY = "nightdesk.mock.v6";
 
 function nowIso() {
   return new Date().toISOString();
@@ -53,7 +53,7 @@ function seedRooms(): Array<[string, string, number]> {
   for (let n = 1; n <= 23; n++) {
     const number = String(n).padStart(2, "0");
     const floor = Math.ceil(n / 9);
-    const room_type = n > 19 ? "Jacuzzi" : "Normal";
+    const room_type = n <= 4 ? "Jacuzzi" : "Normal";
     rooms.push([number, room_type, floor]);
   }
   return rooms;
@@ -72,35 +72,24 @@ function seed(): Db {
   const rates: RatePlan[] = [
     {
       id: 1,
-      name: "3 horas",
+      name: "1 hora",
       kind: "hourly",
-      base_amount_cents: 80_000,
-      extra_hour_cents: 20_000,
-      included_hours: 3,
-      grace_minutes: 10,
-      night_cutoff_hour: 12,
+      base_amount_cents: 45_000,
+      extra_hour_cents: 15_000,
+      included_hours: 1,
+      grace_minutes: 5,
+      night_cutoff_hour: 10,
       active: true,
     },
     {
       id: 2,
-      name: "Noche",
-      kind: "night",
-      base_amount_cents: 150_000,
-      extra_hour_cents: 25_000,
-      included_hours: 24,
-      grace_minutes: 15,
-      night_cutoff_hour: 12,
-      active: true,
-    },
-    {
-      id: 3,
-      name: "Pernocte",
+      name: "Dormida",
       kind: "overnight",
       base_amount_cents: 120_000,
-      extra_hour_cents: 20_000,
+      extra_hour_cents: 15_000,
       included_hours: 12,
-      grace_minutes: 15,
-      night_cutoff_hour: 12,
+      grace_minutes: 5,
+      night_cutoff_hour: 10,
       active: true,
     },
   ];
@@ -118,9 +107,9 @@ function seed(): Db {
       business_name: "MotelApp",
       address: "Av. Principal 100",
       phone: "",
-      tax_percent: 10,
+      tax_percent: 0,
       currency_symbol: "Gs.",
-      theme: "dark",
+      theme: "light",
       receipt_footer: "Gracias por su visita",
       printer_enabled: false,
       printer_path: "",
@@ -350,6 +339,9 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
         fail("conflict", `La habitación ${room.number} tiene una reserva para hoy`);
       }
       const rate = db.rates.find((r) => r.id === payload.rate_plan_id) ?? fail("not_found", "Tarifa no encontrada");
+      if ((rate.kind === "overnight" || rate.kind === "night") && !dormidaWindowOpen(new Date(), rate.night_cutoff_hour)) {
+        fail(dormidaUnavailableMessage(new Date(), rate.night_cutoff_hour));
+      }
       let guestId = 0;
       let reservationId: number | null = null;
       if (payload.reservation_id) {
@@ -383,7 +375,10 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
         rate_kind: rate.kind,
         reservation_id: reservationId,
         check_in_at: nowIso(),
-        expected_checkout_at: new Date(Date.now() + (payload.expected_hours ?? rate.included_hours) * 3600000).toISOString(),
+        expected_checkout_at:
+          rate.kind === "hourly"
+            ? new Date(Date.now() + (payload.expected_hours ?? Math.max(1, rate.included_hours)) * 3600000).toISOString()
+            : theoreticalNightEnd(new Date(), rate.night_cutoff_hour).toISOString(),
         check_out_at: null,
         status: "open",
         converted_to_overnight: false,
@@ -405,9 +400,16 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
     case "convert_to_overnight": {
       const stay = db.stays.find((s) => s.id === args.stay_id) ?? fail("Estadía no encontrada");
       const overnight = db.rates.find((r) => r.kind === "overnight" && r.active) ?? db.rates.find((r) => r.kind === "night" && r.active);
-      if (!overnight) fail("No hay una tarifa de pernocte o noche activa");
+      if (!overnight) fail("No hay una tarifa de dormida activa");
+      if (!dormidaWindowOpen(new Date(), overnight.night_cutoff_hour)) {
+        fail(dormidaUnavailableMessage(new Date(), overnight.night_cutoff_hour));
+      }
       stay.converted_to_overnight = true;
       stay.overnight_rate_plan_id = overnight.id;
+      stay.expected_checkout_at = theoreticalNightEnd(
+        new Date(stay.check_in_at),
+        overnight.night_cutoff_hour,
+      ).toISOString();
       return stay;
     }
     case "add_charge": {

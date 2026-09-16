@@ -1,6 +1,8 @@
 export function formatMoney(amount: number, symbol = "Gs.") {
-  const negative = amount < 0;
-  const abs = Math.abs(Math.round(amount));
+  const value = Math.round(Number(amount));
+  const safe = Number.isFinite(value) ? value : 0;
+  const negative = safe < 0;
+  const abs = Math.abs(safe);
   const wholeStr = abs.toLocaleString("es-PY");
   return `${negative ? "-" : ""}${wholeStr}\u00a0${symbol}`;
 }
@@ -97,7 +99,7 @@ export function rateKindLabel(kind: string) {
     case "night":
       return "Por noche";
     case "overnight":
-      return "Pernocte";
+      return "Dormida";
     default:
       return "Por hora";
   }

@@ -67,7 +67,7 @@ export function Dialog({
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[var(--surface-2)]"
+            className="inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[var(--surface-2)]"
             aria-label="Cerrar panel"
           >
             <X size={18} />

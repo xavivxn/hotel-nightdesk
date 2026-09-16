@@ -1,13 +1,32 @@
-import { useContext } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
+import { Ban, Bath, Clock3, LogIn } from "lucide-react";
 import { RoleContext } from "@/lib/permissions";
 import { api } from "@/lib/api";
 import { formatDateTime, formatMoney, parseGuaranies, rateKindLabel } from "@/lib/format";
+import { dormidaEnd, dormidaStartsAtMidnight, dormidaUnavailableMessage, dormidaWindowOpen } from "@/lib/billing";
 import type { AppSettings, BoardRoom, Charge, RatePlan } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { Field, Input, Select } from "@/components/ui/Field";
+import { Input } from "@/components/ui/Field";
 import { RoomShop } from "@/components/board/RoomShop";
-import { useEffect, useMemo, useState } from "react";
+import { cn } from "@/lib/utils";
+
+function formatClock(date: Date) {
+  return date.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+}
+
+function isDormidaKind(kind: string) {
+  return kind === "overnight" || kind === "night";
+}
+
+function useNow(ms = 30000) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(new Date()), ms);
+    return () => window.clearInterval(id);
+  }, [ms]);
+  return now;
+}
 
 export function RoomDrawer({
   item,
@@ -56,12 +75,36 @@ function CheckInDrawer({
   onClose: () => void;
   onChanged: () => void;
 }) {
-  const activeRates = rates.filter((r) => r.active);
+  const now = useNow();
+  const activeRates = [...rates.filter((r) => r.active)].sort((a, b) => {
+    const order = { hourly: 0, overnight: 1, night: 2 };
+    return (order[a.kind] ?? 9) - (order[b.kind] ?? 9);
+  });
   const [rateId, setRateId] = useState(activeRates[0]?.id ?? 0);
-  const [hours, setHours] = useState(3);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const selected = activeRates.find((r) => r.id === rateId);
+  const blocked = item.display_status === "blocked";
+  const dirty = item.display_status === "dirty";
+  const dormidaOpen = selected
+    ? !isDormidaKind(selected.kind) || dormidaWindowOpen(now, selected.night_cutoff_hour)
+    : false;
+  const canCheckIn = !blocked && !dirty && Boolean(selected) && dormidaOpen;
+  const isJacuzzi = /jacc?uz+i/.test(item.room.room_type.trim().toLowerCase());
+  const checkoutAt = selected?.kind === "hourly"
+    ? new Date(Date.now() + 60 * 60 * 1000)
+    : selected?.kind === "overnight" || selected?.kind === "night"
+      ? dormidaEnd(now, selected.night_cutoff_hour)
+      : null;
+  const dormidaMidnight = selected
+    ? dormidaStartsAtMidnight(now, selected.night_cutoff_hour)
+    : false;
+
+  useEffect(() => {
+    if (!selected || !isDormidaKind(selected.kind) || dormidaWindowOpen(now, selected.night_cutoff_hour)) return;
+    const hourly = rates.find((rate) => rate.active && rate.kind === "hourly");
+    if (hourly) setRateId(hourly.id);
+  }, [now, rates, selected]);
 
   async function submit() {
     setBusy(true);
@@ -73,7 +116,7 @@ function CheckInDrawer({
         document: null,
         phone: null,
         rate_plan_id: rateId,
-        expected_hours: selected?.kind === "hourly" ? hours : null,
+        expected_hours: selected?.kind === "hourly" ? 1 : null,
       });
       onChanged();
       onClose();
@@ -85,53 +128,131 @@ function CheckInDrawer({
   }
 
   return (
-    <Dialog open title={`Habitación ${item.room.number}`} subtitle="Check-in walk-in" onClose={onClose}>
-      {item.display_status === "dirty" || item.display_status === "blocked" ? (
-        <div className={`mb-4 rounded-xl px-4 py-3 text-sm ${item.display_status === "dirty" ? "bg-[var(--dirty-soft)]" : "bg-[var(--danger-soft)]"}`}>
-          Esta habitación está {item.display_status === "dirty" ? "sucia" : "bloqueada"}. Podés marcarla libre desde acá.
-          <Button
-            className="mt-3 w-full"
-            variant="secondary"
-            onClick={async () => {
-              await api.setRoomStatus(item.room.id, "available");
-              onChanged();
-            }}
-          >
-            Marcar como libre
-          </Button>
+    <Dialog open title={`Habitación ${item.room.number}`} subtitle="Ingreso sin reserva" onClose={onClose}>
+      <div className="space-y-5">
+        <div className="flex flex-wrap items-center gap-2 text-sm text-[var(--muted)]">
+          <span className="rounded-lg border border-[var(--line)] bg-[var(--bg)] px-2.5 py-1 font-medium text-[var(--ink)]">
+            {item.room.room_type}
+          </span>
+          <span>Piso {item.room.floor}</span>
+          {isJacuzzi ? (
+            <span className="inline-flex items-center gap-1 text-[var(--gold)]">
+              <Bath size={14} /> Con jacuzzi
+            </span>
+          ) : null}
         </div>
-      ) : null}
-      <div className="space-y-4">
-        <Field label="Tarifa">
-          <Select value={rateId} onChange={(e) => setRateId(Number(e.target.value))}>
-            {activeRates.map((rate) => (
-              <option key={rate.id} value={rate.id}>
-                {rate.name} · {rateKindLabel(rate.kind)} · {formatMoney(rate.base_amount_cents, settings.currency_symbol)}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        {selected?.kind === "hourly" ? (
-          <Field label="Horas esperadas">
-            <Input type="number" min={1} value={hours} onChange={(e) => setHours(Number(e.target.value))} />
-          </Field>
+
+        {dirty || blocked ? (
+          <div className={cn("rounded-lg px-4 py-3 text-sm", dirty ? "bg-[var(--dirty-soft)]" : "bg-[var(--danger-soft)]")}>
+            <p className="font-semibold">{dirty ? "Pendiente de aseo" : "Fuera de servicio"}</p>
+            <p className="mt-1 text-[var(--ink)]">
+              {dirty
+                ? "Marcala como libre cuando esté limpia. Recién ahí se puede ingresar."
+                : "Esta habitación está bloqueada. Desbloqueala para volver a usarla."}
+            </p>
+            <Button
+              className="mt-3 w-full"
+              variant="secondary"
+              onClick={async () => {
+                await api.setRoomStatus(item.room.id, "available");
+                onChanged();
+              }}
+            >
+              {dirty ? "Marcar como libre" : "Desbloquear"}
+            </Button>
+          </div>
         ) : null}
+
+        <div>
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">Elegí la tarifa</p>
+          <div className="grid gap-2">
+            {activeRates.map((rate) => {
+              const active = rate.id === rateId;
+              const locked = isDormidaKind(rate.kind) && !dormidaWindowOpen(now, rate.night_cutoff_hour);
+              const midnight = dormidaStartsAtMidnight(now, rate.night_cutoff_hour);
+              return (
+                <button
+                  key={rate.id}
+                  type="button"
+                  disabled={locked}
+                  aria-disabled={locked}
+                  onClick={() => { if (!locked) setRateId(rate.id); }}
+                  className={cn(
+                    "flex min-h-11 items-center justify-between gap-3 rounded-lg border px-3.5 py-3 text-left",
+                    locked && "cursor-not-allowed opacity-50",
+                    !locked && active
+                      ? "border-[var(--accent)] bg-[var(--accent-soft)]"
+                      : "border-[var(--line)] bg-[var(--surface)]",
+                    !locked && !active && "hover:bg-[var(--surface-2)]",
+                  )}
+                >
+                  <span>
+                    <span className="block text-sm font-semibold text-[var(--ink)]">{rate.name}</span>
+                    <span className="mt-0.5 block text-xs text-[var(--muted)]">
+                      {rate.kind === "hourly"
+                        ? "Después, adicional de 30 min o otra hora"
+                        : locked
+                          ? midnight
+                            ? "Disponible de 00:00 a 10:00"
+                            : "Disponible de 22:00 a 10:00"
+                          : midnight
+                            ? "00:00 a 10:00"
+                            : "22:00 a 10:00"}
+                    </span>
+                  </span>
+                  <span className="font-mono text-sm font-semibold tabular-nums text-[var(--ink)]">
+                    {formatMoney(rate.base_amount_cents, settings.currency_symbol)}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {selected ? (
+          <div className="rounded-lg border border-[var(--line)] bg-[var(--bg)] px-4 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">Resumen</p>
+            <div className="mt-2 flex items-start justify-between gap-3">
+              <span className="inline-flex items-center gap-1.5 text-sm text-[var(--muted)]">
+                <Clock3 size={15} />
+                {checkoutAt
+                  ? selected.kind === "hourly"
+                    ? `Primera hora hasta ${formatClock(checkoutAt)}`
+                    : `Salida a las ${formatClock(checkoutAt)}`
+                  : rateKindLabel(selected.kind)}
+              </span>
+              <span className="font-mono text-lg font-semibold tabular-nums">
+                {formatMoney(selected.base_amount_cents, settings.currency_symbol)}
+              </span>
+            </div>
+            <p className="mt-2 text-xs text-[var(--muted)]">
+              {selected.kind === "hourly"
+                ? "Si se pasan 5 minutos de la hora, se cobra adicional de 30 min. Si se pasan 5 minutos de esos 30, se cobra otra hora. Es automático."
+                : dormidaMidnight
+                  ? "Viernes, sábado y feriados: de 00:00 a 10:00. Si el ingreso es de madrugada, la salida es a las 10:00 de hoy."
+                  : "Domingo a jueves: de 22:00 a 10:00. Si el ingreso es de madrugada, la salida es a las 10:00 de hoy."}
+            </p>
+          </div>
+        ) : null}
+
         {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
-        <Button className="w-full" disabled={busy || item.display_status === "blocked" || item.display_status === "dirty"} onClick={submit}>
-          Confirmar check-in
+        <Button className="w-full" size="lg" disabled={busy || !canCheckIn} onClick={submit}>
+          <LogIn size={18} />
+          {busy ? "Ingresando…" : `Ingresar a ${item.room.number}`}
         </Button>
         {item.display_status === "available" ? (
-          <Button
-            className="w-full"
-            variant="ghost"
+          <button
+            type="button"
+            className="flex min-h-11 w-full items-center justify-center gap-2 text-sm text-[var(--muted)] hover:text-[var(--danger)]"
             onClick={async () => {
               await api.setRoomStatus(item.room.id, "blocked");
               onChanged();
               onClose();
             }}
           >
+            <Ban size={15} />
             Bloquear habitación
-          </Button>
+          </button>
         ) : null}
       </div>
     </Dialog>
@@ -189,6 +310,7 @@ function StayDrawer({
   onChanged: () => void;
 }) {
   const stay = item.stay!;
+  const now = useNow();
   const [bill, setBill] = useState(item.estimated_total_cents);
   const [lines, setLines] = useState<{ description: string; amount_cents: number }[]>([]);
   const [charges, setCharges] = useState<Charge[]>([]);
@@ -271,7 +393,7 @@ function StayDrawer({
               {formatMoney(total, settings.currency_symbol)}
             </p>
             {overnight ? (
-              <p className="mt-2 text-sm text-[var(--accent)]">Se está aplicando tarifa de pernocte/noche</p>
+              <p className="mt-2 text-sm text-[var(--accent)]">Se está aplicando tarifa de dormida</p>
             ) : null}
           </div>
           <ul className="space-y-2 text-sm">
@@ -284,27 +406,32 @@ function StayDrawer({
               </li>
             ))}
           </ul>
-          {!stay.converted_to_overnight ? (
-            <Button
-              variant="secondary"
-              className="w-full"
-              onClick={async () => {
-                setMutationBusy(true);
-                setError(null);
-                try {
-                  await api.convertToOvernight(stay.id);
-                  await refresh();
-                  onChanged();
-                } catch (e) {
-                  setError(String(e));
-                } finally {
-                  setMutationBusy(false);
-                }
-              }}
-              disabled={mutationBusy || busy}
-            >
-              Convertir a pernocte
-            </Button>
+          {!stay.converted_to_overnight && stay.rate_kind === "hourly" ? (
+            <div className="space-y-2">
+              <Button
+                variant="secondary"
+                className="w-full"
+                onClick={async () => {
+                  setMutationBusy(true);
+                  setError(null);
+                  try {
+                    await api.convertToOvernight(stay.id);
+                    await refresh();
+                    onChanged();
+                  } catch (e) {
+                    setError(String(e));
+                  } finally {
+                    setMutationBusy(false);
+                  }
+                }}
+                disabled={mutationBusy || busy || !dormidaWindowOpen(now)}
+              >
+                Convertir a dormida
+              </Button>
+              {!dormidaWindowOpen(now) ? (
+                <p className="text-xs text-[var(--muted)]">{dormidaUnavailableMessage(now)}</p>
+              ) : null}
+            </div>
           ) : null}
           <RoomShop
             stayId={stay.id}

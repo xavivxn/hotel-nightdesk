@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { LoveNestLogo } from "@/components/layout/BrandLogo";
 import { Button } from "@/components/ui/Button";
 import { Input, PasswordInput } from "@/components/ui/Field";
 import { api } from "@/lib/api";
@@ -15,7 +16,7 @@ export function LoginPage({ setup, notice, onLogin }: { setup: boolean; notice: 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [needsSetup, setNeedsSetup] = useState(setup);
-  return <div className="grid min-h-screen place-items-center p-6"><form className="card w-full max-w-md space-y-4 rounded-lg p-8" onSubmit={async e => {
+  return <div className="grid h-full min-h-0 place-items-center overflow-auto p-6"><form className="card w-full max-w-md space-y-4 rounded-lg p-8" onSubmit={async e => {
     e.preventDefault(); setError(null); setBusy(true);
     try {
       if (needsSetup) {
@@ -26,6 +27,7 @@ export function LoginPage({ setup, notice, onLogin }: { setup: boolean; notice: 
       onLogin(await api.login({ username, password }));
     } catch (e) { setError(String(e)); } finally { setPassword(""); setConfirm(""); setLegacyPin(""); setBusy(false); }
   }}>
+    <LoveNestLogo className="login-logo" />
     <p className="page-kicker">Acceso local</p>
     <h1 className="page-title">{needsSetup ? "Crear administrador" : "Iniciar sesión"}</h1>
     <p className="text-sm text-[var(--muted)]">{needsSetup ? "Configurá la primera cuenta de este equipo. Después podrás crear usuarios de recepción." : "Ingresá con tu cuenta individual. Funciona sin internet."}</p>

@@ -11,14 +11,14 @@ type ThemeContextValue = {
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 function applyTheme(theme: Theme) {
+  document.documentElement.classList.remove("love-nest");
   document.documentElement.classList.toggle("dark", theme === "dark");
   document.documentElement.style.colorScheme = theme;
 }
 
-export function ThemeProvider({ children, initial = "dark" }: { children: ReactNode; initial?: Theme }) {
+export function ThemeProvider({ children, initial = "light" }: { children: ReactNode; initial?: Theme }) {
   const [theme, setThemeState] = useState<Theme>(() => {
-    const stored = localStorage.getItem("nightdesk.theme");
-    if (stored === "light" || stored === "dark") return stored;
+    applyTheme(initial);
     return initial;
   });
 

@@ -20,10 +20,7 @@ pub fn build_receipt(
     let mut out = Vec::new();
     out.extend_from_slice(&[0x1B, 0x40]); // init
     select_code_page(&mut out);
-    out.extend_from_slice(&[0x1B, 0x61, 1]); // center
-    set_font(&mut out, 2, 2);
-    set_emphasis(&mut out, true);
-    writeln_ticket(&mut out, &settings.business_name);
+    write_brand_header(&mut out);
     set_font(&mut out, 1, 1);
     set_emphasis(&mut out, true);
     if !settings.address.is_empty() {
@@ -121,10 +118,7 @@ pub fn build_test_receipt(settings: &AppSettings) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(&[0x1B, 0x40]);
     select_code_page(&mut out);
-    out.extend_from_slice(&[0x1B, 0x61, 1]);
-    set_font(&mut out, 2, 2);
-    set_emphasis(&mut out, true);
-    writeln_ticket(&mut out, &settings.business_name);
+    write_brand_header(&mut out);
     set_font(&mut out, 1, 1);
     set_emphasis(&mut out, true);
     writeln_ascii(&mut out, "Prueba de impresion");
@@ -204,6 +198,19 @@ fn archive_ticket(bytes: &[u8], app_data: &Path, label: &str) -> AppResult<()> {
 /// Columns that fit once glyphs are larger than Font A. 80 mm holds 32 at 18 dots.
 fn line_width(paper_width: i64) -> usize {
     if paper_width <= 58 { 21 } else { 32 }
+}
+
+/// Ticket brand matching the logo wordmark. ESC/POS cannot load that typeface.
+fn write_brand_header(out: &mut Vec<u8>) {
+    out.extend_from_slice(&[0x1B, 0x61, 1]); // center
+    set_font(out, 2, 2);
+    set_emphasis(out, true);
+    writeln_ticket(out, "LOVE NESTT");
+    set_font(out, 1, 1);
+    set_emphasis(out, true);
+    writeln_ticket(out, "- M O T E L -");
+    set_emphasis(out, false);
+    writeln_ascii(out, "");
 }
 
 /// GS ! n. Width stays 1 for the body so lines do not wrap; height 2 makes them easier to read.
@@ -320,10 +327,11 @@ mod tests {
             let text = String::from_utf8_lossy(&bytes);
             let rule = "-".repeat(if width == 58 { 21 } else { 32 });
             assert!(text.contains(&rule));
+            assert!(bytes.windows(b"LOVE NESTT".len()).any(|part| part == b"LOVE NESTT"));
+            assert!(bytes.windows(b"M O T E L".len()).any(|part| part == b"M O T E L"));
             let name = encode_ticket("Café\u{1b}@");
             assert_eq!(name, b"Caf\x82?@");
             assert!(!name.contains(&0x1B));
-            assert!(bytes.windows(name.len()).any(|part| part == name));
             assert!(bytes.windows(4).any(|part| part == [0xA0, 0x82, 0xA1, 0xA2]));
             assert!(text.contains("-5.000 Gs."));
         }

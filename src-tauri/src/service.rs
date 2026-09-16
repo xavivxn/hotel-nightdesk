@@ -413,6 +413,18 @@ pub fn save_rate_plan(
     }
 }
 
+fn ensure_dormida_window(cutoff_hour: i64) -> AppResult<()> {
+    let now = chrono::Local::now();
+    if billing::dormida_window_open(now, cutoff_hour) {
+        Ok(())
+    } else {
+        Err(AppError::msg(billing::dormida_unavailable_message(
+            now,
+            cutoff_hour,
+        )))
+    }
+}
+
 pub fn check_in_on(conn: &mut Connection, payload: CheckInPayload) -> AppResult<Stay> {
     accept_reserved_fields(&payload.operation_id, &payload.expected_version)?;
     let tx = conn.transaction()?;
@@ -455,6 +467,9 @@ fn check_in_in_tx(conn: &Connection, payload: CheckInPayload) -> AppResult<i64> 
     let rate = db::get_rate_plan(conn, payload.rate_plan_id)?;
     if !rate.active {
         return Err(AppError::msg("La tarifa no está activa"));
+    }
+    if matches!(rate.kind, RateKind::Night | RateKind::Overnight) {
+        ensure_dormida_window(rate.night_cutoff_hour)?;
     }
 
     let (guest_id, reservation_id) = if let Some(res_id) = payload.reservation_id {
@@ -546,10 +561,16 @@ pub fn convert_to_overnight(conn: &Connection, stay_id: i64) -> AppResult<Stay> 
     }
     let overnight = db::find_plan_by_kind(conn, RateKind::Overnight)?
         .or(db::find_plan_by_kind(conn, RateKind::Night)?)
-        .ok_or_else(|| AppError::msg("No hay una tarifa de pernocte o noche activa"))?;
+        .ok_or_else(|| AppError::msg("No hay una tarifa de dormida activa"))?;
+    ensure_dormida_window(overnight.night_cutoff_hour)?;
+    let expected_checkout = db::parse_dt(&stay.check_in_at).ok().map(|check_in| {
+        billing::expected_checkout_night(check_in, 1, overnight.night_cutoff_hour)
+            .with_timezone(&chrono::Utc)
+            .to_rfc3339()
+    });
     conn.execute(
-        "UPDATE stays SET converted_to_overnight = 1, overnight_rate_plan_id = ?1 WHERE id = ?2",
-        params![overnight.id, stay_id],
+        "UPDATE stays SET converted_to_overnight = 1, overnight_rate_plan_id = ?1, expected_checkout_at = COALESCE(?2, expected_checkout_at) WHERE id = ?3",
+        params![overnight.id, expected_checkout, stay_id],
     )?;
     db::get_stay(conn, stay_id)
 }

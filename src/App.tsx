@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { AppShell } from "@/components/layout/AppShell";
+import { TitleBar } from "@/components/layout/TitleBar";
 import { BoardPage } from "@/pages/BoardPage";
 import { HistoryPage } from "@/pages/HistoryPage";
 import { ReservationsPage } from "@/pages/ReservationsPage";
@@ -19,9 +20,9 @@ const fallbackSettings: AppSettings = {
   business_name: "MotelApp",
   address: "",
   phone: "",
-  tax_percent: 10,
+  tax_percent: 0,
   currency_symbol: "Gs.",
-  theme: "dark",
+  theme: "light",
   receipt_footer: "Gracias por su visita",
   printer_enabled: false,
   printer_path: "",
@@ -49,6 +50,7 @@ export default function App() {
     catch(e) { setError(String(e)); }
   }
   useEffect(() => { document.getElementById("boot-splash")?.remove(); void initialize(); }, []);
+  useEffect(() => { setTheme("light"); }, [session, setTheme]);
   useEffect(() => {
     function expire() { api.clearSession(); setSession(null); setLoaded(false); setNotice("Tu sesión terminó. Volvé a ingresar."); }
     window.addEventListener("nightdesk-session-expired", expire);
@@ -65,8 +67,8 @@ export default function App() {
     }
     void api.getSettings().then(current => {
       if (cancelled) return;
-      setSettings(current);
-      if (current.theme === "light" || current.theme === "dark") setTheme(current.theme);
+      setSettings({ ...current, theme: "light" });
+      setTheme("light");
       setLoaded(true);
     }).catch(e => { if (!cancelled) setError(String(e)); });
     const timer = window.setInterval(refresh, 15000);
@@ -77,13 +79,15 @@ export default function App() {
 
   async function logout() {
     try { await api.logout(); } catch { /* The local session is always cleared. */ }
-    setSession(null); setLoaded(false); setError(null); setNotice("Sesión cerrada.");
+    setSession(null); setLoaded(false); setError(null); setNotice("Sesión cerrada."); setTheme("light");
   }
-  if (setup === null) return <div className="p-8"><p role="alert">{error || "Preparando acceso…"}</p>{error && <Button onClick={initialize}>Reintentar</Button>}</div>;
-  if (!session) return <LoginPage setup={setup} notice={notice} onLogin={s => { setSession(s); setSetup(false); setError(null); setNotice(null); }} />;
-  if (!loaded) return <div className="p-8"><p role="alert">{error || "Cargando tu espacio…"}</p><Button onClick={logout}>Volver al acceso</Button></div>;
+  let body: ReactNode;
+  if (setup === null) body = <div className="p-8"><p role="alert">{error || "Preparando acceso…"}</p>{error && <Button onClick={initialize}>Reintentar</Button>}</div>;
+  else if (!session) body = <LoginPage setup={setup} notice={notice} onLogin={s => { setSession(s); setSetup(false); setError(null); setNotice(null); }} />;
+  else if (!loaded) body = <div className="p-8"><p role="alert">{error || "Cargando tu espacio…"}</p><Button onClick={logout}>Volver al acceso</Button></div>;
+  else {
   const admin = session.user.role === "admin";
-  return <RoleContext.Provider value={session.user.role}><BrowserRouter>
+  body = <RoleContext.Provider value={session.user.role}><BrowserRouter>
     {error && <div role="alert" className="bg-[var(--danger-soft)] p-3 text-[var(--danger)]">No se pudo verificar la conexión: {error}</div>}
     <Routes><Route element={<AppShell user={session.user} onLogout={logout} />}>
       <Route path="/" element={<BoardPage settings={settings} />} />
@@ -96,4 +100,11 @@ export default function App() {
       <Route path="*" element={<Navigate to="/" replace />} />
     </Route></Routes>
   </BrowserRouter></RoleContext.Provider>;
+  }
+  return (
+    <div className="flex h-screen flex-col overflow-hidden">
+      <TitleBar />
+      <div className="min-h-0 flex-1 overflow-hidden">{body}</div>
+    </div>
+  );
 }

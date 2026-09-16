@@ -37,9 +37,9 @@ export function RoomsPage({ settings }: { settings: AppSettings }) {
             kind: "hourly",
             base_amount_cents: 0,
             extra_hour_cents: 0,
-            included_hours: 3,
-            grace_minutes: 10,
-            night_cutoff_hour: 12,
+            included_hours: 1,
+            grace_minutes: 5,
+            night_cutoff_hour: 10,
             active: true,
           })}>
             Nueva tarifa
@@ -128,7 +128,7 @@ export function RoomsPage({ settings }: { settings: AppSettings }) {
               <Select value={rateForm.kind} onChange={(e) => setRateForm({ ...rateForm, kind: e.target.value as RateKind })}>
                 <option value="hourly">Por hora</option>
                 <option value="night">Por noche</option>
-                <option value="overnight">Pernocte</option>
+                <option value="overnight">Dormida</option>
               </Select>
             </Field>
             <Field label="Monto base (Gs.)">
@@ -138,7 +138,7 @@ export function RoomsPage({ settings }: { settings: AppSettings }) {
                 onBlur={(e) => setRateForm({ ...rateForm, base_amount_cents: parseGuaranies(e.target.value) })}
               />
             </Field>
-            <Field label="Hora extra (Gs.)">
+            <Field label="Adicional 30 min (Gs.)">
               <Input
                 inputMode="numeric"
                 defaultValue={guaraniesToInput(rateForm.extra_hour_cents)}

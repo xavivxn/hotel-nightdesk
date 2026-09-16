@@ -34,7 +34,7 @@ export function Drawer({
           </div>
           <button
             onClick={onClose}
-            className="rounded-full p-2 text-[var(--muted)] hover:bg-[var(--surface-2)]"
+            className="cursor-pointer rounded-full p-2 text-[var(--muted)] hover:bg-[var(--surface-2)]"
             aria-label="Cerrar panel"
           >
             <X size={18} />

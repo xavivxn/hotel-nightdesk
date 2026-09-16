@@ -56,6 +56,22 @@ const MIGRATIONS: &[Migration] = &[
         id: "009_ticket_header_name",
         sql: include_str!("../migrations/009_ticket_header_name.sql"),
     },
+    Migration {
+        id: "010_jacuzzi_rooms",
+        sql: include_str!("../migrations/010_jacuzzi_rooms.sql"),
+    },
+    Migration {
+        id: "011_jacuzzi_rooms_1_to_4",
+        sql: include_str!("../migrations/011_jacuzzi_rooms_1_to_4.sql"),
+    },
+    Migration {
+        id: "012_love_nest_rates",
+        sql: include_str!("../migrations/012_love_nest_rates.sql"),
+    },
+    Migration {
+        id: "013_no_iva",
+        sql: include_str!("../migrations/013_no_iva.sql"),
+    },
 ];
 
 pub fn open(db_path: &Path) -> AppResult<Connection> {
@@ -201,7 +217,7 @@ fn seed_if_empty(conn: &Connection) -> AppResult<()> {
     for n in 1..=23 {
         let number = format!("{n:02}");
         let floor = ((n - 1) / 9) + 1;
-        let room_type = if n > 19 { "Jacuzzi" } else { "Normal" };
+        let room_type = if n <= 4 { "Jacuzzi" } else { "Normal" };
         conn.execute(
             "INSERT INTO rooms (number, room_type, floor, status, created_at) VALUES (?1, ?2, ?3, 'available', ?4)",
             params![number, room_type, floor, now],
@@ -211,26 +227,21 @@ fn seed_if_empty(conn: &Connection) -> AppResult<()> {
     conn.execute(
         "INSERT INTO rate_plans (name, kind, base_amount_cents, extra_hour_cents, included_hours, grace_minutes, night_cutoff_hour, active)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
-        params!["3 horas", "hourly", 80_000i64, 20_000i64, 3i64, 10i64, 12i64],
+        params!["1 hora", "hourly", 45_000i64, 15_000i64, 1i64, 5i64, 10i64],
     )?;
     conn.execute(
         "INSERT INTO rate_plans (name, kind, base_amount_cents, extra_hour_cents, included_hours, grace_minutes, night_cutoff_hour, active)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
-        params!["Noche", "night", 150_000i64, 25_000i64, 24i64, 15i64, 12i64],
-    )?;
-    conn.execute(
-        "INSERT INTO rate_plans (name, kind, base_amount_cents, extra_hour_cents, included_hours, grace_minutes, night_cutoff_hour, active)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
-        params!["Pernocte", "overnight", 120_000i64, 20_000i64, 12i64, 15i64, 12i64],
+        params!["Dormida", "overnight", 120_000i64, 15_000i64, 12i64, 5i64, 10i64],
     )?;
 
     let defaults = AppSettings::default();
     upsert_setting(conn, "business_name", &defaults.business_name)?;
     upsert_setting(conn, "address", &defaults.address)?;
     upsert_setting(conn, "phone", "")?;
-    upsert_setting(conn, "tax_percent", "10")?;
+    upsert_setting(conn, "tax_percent", "0")?;
     upsert_setting(conn, "currency_symbol", "Gs.")?;
-    upsert_setting(conn, "theme", "dark")?;
+    upsert_setting(conn, "theme", "light")?;
     upsert_setting(conn, "receipt_footer", &defaults.receipt_footer)?;
     upsert_setting(conn, "printer_enabled", "false")?;
     upsert_setting(conn, "printer_path", "")?;
@@ -403,11 +414,11 @@ pub fn load_settings(conn: &Connection) -> AppResult<AppSettings> {
     settings.business_name = get_setting(conn, "business_name", &settings.business_name)?;
     settings.address = get_setting(conn, "address", &settings.address)?;
     settings.phone = get_setting(conn, "phone", "")?;
-    settings.tax_percent = get_setting(conn, "tax_percent", "10")?
+    settings.tax_percent = get_setting(conn, "tax_percent", "0")?
         .parse()
         .unwrap_or(10.0);
     settings.currency_symbol = get_setting(conn, "currency_symbol", "Gs.")?;
-    settings.theme = get_setting(conn, "theme", "dark")?;
+    settings.theme = get_setting(conn, "theme", "light")?;
     settings.receipt_footer = get_setting(conn, "receipt_footer", &settings.receipt_footer)?;
     settings.printer_enabled = get_setting(conn, "printer_enabled", "false")? == "true";
     settings.printer_path = get_setting(conn, "printer_path", "")?;
@@ -700,6 +711,40 @@ mod room_scope_tests {
         assert_eq!(active, 23);
         assert_eq!(normal, 19);
         assert_eq!(jacuzzi, 4);
+
+        let jacuzzi_numbers: Vec<String> = conn
+            .prepare("SELECT number FROM rooms WHERE room_type = 'Jacuzzi' ORDER BY CAST(number AS INTEGER)")?
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        assert_eq!(jacuzzi_numbers, ["01", "02", "03", "04"]);
+        Ok(())
+    }
+
+    #[test]
+    fn jacuzzi_migration_reclassifies_legacy_suite_labels() -> AppResult<()> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(MIGRATION_001)?;
+        apply_migration(&conn, "001_init")?;
+        for n in 1..=23 {
+            let room_type = if n == 9 || n == 18 { "Suite" } else { "Normal" };
+            conn.execute(
+                "INSERT INTO rooms (number, room_type, floor, status, created_at) VALUES (?1, ?2, 1, 'available', ?3)",
+                params![format!("{n:02}"), room_type, now_rfc3339()],
+            )?;
+        }
+        conn.execute_batch(include_str!("../migrations/010_jacuzzi_rooms.sql"))?;
+        conn.execute_batch(include_str!("../migrations/011_jacuzzi_rooms_1_to_4.sql"))?;
+        let jacuzzi_numbers: Vec<String> = conn
+            .prepare("SELECT number FROM rooms WHERE room_type = 'Jacuzzi' ORDER BY CAST(number AS INTEGER)")?
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        let suite: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM rooms WHERE room_type = 'Suite'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(jacuzzi_numbers, ["01", "02", "03", "04"]);
+        assert_eq!(suite, 0);
         Ok(())
     }
 
