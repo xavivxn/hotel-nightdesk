@@ -1,12 +1,14 @@
 # I03 — Viabilidad de conectividad y destino de respaldos
 
+**Nota 17/09/2026:** WireGuard quedó descartado. La arquitectura vigente es [arquitectura-offline-supabase.md](arquitectura-offline-supabase.md). D08 (handshake VPN) ya no aplica; D09 (destino S3/VPS) pasa a Supabase Storage. El dimensionamiento de snapshot §3 y la custodia de clave §5 se conservan y los usa I08. El cierre formal de filas V05 / §2 / §4 y de D08–D09 en [configuración operativa](configuracion-operativa.md) es [MOT-38 · I03.1](https://naserfer.atlassian.net/browse/MOT-38).
+
 **Entregable:** [MOT-14 · I03](https://naserfer.atlassian.net/browse/MOT-14), con [MOT-38 · I03.1](https://naserfer.atlassian.net/browse/MOT-38) y [MOT-39 · I03.2](https://naserfer.atlassian.net/browse/MOT-39).  
 **Versión:** 1.0 · 16 de septiembre de 2026.  
 **Responsable técnico de este registro:** Iván Ortiz.  
 **Datos de red y destino operativo:** Naser facilita; no constan en el repositorio ni en Jira.  
-**Estado:** protocolo y dimensionamiento listos; handshake WireGuard **no ejecutado** (impedimento D08). No se contrató alojamiento ni intermediario. Este documento no contiene secretos.
+**Estado:** dimensionamiento de snapshot vigente. Handshake WireGuard **no se ejecutará**. Este documento no contiene secretos.
 
-Complementa [N01 — Configuración operativa](configuracion-operativa.md) (faltantes D08–D10) y [arquitectura](arquitectura-offline-vpn-backups.md) §7–§8. No implementa VPN, servicio Windows ni subida cifrada (I07/I08).
+Complementa [N01 — Configuración operativa](configuracion-operativa.md) y [arquitectura Supabase](arquitectura-offline-supabase.md) §7–§8. No implementa sync ni subida cifrada (I07/I08).
 
 ## 1. Decisiones
 

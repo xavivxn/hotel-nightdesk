@@ -1,9 +1,11 @@
 # Operación local, acceso remoto y respaldos
 
-Fecha: 10 de septiembre de 2026.
-Estado: requisitos y arquitectura acordados; implementación pendiente.
+**Sustituido el 17/09/2026.** Este documento describe la arquitectura WireGuard + API HTTP privada, descartada por inviabilidad operativa (D08). La especificación vigente es [arquitectura-offline-supabase.md](arquitectura-offline-supabase.md). Conservar este archivo como historial; no implementarlo.
 
-Este documento reemplaza la restricción anterior de ausencia total de red. La operación del motel sigue sin depender de internet. Internet se utiliza para respaldos externos y para consultar o modificar datos a distancia. No describe funciones ya terminadas ni modifica el presupuesto comercial.
+Fecha: 10 de septiembre de 2026.
+Estado: **sustituido**. La implementación pendiente corresponde a la arquitectura Supabase.
+
+Este documento reemplazaba la restricción anterior de ausencia total de red. Queda como registro de lo acordado el 10/09/2026 y de lo que se descartó el 17/09/2026.
 
 ## 1. Alcance
 

@@ -6,15 +6,15 @@ Pensado para el dueño o el personal de recepción. Los datos quedan en el equip
 
 ## Evolución acordada (pendiente de implementación)
 
-La operación de recepción seguirá siendo local. Se incorporarán usuarios con roles admin/recepción, administración remota con escritura por API privada y VPN, y respaldos diarios cifrados a un servidor externo.
+La operación de recepción sigue siendo local sobre SQLite. El admin remoto consulta y edita catálogo vía Supabase; recepción sincroniza con cola offline. Respaldo diario cifrado a Supabase Storage.
 
-Ver [Arquitectura, requisitos y criterios de aceptación](docs/arquitectura-offline-vpn-backups.md). Esta especificación reemplaza la restricción anterior de ausencia total de red; no implica que las funciones ya estén implementadas.
+Ver [Arquitectura, requisitos y criterios de aceptación](docs/arquitectura-offline-supabase.md). El documento [VPN/API privada](docs/arquitectura-offline-vpn-backups.md) quedó sustituido el 17/09/2026.
 
 Configuración de trabajo documentada en [N01 — Configuración operativa acordada](docs/configuracion-operativa.md): habitaciones, tarifas y catálogo inicial, usuarios, equipos, impresión, respaldos, capacidad del mes y datos pendientes para instalar.
 
 Recorrido de recepción documentado en [N02 — Control de cuentas](docs/recepcion-cuentas.md): cierre local, cargos, limpieza, historial y reimpresión.
 
-Viabilidad de VPN y destino de respaldos documentada en [I03 — Conectividad y respaldos](docs/viabilidad-conectividad-respaldos.md): protocolo WireGuard, medición de snapshot SQLite, retención 7/30/12 y costos a cotizar. La prueba entre ubicaciones queda pendiente de datos de red (D08).
+Medición de snapshot y retención 7/30/12 en [I03 — Conectividad y respaldos](docs/viabilidad-conectividad-respaldos.md) §3. WireGuard no se implementa; D08/D09 se cierran en I03.1. Contrato: [contrato-ipc-api.md](docs/contrato-ipc-api.md).
 
 ## Qué incluye el MVP
 

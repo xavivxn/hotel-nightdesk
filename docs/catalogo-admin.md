@@ -24,7 +24,7 @@ La UI usa los comandos de dominio `list_products(active_only)`, `save_product(pa
 }
 ```
 
-Las escrituras remotas deben viajar autenticadas por la API privada sobre WireGuard. La aplicación administradora no accede al archivo SQLite de recepción. Si WireGuard o la recepción están desconectados, la operación remota queda pendiente/rechazada y la recepción conserva su funcionamiento local. La aplicación actual deja preparado este contrato; la autenticación de usuarios y el guard de rol se conectan con N04/I04, y el transporte HTTP/VPN con I02/I06.
+Las escrituras remotas van a Supabase (`catalog_upsert_*` con `expected_version`; ver [arquitectura](arquitectura-offline-supabase.md) y [contrato](contrato-ipc-api.md)). La aplicación administradora no accede al archivo SQLite de recepción. Sin conexión con administración la edición de catálogo se rechaza y recepción sigue operando. N11 dejó el menú local; I11/N07 cierran el write-through.
 
 ## Revisión de uso
 
@@ -33,4 +33,4 @@ Las escrituras remotas deben viajar autenticadas por la API privada sobre WireGu
 3. Editar nombre, categoría y precio; verificar que el cambio aparece al recargar.
 4. Desactivar el producto; comprobar que desaparece de **Tienda** en una cuenta abierta.
 5. Reactivarlo y agregarlo a una cuenta; cerrar la cuenta y confirmar que el historial conserva descripción y precio aunque el catálogo se vuelva a editar.
-6. Repetir la lectura/escritura desde administración con WireGuard conectado y comprobar que sin conectividad sólo falla la operación remota, no el flujo local.
+6. Repetir la lectura/escritura desde el modo Administración remota (Supabase) y comprobar que sin conectividad sólo falla la edición de catálogo, no el flujo local de recepción.
