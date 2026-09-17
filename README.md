@@ -14,6 +14,8 @@ Configuración de trabajo documentada en [N01 — Configuración operativa acord
 
 Recorrido de recepción documentado en [N02 — Control de cuentas](docs/recepcion-cuentas.md): cierre local, cargos, limpieza, historial y reimpresión.
 
+Viabilidad de VPN y destino de respaldos documentada en [I03 — Conectividad y respaldos](docs/viabilidad-conectividad-respaldos.md): protocolo WireGuard, medición de snapshot SQLite, retención 7/30/12 y costos a cotizar. La prueba entre ubicaciones queda pendiente de datos de red (D08).
+
 ## Qué incluye el MVP
 
 - Tablero visual de habitaciones (libre, ocupada, sucia, bloqueada, reservada)

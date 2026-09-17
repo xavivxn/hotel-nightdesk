@@ -95,7 +95,7 @@ El detalle de permisos es la propuesta documentada para I04 y deberá quedar apl
 | PC administración | Windows; consulta y escritura autorizada por API/VPN. | Nombre del equipo, Windows, ubicación de conexión y usuario operativo. |
 | SQLite | Identificador actual `com.nightdesk.hotel`; archivo `nightdesk.db` en el directorio de datos de la aplicación. | Ruta efectiva de instalación y cuenta propietaria, sin carpeta compartida o sincronizada como base activa. |
 | Impresora | Solo recepción. Código ESC/POS para 58/80 mm. Naser tiene la impresora para probar. | Marca, modelo, driver, conexión, nombre exacto de cola o puerto, ancho físico y disponibilidad para N03. |
-| Red/VPN | WireGuard + API privada autenticada. | Router, proveedor, CGNAT/IPv6, endpoint, interfaces, firewall y confianza del certificado; prueba de I03/I07. |
+| Red/VPN | WireGuard + API privada autenticada. | I03 documentó el protocolo y dejó D08 como impedimento hasta el relevamiento (ver [viabilidad](viabilidad-conectividad-respaldos.md)). I07 implementa tras la prueba. |
 | Servicio | Objetivo: iniciar con Windows y seguir disponible con la ventana cerrada. | Implementación y empaquetado de I07; integración del instalador en N09. |
 
 **Ajustes actuales de demostración:** impresora desactivada; nombre/ruta vacíos; papel 80 mm; impresión al cierre activada como preferencia; tema oscuro; pie «Gracias por su visita». `Nightdesk Inn` y `Av. Principal 100` son valores de ejemplo, no datos del establecimiento. El ticket actual elimina tildes para producir ASCII; N03/N05 deben verificar legibilidad, márgenes y corte físicos.
@@ -108,14 +108,14 @@ El detalle de permisos es la propuesta documentada para I04 y deberá quedar apl
 |---|---|
 | Frecuencia | Diaria, acordada. |
 | Consistencia y cifrado | Snapshot consistente, cifrado antes de subir, cola persistente y reintentos. |
-| Destino | Servidor externo acordado; proveedor, dirección, protocolo concreto y capacidad todavía no constan. |
-| Responsable operativo | Nombre y contacto de la persona que supervisa copias y restauraciones: no informados. Naser registra el dato; I03/I08 realizan la parte técnica. |
-| Horario | 04:00 aparece como propuesta técnica previa; no confirmado para instalación. |
-| Retención | 7 locales, 30 diarias y 12 mensuales remotas: propuesta previa pendiente de capacidad y definición operativa. |
-| Custodia de clave | Persona, ubicación protegida y procedimiento de recuperación: pendientes de registrar. |
+| Destino | Servidor externo acordado. I03 no contrata: opciones S3-compatible o VPS/equipo de Naser, con costos a cotizar. Proveedor concreto y dirección: D09, Naser nombra. Detalle en [viabilidad](viabilidad-conectividad-respaldos.md) §4. |
+| Responsable operativo | Nombre y contacto de quien supervisa copias y restauraciones: no informado. Naser registra (D09); I08 implementa. |
+| Horario | 04:00 sigue como propuesta técnica; no confirmado para instalación. |
+| Retención | 7 locales, 30 diarias y 12 mensuales remotas: **confirmada en capacidad** por I03 (mes sintético gzip ≈ 132 KiB; remoto 30+12 ≈ 5,4 MiB). Definición operativa y prueba de restauración: I08. |
+| Custodia de clave | Fuera de la PC de recepción; persona nombrada + copia protegida. Naser nombra al custodio (D10). Procedimiento en [viabilidad](viabilidad-conectividad-respaldos.md) §5. |
 | Recuperación | Admin; detener escrituras, copia previa, validar integridad/compatibilidad, restaurar y verificar en otro equipo. |
 
-El backup externo no es una segunda base operativa. No se copia únicamente el `.db` mientras WAL está activo. I03 debe medir tamaño y crecimiento de una copia representativa para dimensionar almacenamiento, espacio de cola y tiempo de subida; no se dispone de esa medición. La viabilidad de conexión directa de WireGuard tampoco está comprobada. No se ha contratado almacenamiento ni un intermediario de red.
+El backup externo no es una segunda base operativa. No se copia únicamente el `.db` mientras WAL está activo (en desarrollo el WAL era ~1 MiB frente a 4 KiB del archivo principal). I03 midió snapshot con `.backup` / `VACUUM INTO`: ver [viabilidad](viabilidad-conectividad-respaldos.md) §3. La conexión directa de WireGuard **sigue sin comprobarse** (impedimento D08). No se ha contratado almacenamiento ni un intermediario de red.
 
 ## 8. Plan del mes y revisión de capacidad
 
@@ -150,9 +150,9 @@ Se conserva una tarea principal en curso por persona, actualización diaria, con
 | D05 | Usuarios operativos, rol de cada uno y responsable administrador. | Naser / N04; implementación I04. | Alta de usuarios de producción. |
 | D06 | Inventario técnico de ambas PCs y cuenta/ruta local de datos. | Naser / N09; servicio I07. | Instalación y actualización. |
 | D07 | Modelo/driver, cola o puerto, ancho de papel y disponibilidad de impresora física. | Naser / N03. | Prueba física e impresión real. |
-| D08 | Proveedor/router, condición de CGNAT/IPv6, endpoint y resultado de conectividad entre ubicaciones. | I03/I07, sin asignar; Naser facilita datos. | Habilitar acceso remoto. |
-| D09 | Dirección/proveedor/protocolo/capacidad del destino externo y responsable operativo nombrado. | Naser registra; I03/I08, sin asignar. | Subida real de respaldos. |
-| D10 | Horario, retención, tamaño de copia, custodia de clave y responsable de probar restauración. | Naser registra; I03/I05/I08, sin asignar. | Respaldo/recuperación de producción. |
+| D08 | Proveedor/router, condición de CGNAT/IPv6, endpoint y resultado de conectividad entre ubicaciones. | **Impedimento I03 (16/09/2026):** protocolo listo, handshake no ejecutado. Naser facilita datos; I07 implementa tras la prueba. | Habilitar acceso remoto. |
+| D09 | Dirección/proveedor/protocolo/capacidad del destino externo y responsable operativo nombrado. | I03 definió opciones y costos a cotizar (S3-compatible o VPS); Naser nombra proveedor y responsable. I08 sube. | Subida real de respaldos. |
+| D10 | Horario, retención, tamaño de copia, custodia de clave y responsable de probar restauración. | I03: retención 7/30/12 viable (gzip diario ≈ 132 KiB); horario 04:00 propuesto; custodio aún sin nombrar. Naser nombra; I08 cifra y prueba restauración. | Respaldo/recuperación de producción. |
 | D11 | Fecha de inicio y horas semanales efectivas de ambos desarrolladores. | Naser / planificación del mes. | Comprometer calendario. |
 
 Las claves, contraseñas, certificados privados y credenciales de almacenamiento se entregan por un canal protegido durante la configuración. En Jira solo se registra que fueron configurados y quién los custodia.

@@ -129,15 +129,15 @@ El servidor externo conserva copias versionadas para recuperación. No es la bas
 
 ### Retención y restauración
 
-Propuesta inicial, pendiente de capacidad y aprobación: 7 copias locales; 30 diarias y 12 mensuales remotas. Separar credenciales de subida y borrado cuando el servidor lo permita. Definir custodia y recuperación de la clave de descifrado fuera de la PC principal.
+Propuesta inicial, pendiente de aprobación operativa y confirmada en capacidad por I03: 7 copias locales; 30 diarias y 12 mensuales remotas. Separar credenciales de subida y borrado cuando el servidor lo permita. Definir custodia y recuperación de la clave de descifrado fuera de la PC principal (Naser nombra al custodio).
 
 Restauración exclusiva del administrador: suspender escrituras locales/remotas, hacer copia del estado actual, descargar y descifrar, comprobar integridad y compatibilidad, restaurar de forma controlada y validar habitaciones, cuentas e historial antes de reabrir. Revocar sesiones restauradas y limpiar estados de clientes para no aplicar cambios antiguos. Una copia solo se considera recuperable después de una prueba real de restauración.
 
 ## 8. VPN y disponibilidad
 
-Se propone WireGuard en los equipos autorizados. WireGuard no tiene cuota de suscripción; la conexión directa depende de router, firewall y proveedor. Revisar IPv4 pública/IPv6 y CGNAT. Si no se puede comunicar directamente, decidir si se usa un intermediario propio o servicio autorizado; no garantizar acceso directo antes de comprobarlo.
+Se propone WireGuard en los equipos autorizados. WireGuard no tiene cuota de suscripción; la conexión directa depende de router, firewall y proveedor. I03 dejó el protocolo de prueba y el criterio CGNAT/IPv6 en [viabilidad](viabilidad-conectividad-respaldos.md); el handshake entre ubicaciones **no está comprobado** (D08). Si no se puede comunicar directamente, el intermediario (VPS o servicio autorizado) se cotiza; no es gratuito por defecto.
 
-El servidor de backup puede ser infraestructura propia o almacenamiento contratado. Su alojamiento y operación no son automáticamente gratuitos. Aún no se han definido proveedor, dirección, capacidad ni credenciales. El backup y un eventual relay VPN son funciones distintas aunque puedan alojarse en infraestructura común, con separación de permisos.
+El servidor de backup puede ser almacenamiento de objetos S3-compatible o un VPS/equipo propio. I03 dimensionó la retención 7/30/12 (gzip diario de un mes sintético ≈ 132 KiB) y listó costos a cotizar. Proveedor, dirección y credenciales siguen sin nombrarse (D09). El backup y un eventual relay VPN son funciones distintas aunque puedan alojarse en infraestructura común, con separación de permisos.
 
 ## 9. Criterios de aceptación
 
@@ -166,9 +166,11 @@ El servidor de backup puede ser infraestructura propia o almacenamiento contrata
 
 ## 11. Datos pendientes para desplegar
 
-- Servidor de respaldo: propio/contratado, protocolo, dirección y responsable. Credenciales por canal seguro, nunca en este Markdown.
-- Horario, retención, capacidad, clave de recuperación y responsables de probar restauraciones.
-- Proveedor/router del motel y ubicación de la PC administradora para validar conectividad.
+I03 ([viabilidad de conectividad y respaldos](viabilidad-conectividad-respaldos.md), 16/09/2026) dejó protocolizado WireGuard y dimensionada la retención 7/30/12. Pendiente de persona/dato concreto, no de criterio técnico:
+
+- Servidor de respaldo: elegir S3-compatible o VPS/equipo de Naser; dirección y responsable (D09). Credenciales por canal seguro, nunca en este Markdown.
+- Custodio de la clave de descifrado y quién prueba la restauración en otro equipo (D10). Horario 04:00 sigue propuesto.
+- Proveedor/router del motel, CGNAT/IPv6 y prueba de handshake entre ubicaciones (D08, impedimento). Sin eso no hay VPN directa ni cotización cerrada de intermediario.
 - Nombres de usuarios iniciales y aceptación de la matriz de permisos.
 - Política de conservación de datos personales y permisos del usuario de Windows sobre la base.
 
