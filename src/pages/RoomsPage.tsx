@@ -41,10 +41,11 @@ export function RoomsPage({ settings }: { settings: AppSettings }) {
             grace_minutes: 5,
             night_cutoff_hour: 10,
             active: true,
+            version: 1,
           })}>
             Nueva tarifa
           </Button>
-          <Button onClick={() => setRoomForm({ id: 0, number: "", room_type: "Estándar", floor: 1, status: "available", notes: null, active: true })}>
+          <Button onClick={() => setRoomForm({ id: 0, number: "", room_type: "Estándar", floor: 1, status: "available", notes: null, active: true, version: 1 })}>
             Nueva habitación
           </Button>
         </div>
@@ -111,7 +112,7 @@ export function RoomsPage({ settings }: { settings: AppSettings }) {
               <Input type="number" value={roomForm.floor} onChange={(e) => setRoomForm({ ...roomForm, floor: Number(e.target.value) })} />
             </Field>
             <Button className="w-full" onClick={async () => {
-              await api.saveRoom({ ...roomForm, id: roomForm.id || null });
+              await api.saveRoom({ ...roomForm, id: roomForm.id || null, expected_version: roomForm.id ? roomForm.version : null });
               setRoomForm(null);
               await load();
             }}>Guardar</Button>
@@ -161,7 +162,7 @@ export function RoomsPage({ settings }: { settings: AppSettings }) {
               Activa
             </label>
             <Button className="w-full" onClick={async () => {
-              await api.saveRatePlan({ ...rateForm, id: rateForm.id || null });
+              await api.saveRatePlan({ ...rateForm, id: rateForm.id || null, expected_version: rateForm.id ? rateForm.version : null });
               setRateForm(null);
               await load();
             }}>Guardar tarifa</Button>

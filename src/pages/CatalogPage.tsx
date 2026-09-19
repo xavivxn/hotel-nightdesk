@@ -16,6 +16,7 @@ type ProductForm = {
   price: string;
   active: boolean;
   sort_order: number;
+  version: number;
 };
 
 const emptyForm: ProductForm = {
@@ -25,6 +26,7 @@ const emptyForm: ProductForm = {
   price: "",
   active: true,
   sort_order: 0,
+  version: 1,
 };
 
 function categoryLabel(category: string) {
@@ -83,6 +85,7 @@ export function CatalogPage({ settings }: { settings: AppSettings }) {
       price: inputPrice(product.price_cents),
       active: product.active,
       sort_order: product.sort_order,
+      version: product.version,
     });
   }
 
@@ -108,6 +111,7 @@ export function CatalogPage({ settings }: { settings: AppSettings }) {
         price_cents: price,
         active: form.active,
         sort_order: form.sort_order || undefined,
+        expected_version: form.id ? form.version : null,
       });
       await load();
       setForm(null);

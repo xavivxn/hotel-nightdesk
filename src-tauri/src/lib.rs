@@ -7,6 +7,7 @@ mod models;
 mod printer;
 mod service;
 mod reports;
+mod sync;
 
 use rusqlite::Connection;
 use std::sync::Mutex;

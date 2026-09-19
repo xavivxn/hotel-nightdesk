@@ -68,6 +68,7 @@ function seed(): Db {
     status: "available",
     notes: null,
     active: true,
+    version: 1,
   }));
   const rates: RatePlan[] = [
     {
@@ -80,6 +81,7 @@ function seed(): Db {
       grace_minutes: 5,
       night_cutoff_hour: 10,
       active: true,
+      version: 1,
     },
     {
       id: 2,
@@ -91,12 +93,13 @@ function seed(): Db {
       grace_minutes: 5,
       night_cutoff_hour: 10,
       active: true,
+      version: 1,
     },
   ];
   return {
     rooms,
     rates,
-    products: buildSeedProducts(),
+    products: buildSeedProducts().map((product) => ({ ...product, version: 1 })),
     guests: [],
     reservations: [],
     stays: [],
@@ -154,7 +157,10 @@ function load(): Db {
   try {
     const db = JSON.parse(raw) as Db;
     db.closed_bills ??= {};
-    db.products ??= buildSeedProducts();
+    db.products ??= buildSeedProducts().map((product) => ({ ...product, version: 1 }));
+    db.rooms = (db.rooms ?? []).map((room) => ({ ...room, version: room.version ?? 1 }));
+    db.rates = (db.rates ?? []).map((rate) => ({ ...rate, version: rate.version ?? 1 }));
+    db.products = db.products.map((product) => ({ ...product, version: product.version ?? 1 }));
     db.ids ??= { room: 23, rate: 3, product: db.products.reduce((max, item) => Math.max(max, item.id), 0), guest: 0, reservation: 0, stay: 0, charge: 0, payment: 0 };
     db.ids.product ??= db.products.reduce((max, item) => Math.max(max, item.id), 0);
     return normalizeRoomConfiguration(db);
@@ -204,7 +210,7 @@ function stayBill(db: Db, stay: Stay) {
     : db.rates.find((r) => r.kind === "overnight" && r.active);
   const night = db.rates.find((r) => r.kind === "night" && r.active);
   const manual = db.charges
-    .filter((c) => c.stay_id === stay.id && (c.kind === "surcharge" || c.kind === "discount"))
+    .filter((c) => c.stay_id === stay.id && (c.kind === "surcharge" || c.kind === "discount") && !c.deleted_at)
     .map((c) => ({ kind: c.kind, description: c.description, amount_cents: c.amount_cents }));
   return previewBill({
     stayId: stay.id,
@@ -246,7 +252,7 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
         return { stay_id: s.id, room_number: s.room_number, check_in_at: s.check_in_at, check_out_at: s.check_out_at,
           closed_on_day: closed, open_at_cutoff: +new Date(s.check_in_at) < +cutoff && (!s.check_out_at || +new Date(s.check_out_at) >= +cutoff), total_cents: closed ? stayBill(db, s).total_cents : null };
       });
-      const adjustments = db.charges.filter(c => (c.kind === "surcharge" || c.kind === "discount") && localDay(c.created_at) === date && +new Date(c.created_at) <= +now);
+      const adjustments = db.charges.filter(c => (c.kind === "surcharge" || c.kind === "discount") && !c.deleted_at && localDay(c.created_at) === date && +new Date(c.created_at) <= +now);
       return { date, generated_at: now.toISOString(), cutoff_at: cutoff.toISOString(), timezone: "Hora local del navegador (demostración)",
         occupied_rooms: new Set(stays.filter(s => +new Date(s.check_in_at) < +cutoff && (!s.check_out_at || +new Date(s.check_out_at) > +start)).map(s => s.room_id)).size,
         closed_total_cents: accounts.reduce((sum, a) => sum + (a.total_cents ?? 0), 0),
@@ -286,10 +292,14 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
     case "list_rooms":
       return db.rooms.filter((room) => room.active);
     case "save_room": {
-      const payload = args.payload as { id?: number; number: string; room_type: string; floor: number; notes?: string | null };
+      const payload = args.payload as { id?: number; number: string; room_type: string; floor: number; notes?: string | null; operation_id?: string | null; expected_version?: number | null };
+      acceptReserved(payload);
       if (payload.id) {
         const room = db.rooms.find((r) => r.id === payload.id) ?? fail("Habitación no encontrada");
-        Object.assign(room, { number: payload.number, room_type: payload.room_type, floor: payload.floor, notes: payload.notes ?? null });
+        if (payload.expected_version != null && payload.expected_version !== room.version) {
+          fail("conflict", "La ficha cambió; recargá antes de guardar");
+        }
+        Object.assign(room, { number: payload.number, room_type: payload.room_type, floor: payload.floor, notes: payload.notes ?? null, version: (room.version ?? 1) + 1 });
         return room;
       }
       db.ids.room += 1;
@@ -301,6 +311,7 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
         status: "available",
         notes: payload.notes ?? null,
         active: true,
+        version: 1,
       };
       db.rooms.push(room);
       return room;
@@ -315,14 +326,18 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
     case "list_rate_plans":
       return args.active_only ? db.rates.filter((r) => r.active) : db.rates;
     case "save_rate_plan": {
-      const payload = args.payload as RatePlan & { id?: number };
+      const payload = args.payload as RatePlan & { id?: number; operation_id?: string | null; expected_version?: number | null };
+      acceptReserved(payload);
       if (payload.id) {
         const rate = db.rates.find((r) => r.id === payload.id) ?? fail("Tarifa no encontrada");
-        Object.assign(rate, payload);
+        if (payload.expected_version != null && payload.expected_version !== rate.version) {
+          fail("conflict", "La ficha cambió; recargá antes de guardar");
+        }
+        Object.assign(rate, payload, { version: (rate.version ?? 1) + 1 });
         return rate;
       }
       db.ids.rate += 1;
-      const rate = { ...payload, id: db.ids.rate };
+      const rate = { ...payload, id: db.ids.rate, version: 1 };
       db.rates.push(rate);
       return rate;
     }
@@ -395,7 +410,7 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
     }
     case "get_stay_detail": {
       const stay = db.stays.find((s) => s.id === args.stay_id) ?? fail("Estadía no encontrada");
-      return [stay, stayBill(db, stay), db.charges.filter((c) => c.stay_id === stay.id), db.payments.filter((p) => p.stay_id === stay.id)];
+      return [stay, stayBill(db, stay), db.charges.filter((c) => c.stay_id === stay.id && !c.deleted_at), db.payments.filter((p) => p.stay_id === stay.id)];
     }
     case "convert_to_overnight": {
       const stay = db.stays.find((s) => s.id === args.stay_id) ?? fail("Estadía no encontrada");
@@ -438,7 +453,8 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
       return (db.products ?? []).filter((p) => (activeOnly ? p.active : true));
     }
     case "save_product": {
-      const payload = args.payload as { id?: number | null; name: string; category: string; price_cents: number; active?: boolean; sort_order?: number };
+      const payload = args.payload as { id?: number | null; name: string; category: string; price_cents: number; active?: boolean; sort_order?: number; operation_id?: string | null; expected_version?: number | null };
+      acceptReserved(payload);
       const name = String(payload.name ?? "").trim();
       const category = String(payload.category ?? "").trim();
       const price = Number(payload.price_cents);
@@ -448,17 +464,21 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
       if (!Number.isInteger(price) || price <= 0) fail("El precio debe ser un número entero mayor que 0 Gs.");
       if (payload.id) {
         const product = db.products.find((item) => item.id === payload.id) ?? fail("Producto no encontrado");
-        Object.assign(product, { name, category, price_cents: price, active: payload.active ?? product.active, sort_order: payload.sort_order ?? product.sort_order });
+        if (payload.expected_version != null && payload.expected_version !== product.version) {
+          fail("conflict", "La ficha cambió; recargá antes de guardar");
+        }
+        Object.assign(product, { name, category, price_cents: price, active: payload.active ?? product.active, sort_order: payload.sort_order ?? product.sort_order, version: (product.version ?? 1) + 1 });
         return product;
       }
       db.ids.product = Math.max(db.ids.product ?? 0, ...db.products.map((item) => item.id)) + 1;
-      const product: Product = { id: db.ids.product, name, category, price_cents: price, active: payload.active ?? true, sort_order: payload.sort_order ?? db.ids.product };
+      const product: Product = { id: db.ids.product, name, category, price_cents: price, active: payload.active ?? true, sort_order: payload.sort_order ?? db.ids.product, version: 1 };
       db.products.push(product);
       return product;
     }
     case "set_product_active": {
       const product = db.products.find((item) => item.id === Number(args.product_id)) ?? fail("Producto no encontrado");
       product.active = Boolean(args.active);
+      product.version = (product.version ?? 1) + 1;
       return product;
     }
     case "add_product_charge": {
@@ -482,11 +502,14 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
     }
     case "delete_charge":
       {
-        const stay = db.stays.find((item) => item.id === db.charges.find((charge) => charge.id === args.charge_id)?.stay_id);
-        if (!stay) fail("not_found", "Cargo no encontrado");
+        const charge = db.charges.find((item) => item.id === args.charge_id && !item.deleted_at);
+        const stay = db.stays.find((item) => item.id === charge?.stay_id);
+        if (!charge || !stay) fail("not_found", "Cargo no encontrado");
         if (stay.status !== "open") fail("conflict", "No se pueden modificar cargos de una cuenta cerrada");
+        if (charge.kind === "surcharge" || charge.kind === "discount") {
+          charge.deleted_at = nowIso();
+        }
       }
-      db.charges = db.charges.filter((c) => c.id !== args.charge_id || (c.kind !== "surcharge" && c.kind !== "discount"));
       return null;
     case "check_out": {
       const payload = args.payload as CheckOutPayload;

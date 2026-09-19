@@ -174,14 +174,18 @@ Campos reservados en todos: `operation_id?: string`, `expected_version?: number`
 
 **add_charge** (admin) / **add_product_charge** → `Charge`. `conflict` sobre estadía cerrada.
 
-**save_room** / **save_rate_plan** / **save_product** (admin): `id` ausente crea, presente actualiza. Con sync habilitado, write-through a Supabase; `expected_version` debe coincidir o `conflict`. Sin conexión: no escribir local y devolver error claro.
+**save_room** / **save_rate_plan** / **save_product** (admin): `id` ausente crea, presente actualiza. `Room`, `RatePlan` y `Product` exponen `version`. Si `expected_version` no coincide con `version`, `conflict` («La ficha cambió; recargá antes de guardar»). Con sync habilitado, write-through a Supabase (I11). Sin conexión: no escribir local y devolver error claro.
+
+**delete_charge** (admin): baja lógica (`charges.deleted_at`). `list_charges` / preview / detalle omiten filas borradas. La outbox registra `op=delete`.
+
+Mutaciones operativas escriben `sync_outbox` en la misma TX. El `operation_id` de `api.ts` es `root_operation_id`; si una operación genera varias filas (checkout: stay + cargos + room), los sub-ops usan un UUID v5 derivado. Repetir el mismo `operation_id` → `conflict` y rollback (no hay segunda estadía ni segunda fila).
 
 Consultas (`list_board`, `list_rooms`, `preview_bill`, `get_stay_detail`, `list_history`, …) no llevan `operation_id`. Resultado = tipos de `models.rs` / `types.ts`.
 
 ## Qué queda por implementar
 
-- **I06:** persistir `operation_id` en `sync_outbox`; `expected_version` local en catálogo; `014_sync`.
-- **N12:** esquema Postgres, RLS, `sync_apply_ops`, `catalog_upsert_*`, Realtime, Auth, bucket `backups`.
+- **I06:** hecho (`014_sync`, outbox en TX, lista blanca, `expected_version` local).
+- **N12:** hecho (esquema Postgres, RLS, `sync_apply_ops`, `catalog_upsert_*`, Realtime, Auth, bucket `backups`).
 - **I07:** worker push/pull/Realtime y comandos `sync_*`.
 - **I11 / N07:** write-through, `hash_password`, `supabaseInvoke`, modo del equipo.
 - **I08:** `backup_run_now` / `backup_status`.

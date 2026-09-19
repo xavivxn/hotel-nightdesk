@@ -72,6 +72,10 @@ const MIGRATIONS: &[Migration] = &[
         id: "013_no_iva",
         sql: include_str!("../migrations/013_no_iva.sql"),
     },
+    Migration {
+        id: "014_sync",
+        sql: include_str!("../migrations/014_sync.sql"),
+    },
 ];
 
 pub fn open(db_path: &Path) -> AppResult<Connection> {
@@ -312,40 +316,34 @@ fn seed_products_if_empty(conn: &Connection) -> AppResult<()> {
     Ok(())
 }
 
+fn map_product(row: &rusqlite::Row<'_>) -> rusqlite::Result<Product> {
+    Ok(Product {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        category: row.get(2)?,
+        price_cents: row.get(3)?,
+        active: row.get::<_, i64>(4)? != 0,
+        sort_order: row.get(5)?,
+        version: row.get(6)?,
+    })
+}
+
 pub fn list_products(conn: &Connection, active_only: bool) -> AppResult<Vec<Product>> {
     let sql = if active_only {
-        "SELECT id, name, category, price_cents, active, sort_order FROM products WHERE active = 1 ORDER BY sort_order, name"
+        "SELECT id, name, category, price_cents, active, sort_order, version FROM products WHERE active = 1 ORDER BY sort_order, name"
     } else {
-        "SELECT id, name, category, price_cents, active, sort_order FROM products ORDER BY sort_order, name"
+        "SELECT id, name, category, price_cents, active, sort_order, version FROM products ORDER BY sort_order, name"
     };
     let mut stmt = conn.prepare(sql)?;
-    let rows = stmt.query_map([], |row| {
-        Ok(Product {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            category: row.get(2)?,
-            price_cents: row.get(3)?,
-            active: row.get::<_, i64>(4)? != 0,
-            sort_order: row.get(5)?,
-        })
-    })?;
+    let rows = stmt.query_map([], map_product)?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
 pub fn get_product(conn: &Connection, id: i64) -> AppResult<Product> {
     conn.query_row(
-        "SELECT id, name, category, price_cents, active, sort_order FROM products WHERE id = ?1",
+        "SELECT id, name, category, price_cents, active, sort_order, version FROM products WHERE id = ?1",
         [id],
-        |row| {
-            Ok(Product {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                category: row.get(2)?,
-                price_cents: row.get(3)?,
-                active: row.get::<_, i64>(4)? != 0,
-                sort_order: row.get(5)?,
-            })
-        },
+        map_product,
     )
     .map_err(|_| AppError::msg("Producto no encontrado"))
 }
@@ -442,28 +440,31 @@ pub fn hash_pin(pin: &str) -> String {
     hex::encode(hasher.finalize())
 }
 
+pub fn map_room(row: &rusqlite::Row<'_>) -> rusqlite::Result<Room> {
+    Ok(Room {
+        id: row.get(0)?,
+        number: row.get(1)?,
+        room_type: row.get(2)?,
+        floor: row.get(3)?,
+        status: row.get(4)?,
+        notes: row.get(5)?,
+        active: row.get::<_, i64>(6)? != 0,
+        version: row.get(7)?,
+    })
+}
+
 pub fn get_room(conn: &Connection, id: i64) -> AppResult<Room> {
     conn.query_row(
-        "SELECT id, number, room_type, floor, status, notes, active FROM rooms WHERE id = ?1",
+        "SELECT id, number, room_type, floor, status, notes, active, version FROM rooms WHERE id = ?1",
         [id],
-        |row| {
-            Ok(Room {
-                id: row.get(0)?,
-                number: row.get(1)?,
-                room_type: row.get(2)?,
-                floor: row.get(3)?,
-                status: row.get(4)?,
-                notes: row.get(5)?,
-                active: row.get::<_, i64>(6)? != 0,
-            })
-        },
+        map_room,
     )
     .map_err(|_| AppError::msg("Habitación no encontrada"))
 }
 
 pub fn get_rate_plan(conn: &Connection, id: i64) -> AppResult<RatePlan> {
     conn.query_row(
-        "SELECT id, name, kind, base_amount_cents, extra_hour_cents, included_hours, grace_minutes, night_cutoff_hour, active
+        "SELECT id, name, kind, base_amount_cents, extra_hour_cents, included_hours, grace_minutes, night_cutoff_hour, active, version
          FROM rate_plans WHERE id = ?1",
         [id],
         map_rate_plan,
@@ -484,15 +485,16 @@ fn map_rate_plan(row: &rusqlite::Row<'_>) -> rusqlite::Result<RatePlan> {
         grace_minutes: row.get(6)?,
         night_cutoff_hour: row.get(7)?,
         active: active != 0,
+        version: row.get(9)?,
     })
 }
 
 pub fn list_rate_plans(conn: &Connection, active_only: bool) -> AppResult<Vec<RatePlan>> {
     let sql = if active_only {
-        "SELECT id, name, kind, base_amount_cents, extra_hour_cents, included_hours, grace_minutes, night_cutoff_hour, active
+        "SELECT id, name, kind, base_amount_cents, extra_hour_cents, included_hours, grace_minutes, night_cutoff_hour, active, version
          FROM rate_plans WHERE active = 1 ORDER BY kind, name"
     } else {
-        "SELECT id, name, kind, base_amount_cents, extra_hour_cents, included_hours, grace_minutes, night_cutoff_hour, active
+        "SELECT id, name, kind, base_amount_cents, extra_hour_cents, included_hours, grace_minutes, night_cutoff_hour, active, version
          FROM rate_plans ORDER BY kind, name"
     };
     let mut stmt = conn.prepare(sql)?;
@@ -502,7 +504,7 @@ pub fn list_rate_plans(conn: &Connection, active_only: bool) -> AppResult<Vec<Ra
 
 pub fn find_plan_by_kind(conn: &Connection, kind: RateKind) -> AppResult<Option<RatePlan>> {
     conn.query_row(
-        "SELECT id, name, kind, base_amount_cents, extra_hour_cents, included_hours, grace_minutes, night_cutoff_hour, active
+        "SELECT id, name, kind, base_amount_cents, extra_hour_cents, included_hours, grace_minutes, night_cutoff_hour, active, version
          FROM rate_plans WHERE kind = ?1 AND active = 1 ORDER BY id LIMIT 1",
         [kind.as_str()],
         map_rate_plan,
@@ -593,7 +595,7 @@ pub fn open_stay_for_room(conn: &Connection, room_id: i64) -> AppResult<Option<S
 
 pub fn list_charges(conn: &Connection, stay_id: i64) -> AppResult<Vec<Charge>> {
     let mut stmt = conn.prepare(
-        "SELECT id, stay_id, kind, description, amount_cents, created_at FROM charges WHERE stay_id = ?1 ORDER BY id",
+        "SELECT id, stay_id, kind, description, amount_cents, created_at FROM charges WHERE stay_id = ?1 AND deleted_at IS NULL ORDER BY id",
     )?;
     let rows = stmt.query_map([stay_id], |row| {
         Ok(Charge {
@@ -681,6 +683,177 @@ pub fn set_room_status(conn: &Connection, room_id: i64, status: &str) -> AppResu
         params![status, room_id],
     )?;
     Ok(())
+}
+
+const UID_TABLES: &[&str] = &[
+    "rooms",
+    "rate_plans",
+    "products",
+    "guests",
+    "reservations",
+    "stays",
+    "charges",
+    "payments",
+    "users",
+];
+
+pub fn uid_of(conn: &Connection, table: &str, id: i64) -> AppResult<String> {
+    if !UID_TABLES.contains(&table) {
+        return Err(AppError::msg("Tabla inválida"));
+    }
+    match conn.query_row(
+        &format!("SELECT uid FROM {table} WHERE id = ?1"),
+        [id],
+        |row| row.get::<_, Option<String>>(0),
+    ) {
+        Ok(Some(uid)) if !uid.is_empty() => Ok(uid),
+        Ok(_) => Err(AppError::not_found("Fila sin uid")),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Err(AppError::not_found("Fila sin uid")),
+        Err(error) => Err(error.into()),
+    }
+}
+
+pub fn payload_for_guest(conn: &Connection, id: i64) -> AppResult<serde_json::Value> {
+    conn.query_row(
+        "SELECT id, uid, name, document, phone FROM guests WHERE id = ?1",
+        [id],
+        |row| {
+            Ok(serde_json::json!({
+                "local_id": row.get::<_, i64>(0)?,
+                "uid": row.get::<_, String>(1)?,
+                "name": row.get::<_, String>(2)?,
+                "document": row.get::<_, Option<String>>(3)?,
+                "phone": row.get::<_, Option<String>>(4)?,
+            }))
+        },
+    )
+    .map_err(|_| AppError::not_found("Huésped no encontrado"))
+}
+
+pub fn payload_for_room(conn: &Connection, id: i64) -> AppResult<serde_json::Value> {
+    conn.query_row(
+        "SELECT id, uid, number, room_type, floor, status, notes, active FROM rooms WHERE id = ?1",
+        [id],
+        |row| {
+            Ok(serde_json::json!({
+                "local_id": row.get::<_, i64>(0)?,
+                "uid": row.get::<_, String>(1)?,
+                "number": row.get::<_, String>(2)?,
+                "room_type": row.get::<_, String>(3)?,
+                "floor": row.get::<_, i64>(4)?,
+                "status": row.get::<_, String>(5)?,
+                "notes": row.get::<_, Option<String>>(6)?,
+                "active": row.get::<_, i64>(7)? != 0,
+            }))
+        },
+    )
+    .map_err(|_| AppError::not_found("Habitación no encontrada"))
+}
+
+pub fn payload_for_reservation(conn: &Connection, id: i64) -> AppResult<serde_json::Value> {
+    conn.query_row(
+        "SELECT res.id, res.uid, g.uid, r.uid, rp.uid, res.expected_arrival_at, res.expected_nights, res.status, res.notes
+         FROM reservations res
+         JOIN guests g ON g.id = res.guest_id
+         JOIN rooms r ON r.id = res.room_id
+         JOIN rate_plans rp ON rp.id = res.rate_plan_id
+         WHERE res.id = ?1",
+        [id],
+        |row| {
+            Ok(serde_json::json!({
+                "local_id": row.get::<_, i64>(0)?,
+                "uid": row.get::<_, String>(1)?,
+                "guest_uid": row.get::<_, String>(2)?,
+                "room_uid": row.get::<_, String>(3)?,
+                "rate_plan_uid": row.get::<_, String>(4)?,
+                "expected_arrival_at": row.get::<_, String>(5)?,
+                "expected_nights": row.get::<_, i64>(6)?,
+                "status": row.get::<_, String>(7)?,
+                "notes": row.get::<_, Option<String>>(8)?,
+            }))
+        },
+    )
+    .map_err(|_| AppError::not_found("Reserva no encontrada"))
+}
+
+pub fn payload_for_stay(conn: &Connection, id: i64) -> AppResult<serde_json::Value> {
+    conn.query_row(
+        "SELECT s.id, s.uid, r.uid, g.uid, rp.uid, res.uid, s.check_in_at, s.expected_checkout_at,
+                s.check_out_at, s.status, s.converted_to_overnight, orp.uid, s.notes,
+                s.closed_applied_kind, s.closed_tax_percent, s.closed_duration_label
+         FROM stays s
+         JOIN rooms r ON r.id = s.room_id
+         JOIN guests g ON g.id = s.guest_id
+         JOIN rate_plans rp ON rp.id = s.rate_plan_id
+         LEFT JOIN reservations res ON res.id = s.reservation_id
+         LEFT JOIN rate_plans orp ON orp.id = s.overnight_rate_plan_id
+         WHERE s.id = ?1",
+        [id],
+        |row| {
+            Ok(serde_json::json!({
+                "local_id": row.get::<_, i64>(0)?,
+                "uid": row.get::<_, String>(1)?,
+                "room_uid": row.get::<_, String>(2)?,
+                "guest_uid": row.get::<_, String>(3)?,
+                "rate_plan_uid": row.get::<_, String>(4)?,
+                "reservation_uid": row.get::<_, Option<String>>(5)?,
+                "check_in_at": row.get::<_, String>(6)?,
+                "expected_checkout_at": row.get::<_, Option<String>>(7)?,
+                "check_out_at": row.get::<_, Option<String>>(8)?,
+                "status": row.get::<_, String>(9)?,
+                "converted_to_overnight": row.get::<_, i64>(10)? != 0,
+                "overnight_rate_plan_uid": row.get::<_, Option<String>>(11)?,
+                "notes": row.get::<_, Option<String>>(12)?,
+                "closed_applied_kind": row.get::<_, Option<String>>(13)?,
+                "closed_tax_percent": row.get::<_, Option<f64>>(14)?,
+                "closed_duration_label": row.get::<_, Option<String>>(15)?,
+            }))
+        },
+    )
+    .map_err(|_| AppError::not_found("Estadía no encontrada"))
+}
+
+pub fn payload_for_charge(conn: &Connection, id: i64) -> AppResult<serde_json::Value> {
+    conn.query_row(
+        "SELECT c.id, c.uid, s.uid, c.kind, c.description, c.amount_cents, c.deleted_at
+         FROM charges c
+         JOIN stays s ON s.id = c.stay_id
+         WHERE c.id = ?1",
+        [id],
+        |row| {
+            Ok(serde_json::json!({
+                "local_id": row.get::<_, i64>(0)?,
+                "uid": row.get::<_, String>(1)?,
+                "stay_uid": row.get::<_, String>(2)?,
+                "kind": row.get::<_, String>(3)?,
+                "description": row.get::<_, String>(4)?,
+                "amount_cents": row.get::<_, i64>(5)?,
+                "deleted_at": row.get::<_, Option<String>>(6)?,
+            }))
+        },
+    )
+    .map_err(|_| AppError::not_found("Cargo no encontrado"))
+}
+
+#[allow(dead_code)]
+pub fn payload_for_payment(conn: &Connection, id: i64) -> AppResult<serde_json::Value> {
+    conn.query_row(
+        "SELECT p.id, p.uid, s.uid, p.method, p.amount_cents
+         FROM payments p
+         JOIN stays s ON s.id = p.stay_id
+         WHERE p.id = ?1",
+        [id],
+        |row| {
+            Ok(serde_json::json!({
+                "local_id": row.get::<_, i64>(0)?,
+                "uid": row.get::<_, String>(1)?,
+                "stay_uid": row.get::<_, String>(2)?,
+                "method": row.get::<_, String>(3)?,
+                "amount_cents": row.get::<_, i64>(4)?,
+            }))
+        },
+    )
+    .map_err(|_| AppError::not_found("Pago no encontrado"))
 }
 
 #[cfg(test)]
@@ -856,8 +1029,8 @@ pub fn save_product(
     if let Some(id) = id {
         let current = get_product(conn, id)?;
         conn.execute(
-            "UPDATE products SET name = ?1, category = ?2, price_cents = ?3, active = ?4, sort_order = ?5 WHERE id = ?6",
-            params![name, category, price_cents, if active { 1 } else { 0 }, sort_order.unwrap_or(current.sort_order), id],
+            "UPDATE products SET name = ?1, category = ?2, price_cents = ?3, active = ?4, sort_order = ?5, version = version + 1, updated_at = ?6 WHERE id = ?7",
+            params![name, category, price_cents, if active { 1 } else { 0 }, sort_order.unwrap_or(current.sort_order), now_rfc3339(), id],
         )?;
         return get_product(conn, id);
     }
@@ -875,8 +1048,8 @@ pub fn save_product(
 pub fn set_product_active(conn: &Connection, id: i64, active: bool) -> AppResult<Product> {
     get_product(conn, id)?;
     conn.execute(
-        "UPDATE products SET active = ?1 WHERE id = ?2",
-        params![if active { 1 } else { 0 }, id],
+        "UPDATE products SET active = ?1, version = version + 1, updated_at = ?2 WHERE id = ?3",
+        params![if active { 1 } else { 0 }, now_rfc3339(), id],
     )?;
     get_product(conn, id)
 }
@@ -1056,6 +1229,103 @@ mod migration_runner_tests {
             |row| row.get(0),
         )?;
         assert_eq!(open, 2);
+        Ok(())
+    }
+
+    fn migrate_up_to(conn: &mut Connection, last_id: &str) -> AppResult<()> {
+        let mut catalog = Vec::new();
+        for migration in MIGRATIONS {
+            catalog.push(Migration {
+                id: migration.id,
+                sql: migration.sql,
+            });
+            if migration.id == last_id {
+                break;
+            }
+        }
+        run_pending(conn, None, &catalog)
+    }
+
+    fn assert_uuid(value: &str) {
+        uuid::Uuid::parse_str(value).unwrap_or_else(|_| panic!("invalid uid {value}"));
+    }
+
+    #[test]
+    fn sync_migration_backfills_uid_and_trigger_fills_inserts() -> AppResult<()> {
+        let mut conn = Connection::open_in_memory()?;
+        migrate_up_to(&mut conn, "013_no_iva")?;
+        seed_if_empty(&conn)?;
+        seed_products_if_empty(&conn)?;
+        conn.execute(
+            "INSERT INTO guests (name, created_at) VALUES ('Pre-sync', ?1)",
+            [now_rfc3339()],
+        )?;
+        conn.execute(
+            "INSERT INTO stays (room_id, guest_id, rate_plan_id, check_in_at, status) VALUES (1, 1, 1, ?1, 'open')",
+            [now_rfc3339()],
+        )?;
+        conn.execute(
+            "INSERT INTO charges (stay_id, kind, description, amount_cents, created_at) VALUES (1, 'surcharge', 'Pre', 1000, ?1)",
+            [now_rfc3339()],
+        )?;
+        conn.execute(
+            "INSERT INTO payments (stay_id, method, amount_cents, created_at) VALUES (1, 'cash', 1000, ?1)",
+            [now_rfc3339()],
+        )?;
+        conn.execute(
+            "INSERT INTO users (username, password_hash, role) VALUES ('admin', 'x', 'admin')",
+            [],
+        )?;
+
+        let missing_uid: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('rooms') WHERE name = 'uid'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(missing_uid, 0);
+
+        migrate(&mut conn, None)?;
+        seed_if_empty(&conn)?;
+
+        for table in [
+            "rooms",
+            "rate_plans",
+            "products",
+            "guests",
+            "stays",
+            "charges",
+            "payments",
+            "users",
+        ] {
+            let mut stmt = conn.prepare(&format!(
+                "SELECT uid FROM {table} WHERE uid IS NULL OR uid = ''"
+            ))?;
+            let empty: i64 = stmt.query_map([], |_| Ok(()))?.count() as i64;
+            assert_eq!(empty, 0, "{table} has empty uid");
+            let mut ids = conn.prepare(&format!("SELECT uid FROM {table}"))?;
+            let mut seen = std::collections::HashSet::new();
+            for uid in ids.query_map([], |row| row.get::<_, String>(0))? {
+                let uid = uid?;
+                assert_uuid(&uid);
+                assert!(seen.insert(uid), "duplicate uid in {table}");
+            }
+        }
+
+        conn.execute(
+            "INSERT INTO rooms (number, room_type, floor, status, created_at) VALUES ('88', 'Normal', 1, 'available', ?1)",
+            [now_rfc3339()],
+        )?;
+        let uid = uid_of(&conn, "rooms", conn.last_insert_rowid())?;
+        assert_uuid(&uid);
+
+        let version: i64 = conn.query_row("SELECT version FROM rooms WHERE id = 1", [], |row| row.get(0))?;
+        assert_eq!(version, 1);
+        let outbox: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name = 'sync_outbox'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(outbox, 1);
         Ok(())
     }
 }

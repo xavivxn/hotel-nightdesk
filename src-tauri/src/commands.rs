@@ -53,8 +53,8 @@ pub fn save_room(state: State<AppState>, session_token: Option<String>, payload:
 #[tauri::command]
 pub fn set_room_status(state: State<AppState>, session_token: Option<String>, room_id: i64, status: String) -> AppResult<Room> {
     crate::auth::require(&state, session_token.as_deref(), false)?;
-    let conn = conn(&state);
-    service::set_room_status(&conn, room_id, status)
+    let mut conn = conn(&state);
+    service::set_room_status(&mut conn, room_id, status)
 }
 
 #[tauri::command]
@@ -99,8 +99,8 @@ pub fn get_stay_detail(
 #[tauri::command]
 pub fn convert_to_overnight(state: State<AppState>, session_token: Option<String>, stay_id: i64) -> AppResult<Stay> {
     crate::auth::require(&state, session_token.as_deref(), false)?;
-    let conn = conn(&state);
-    service::convert_to_overnight(&conn, stay_id)
+    let mut conn = conn(&state);
+    service::convert_to_overnight(&mut conn, stay_id)
 }
 
 #[tauri::command]
@@ -127,22 +127,22 @@ pub fn set_product_active(state: State<AppState>, session_token: Option<String>,
 #[tauri::command]
 pub fn add_charge(state: State<AppState>, session_token: Option<String>, payload: AddChargePayload) -> AppResult<Charge> {
     let user = crate::auth::require(&state, session_token.as_deref(), true)?;
-    let conn = conn(&state);
-    service::add_charge(&conn, &actor_from(&user), payload)
+    let mut conn = conn(&state);
+    service::add_charge(&mut conn, &actor_from(&user), payload)
 }
 
 #[tauri::command]
 pub fn add_product_charge(state: State<AppState>, session_token: Option<String>, payload: AddProductChargePayload) -> AppResult<Charge> {
     crate::auth::require(&state, session_token.as_deref(), false)?;
-    let conn = conn(&state);
-    service::add_product_charge(&conn, payload)
+    let mut conn = conn(&state);
+    service::add_product_charge(&mut conn, payload)
 }
 
 #[tauri::command]
 pub fn delete_charge(state: State<AppState>, session_token: Option<String>, charge_id: i64) -> AppResult<()> {
     let user = crate::auth::require(&state, session_token.as_deref(), true)?;
-    let conn = conn(&state);
-    service::delete_charge(&conn, &actor_from(&user), charge_id)
+    let mut conn = conn(&state);
+    service::delete_charge(&mut conn, &actor_from(&user), charge_id)
 }
 
 #[tauri::command]
@@ -189,8 +189,8 @@ pub fn create_reservation(state: State<AppState>, session_token: Option<String>,
 #[tauri::command]
 pub fn set_reservation_status(state: State<AppState>, session_token: Option<String>, reservation_id: i64, status: String) -> AppResult<Reservation> {
     crate::auth::require(&state, session_token.as_deref(), false)?;
-    let conn = conn(&state);
-    service::set_reservation_status(&conn, reservation_id, status)
+    let mut conn = conn(&state);
+    service::set_reservation_status(&mut conn, reservation_id, status)
 }
 
 #[tauri::command]

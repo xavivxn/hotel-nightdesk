@@ -12,7 +12,7 @@ SQLite local (`nightdesk.db` en el data dir). `PRAGMA foreign_keys=ON` y `journa
 
 ## Migraciones
 
-Archivos en `src-tauri/migrations/` (`001_init` … `006_stay_integrity`), cargados en el catálogo de `db.rs` y registrados en `schema_migrations`.
+Archivos en `src-tauri/migrations/` (`001_init` … `014_sync`), cargados en el catálogo de `db.rs` y registrados en `schema_migrations`.
 
 `migrate` ejecuta **solo** ids no aplicados, cada uno en transacción. Si hay pendientes, copia la DB con SQLite Online Backup API a `{stem}.pre-migrate-{id}.bak` junto al archivo. Fallo: rollback de la TX y restauración del `.bak`. No reescribir `001_init.sql` en instalaciones existentes. En `:memory:` no hay backup de archivo.
 
@@ -23,7 +23,9 @@ Migración nueva:
 3. El runner aplica el SQL solo si ese `id` no está en `schema_migrations`, luego `INSERT` el id
 4. Seed: `seed_if_empty` corre solo si `COUNT(rooms) = 0`. No duplicar seed.
 
-Tablas: `rooms`, `rate_plans`, `guests`, `reservations`, `stays`, `charges`, `payments`, `settings`, `products`, `users`, `login_attempts`.
+Tablas: `rooms`, `rate_plans`, `guests`, `reservations`, `stays`, `charges`, `payments`, `settings`, `products`, `users`, `login_attempts`, `sync_outbox`, `sync_state`.
+
+`014_sync` agrega `uid` (UUID v4, índice único + trigger `AFTER INSERT` si viene NULL) a las filas sincronizables; `version`/`updated_at` en catálogo (`rooms`, `rate_plans`, `products`, `users`); `charges.deleted_at` para baja lógica. La UI sigue usando `id INTEGER`. Mutación operativa: `sync::outbox::enqueue` en la misma TX.
 
 ## Habitación
 
@@ -62,4 +64,4 @@ Status: `hold` (alta) → `checked_in` (al check-in) | `cancelled` | `no_show`.
 
 `kind`: `hourly` | `night` | `overnight`. Montos `*_cents`. `night_cutoff_hour` 0–23. `active` 0/1.
 
-Cargos: `stay` | `extra_hour` | `tax` (computados al cerrar) y `surcharge` | `discount` (manuales). Pagos: `cash` | `card` | `transfer`.
+Cargos: `stay` | `extra_hour` | `tax` (computados al cerrar) y `surcharge` | `discount` (manuales). Bajas de recargo/descuento: `deleted_at`, nunca `DELETE`. Pagos: `cash` | `card` | `transfer`.

@@ -81,6 +81,10 @@ impl RateKind {
     }
 }
 
+fn version_one() -> i64 {
+    1
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Room {
     pub id: i64,
@@ -90,6 +94,8 @@ pub struct Room {
     pub status: String,
     pub notes: Option<String>,
     pub active: bool,
+    #[serde(default = "version_one")]
+    pub version: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,6 +109,8 @@ pub struct RatePlan {
     pub grace_minutes: i64,
     pub night_cutoff_hour: i64,
     pub active: bool,
+    #[serde(default = "version_one")]
+    pub version: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,6 +121,8 @@ pub struct Product {
     pub price_cents: i64,
     pub active: bool,
     pub sort_order: i64,
+    #[serde(default = "version_one")]
+    pub version: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -284,6 +294,10 @@ pub struct SaveRoomPayload {
     pub room_type: String,
     pub floor: i64,
     pub notes: Option<String>,
+    #[serde(default)]
+    pub operation_id: Option<String>,
+    #[serde(default)]
+    pub expected_version: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -297,6 +311,10 @@ pub struct SaveRatePlanPayload {
     pub grace_minutes: i64,
     pub night_cutoff_hour: i64,
     pub active: bool,
+    #[serde(default)]
+    pub operation_id: Option<String>,
+    #[serde(default)]
+    pub expected_version: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -345,6 +363,10 @@ pub struct SaveProductPayload {
     pub price_cents: i64,
     pub active: bool,
     pub sort_order: Option<i64>,
+    #[serde(default)]
+    pub operation_id: Option<String>,
+    #[serde(default)]
+    pub expected_version: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]

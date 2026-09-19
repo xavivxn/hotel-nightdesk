@@ -12,6 +12,7 @@ export type Room = {
   status: string;
   notes: string | null;
   active: boolean;
+  version: number;
 };
 
 export type RatePlan = {
@@ -24,6 +25,7 @@ export type RatePlan = {
   grace_minutes: number;
   night_cutoff_hour: number;
   active: boolean;
+  version: number;
 };
 
 export type Product = {
@@ -33,6 +35,7 @@ export type Product = {
   price_cents: number;
   active: boolean;
   sort_order: number;
+  version: number;
 };
 
 export type Stay = {
@@ -79,6 +82,7 @@ export type Charge = {
   description: string;
   amount_cents: number;
   created_at: string;
+  deleted_at?: string | null;
 };
 
 export type Payment = {

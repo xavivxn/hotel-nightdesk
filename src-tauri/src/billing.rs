@@ -322,6 +322,7 @@ mod tests {
             grace_minutes: grace,
             night_cutoff_hour: cutoff,
             active: true,
+            version: 1,
         }
     }
 

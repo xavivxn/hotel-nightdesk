@@ -1,7 +1,7 @@
 # Operación local, administración remota y respaldos (Supabase)
 
 Fecha: 17 de septiembre de 2026.
-Estado: requisitos y arquitectura acordados; implementación pendiente (I12 documenta; I06, N12, I07, N07, I11 e I08 implementan).
+Estado: requisitos y arquitectura acordados. I12 y N12 documentados/aplicados; I06 (`014_sync`, outbox local) implementado. Pendientes I07, N07, I11 e I08.
 
 Este documento sustituye el 17/09/2026 a [arquitectura-offline-vpn-backups.md](arquitectura-offline-vpn-backups.md). La operación del motel sigue sin depender de internet. Supabase se usa para que el admin consulte y edite catálogo a distancia, para replicar la operación en lectura y para el respaldo diario cifrado. No describe funciones ya terminadas ni modifica el presupuesto comercial.
 
@@ -23,8 +23,8 @@ Este documento sustituye el 17/09/2026 a [arquitectura-offline-vpn-backups.md](a
 - Tauri y React usan `src/lib/api.ts` como puente hacia comandos Rust (`invoke`) o el mock (`mockInvoke`). Aún no existe `supabaseInvoke`.
 - SQLite está en el directorio de datos de la aplicación (`nightdesk.db`), fuera del repositorio. WAL y claves foráneas están habilitados.
 - Roles, sesiones Argon2id, cierre transaccional, tickets, PDF diario y catálogo local están implementados (N01–N06, N11, I01–I04).
-- No están implementados `uid`/`version`/`sync_outbox`, el worker de sincronización, el esquema Supabase ni la subida diaria a Storage.
-- Migraciones SQLite aplicadas hasta `013_no_iva`. La migración de sync será `014_sync` (I06).
+- `uid`/`version`/`updated_at`, `charges.deleted_at`, `sync_outbox` y `sync_state` viven en SQLite (`014_sync`). El worker de sincronización y la subida diaria a Storage siguen pendientes (I07/I08). El esquema Supabase (N12) ya existe.
+- Migraciones SQLite aplicadas hasta `014_sync`.
 - I03 midió el snapshot: un mes sintético gzip ≈ 132 KiB. Esa cifra se reutiliza para Storage.
 
 ## 3. Arquitectura objetivo
@@ -83,7 +83,7 @@ Tablas de catálogo llevan `version INTEGER NOT NULL DEFAULT 1` y `updated_at`. 
 
 ### Outbox (recepción → Supabase)
 
-Tabla local `sync_outbox(id, operation_id UUID UNIQUE, entity, entity_uid, op, payload JSON, created_at, attempts, last_error, status pending|sent|rejected)`. `service.rs` la escribe **en la misma transacción** que el cambio de negocio en: check-in, checkout (cargos computados y pago), `add_charge`, `add_product_charge`, `delete_charge` (lógico), `convert_to_overnight`, `set_room_status`, `create_reservation`, `set_reservation_status`, `check_in_reservation` y alta de huésped.
+Tabla local `sync_outbox(id, operation_id UUID UNIQUE, root_operation_id, entity, entity_uid, op, payload JSON, created_at, attempts, last_error, status pending|sent|rejected)`. `service.rs` la escribe **en la misma transacción** que el cambio de negocio en: check-in, checkout (cargos computados; hoy no hay pago), `add_charge`, `add_product_charge`, `delete_charge` (lógico), `convert_to_overnight`, `set_room_status`, `create_reservation`, `set_reservation_status`, `check_in_reservation` y alta de huésped. Un checkout u otra mutación compuesta comparte `root_operation_id`; los sub-ops derivan un UUID v5 para no chocar con `sync_applied_ops`.
 
 El `operation_id` que ya genera `api.ts` (`withOperationId`) es la clave idempotente de extremo a extremo (`sync_outbox` y `sync_applied_ops` en Postgres). El worker envía lotes FIFO (hasta 200) a la RPC `sync_apply_ops(device_id, ops jsonb)`: una sola TX, ignora ops ya aplicadas, upsert incondicional (recepción manda). Backoff 5 s → 60 s. Una op pasa a `sent` solo tras confirmación.
 
@@ -184,7 +184,7 @@ El admin consulta aunque recepción esté apagada (réplica). Los cambios de cat
 Trazado en Jira MOT. Documentación de este archivo: I12 (`MOT-79`).
 
 1. **I12** — este documento, contrato, AGENTS y skills.
-2. **I06** (`MOT-18`, S2) — `014_sync`, outbox en TX, lista blanca, `expected_version` local. En paralelo **N12** (`MOT-80`) — esquema, RLS, RPC, Realtime, Auth, bucket.
+2. **I06** (`MOT-18`, S2) — hecho: `014_sync`, outbox en TX, lista blanca, `expected_version` local. En paralelo **N12** (`MOT-80`) — hecho: esquema, RLS, RPC, Realtime, Auth, bucket.
 3. **I07** (`MOT-21`, S3) — worker push/pull/Realtime. **I11** (`MOT-73`) — write-through y `hash_password`. **N07** (`MOT-19`) — modo remoto, `supabase.ts`, tablero en vivo, edición de catálogo.
 4. **I05** snapshot local; **I08** (`MOT-22`) subida a Storage; **N08** visibilidad.
 5. Instalador con selección de modo, pruebas (I09: RLS, replay, 6 h, Storage caído) y aceptación.

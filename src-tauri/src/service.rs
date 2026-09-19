@@ -2,6 +2,7 @@ use crate::billing::{self, BillingContext};
 use crate::db::{self, now_rfc3339};
 use crate::error::{AppError, AppResult};
 use crate::models::*;
+use crate::sync::outbox::{self, Entity, OutboxOp};
 use rusqlite::{params, Connection, OptionalExtension};
 
 pub const CONTRACT_VERSION: u32 = 1;
@@ -72,6 +73,52 @@ pub fn accept_reserved_fields(
         }
     }
     Ok(())
+}
+
+fn assert_expected_version(current: i64, expected: &Option<i64>) -> AppResult<()> {
+    if let Some(version) = expected {
+        if *version != current {
+            return Err(AppError::conflict(
+                "La ficha cambió; recargá antes de guardar",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn enqueue_guest_stay_room(
+    conn: &Connection,
+    operation_id: &str,
+    guest_id: i64,
+    stay_id: i64,
+    room_id: i64,
+    reservation_id: Option<i64>,
+) -> AppResult<()> {
+    let mut ops = vec![
+        OutboxOp::upsert(
+            Entity::Guest,
+            db::uid_of(conn, "guests", guest_id)?,
+            db::payload_for_guest(conn, guest_id)?,
+        ),
+    ];
+    if let Some(res_id) = reservation_id {
+        ops.push(OutboxOp::upsert(
+            Entity::Reservation,
+            db::uid_of(conn, "reservations", res_id)?,
+            db::payload_for_reservation(conn, res_id)?,
+        ));
+    }
+    ops.push(OutboxOp::upsert(
+        Entity::Stay,
+        db::uid_of(conn, "stays", stay_id)?,
+        db::payload_for_stay(conn, stay_id)?,
+    ));
+    ops.push(OutboxOp::upsert(
+        Entity::Room,
+        db::uid_of(conn, "rooms", room_id)?,
+        db::payload_for_room(conn, room_id)?,
+    ));
+    outbox::enqueue(conn, operation_id, &ops)
 }
 
 pub fn contract_info(conn: &Connection) -> AppResult<ContractInfo> {
@@ -209,7 +256,9 @@ pub fn close_account(
     stay: &Stay,
     bill: &BillPreview,
     checkout_at: &str,
+    operation_id: Option<String>,
 ) -> AppResult<()> {
+    let root = outbox::resolve_operation_id(&operation_id);
     let tx = conn.transaction()?;
     persist_computed_charges(&tx, bill)?;
     tx.execute(
@@ -238,28 +287,43 @@ pub fn close_account(
     let bytes = crate::printer::build_receipt(&settings, &closed, bill);
     tx.execute("INSERT INTO receipt_snapshots(stay_id, bytes, created_at) VALUES (?1, ?2, ?3)",
         params![stay.id, bytes, checkout_at])?;
+
+    let mut ops = vec![OutboxOp::upsert(
+        Entity::Stay,
+        db::uid_of(&tx, "stays", stay.id)?,
+        db::payload_for_stay(&tx, stay.id)?,
+    )];
+    let mut stmt = tx.prepare(
+        "SELECT id FROM charges WHERE stay_id = ?1 AND kind IN ('stay', 'extra_hour', 'tax') AND deleted_at IS NULL",
+    )?;
+    let charge_ids: Vec<i64> = stmt
+        .query_map([stay.id], |row| row.get(0))?
+        .filter_map(|row| row.ok())
+        .collect();
+    drop(stmt);
+    for charge_id in charge_ids {
+        ops.push(OutboxOp::upsert(
+            Entity::Charge,
+            db::uid_of(&tx, "charges", charge_id)?,
+            db::payload_for_charge(&tx, charge_id)?,
+        ));
+    }
+    ops.push(OutboxOp::upsert(
+        Entity::Room,
+        db::uid_of(&tx, "rooms", stay.room_id)?,
+        db::payload_for_room(&tx, stay.room_id)?,
+    ));
+    outbox::enqueue(&tx, &root, &ops)?;
     tx.commit()?;
     Ok(())
 }
 
-fn map_room(row: &rusqlite::Row<'_>) -> rusqlite::Result<Room> {
-    Ok(Room {
-        id: row.get(0)?,
-        number: row.get(1)?,
-        room_type: row.get(2)?,
-        floor: row.get(3)?,
-        status: row.get(4)?,
-        notes: row.get(5)?,
-        active: row.get::<_, i64>(6)? != 0,
-    })
-}
-
 pub fn list_board(conn: &Connection) -> AppResult<Vec<BoardRoom>> {
     let mut stmt = conn.prepare(
-        "SELECT id, number, room_type, floor, status, notes, active FROM rooms WHERE active = 1 ORDER BY floor, number",
+        "SELECT id, number, room_type, floor, status, notes, active, version FROM rooms WHERE active = 1 ORDER BY floor, number",
     )?;
     let rooms: Vec<Room> = stmt
-        .query_map([], map_room)?
+        .query_map([], db::map_room)?
         .filter_map(|r| r.ok())
         .collect();
 
@@ -308,10 +372,10 @@ pub fn list_board(conn: &Connection) -> AppResult<Vec<BoardRoom>> {
 
 pub fn list_rooms(conn: &Connection) -> AppResult<Vec<Room>> {
     let mut stmt = conn.prepare(
-        "SELECT id, number, room_type, floor, status, notes, active FROM rooms WHERE active = 1 ORDER BY floor, number",
+        "SELECT id, number, room_type, floor, status, notes, active, version FROM rooms WHERE active = 1 ORDER BY floor, number",
     )?;
     let rooms = stmt
-        .query_map([], map_room)?
+        .query_map([], db::map_room)?
         .filter_map(|r| r.ok())
         .collect();
     Ok(rooms)
@@ -319,37 +383,42 @@ pub fn list_rooms(conn: &Connection) -> AppResult<Vec<Room>> {
 
 pub fn save_room(conn: &Connection, actor: &Actor, payload: SaveRoomPayload) -> AppResult<Room> {
     authorize(actor, Operation::SaveRoom)?;
+    accept_reserved_fields(&payload.operation_id, &payload.expected_version)?;
     if payload.number.trim().is_empty() {
         return Err(AppError::msg("El número de habitación es obligatorio"));
     }
+    let now = now_rfc3339();
     if let Some(id) = payload.id {
+        let current = db::get_room(conn, id)?;
+        assert_expected_version(current.version, &payload.expected_version)?;
         conn.execute(
-            "UPDATE rooms SET number = ?1, room_type = ?2, floor = ?3, notes = ?4 WHERE id = ?5",
+            "UPDATE rooms SET number = ?1, room_type = ?2, floor = ?3, notes = ?4, version = version + 1, updated_at = ?5 WHERE id = ?6",
             params![
                 payload.number.trim(),
                 payload.room_type.trim(),
                 payload.floor,
                 payload.notes,
+                now,
                 id
             ],
         )?;
         db::get_room(conn, id)
     } else {
         conn.execute(
-            "INSERT INTO rooms (number, room_type, floor, status, notes, created_at) VALUES (?1, ?2, ?3, 'available', ?4, ?5)",
+            "INSERT INTO rooms (number, room_type, floor, status, notes, created_at, updated_at) VALUES (?1, ?2, ?3, 'available', ?4, ?5, ?5)",
             params![
                 payload.number.trim(),
                 payload.room_type.trim(),
                 payload.floor,
                 payload.notes,
-                now_rfc3339()
+                now
             ],
         )?;
         db::get_room(conn, conn.last_insert_rowid())
     }
 }
 
-pub fn set_room_status(conn: &Connection, room_id: i64, status: String) -> AppResult<Room> {
+pub fn set_room_status(conn: &mut Connection, room_id: i64, status: String) -> AppResult<Room> {
     let allowed = ["available", "dirty", "blocked"];
     if !allowed.contains(&status.as_str()) {
         return Err(AppError::msg("Estado de habitación inválido"));
@@ -363,8 +432,21 @@ pub fn set_room_status(conn: &Connection, room_id: i64, status: String) -> AppRe
             "No se puede cambiar el estado de una habitación ocupada",
         ));
     }
-    db::set_room_status(conn, room_id, &status)?;
-    db::get_room(conn, room_id)
+    let root = outbox::resolve_operation_id(&None);
+    let tx = conn.transaction()?;
+    db::set_room_status(&tx, room_id, &status)?;
+    outbox::enqueue(
+        &tx,
+        &root,
+        &[OutboxOp::upsert(
+            Entity::Room,
+            db::uid_of(&tx, "rooms", room_id)?,
+            db::payload_for_room(&tx, room_id)?,
+        )],
+    )?;
+    let room = db::get_room(&tx, room_id)?;
+    tx.commit()?;
+    Ok(room)
 }
 
 pub fn save_rate_plan(
@@ -373,14 +455,17 @@ pub fn save_rate_plan(
     payload: SaveRatePlanPayload,
 ) -> AppResult<RatePlan> {
     authorize(actor, Operation::SaveRatePlan)?;
+    accept_reserved_fields(&payload.operation_id, &payload.expected_version)?;
     if payload.name.trim().is_empty() {
         return Err(AppError::msg("El nombre de la tarifa es obligatorio"));
     }
     let active = if payload.active { 1 } else { 0 };
     if let Some(id) = payload.id {
+        let current = db::get_rate_plan(conn, id)?;
+        assert_expected_version(current.version, &payload.expected_version)?;
         conn.execute(
             "UPDATE rate_plans SET name=?1, kind=?2, base_amount_cents=?3, extra_hour_cents=?4,
-             included_hours=?5, grace_minutes=?6, night_cutoff_hour=?7, active=?8 WHERE id=?9",
+             included_hours=?5, grace_minutes=?6, night_cutoff_hour=?7, active=?8, version = version + 1, updated_at=?9 WHERE id=?10",
             params![
                 payload.name.trim(),
                 payload.kind.as_str(),
@@ -390,6 +475,7 @@ pub fn save_rate_plan(
                 payload.grace_minutes.max(0),
                 payload.night_cutoff_hour.clamp(0, 23),
                 active,
+                now_rfc3339(),
                 id
             ],
         )?;
@@ -427,20 +513,22 @@ fn ensure_dormida_window(cutoff_hour: i64) -> AppResult<()> {
 
 pub fn check_in_on(conn: &mut Connection, payload: CheckInPayload) -> AppResult<Stay> {
     accept_reserved_fields(&payload.operation_id, &payload.expected_version)?;
+    let root = outbox::resolve_operation_id(&payload.operation_id);
     let tx = conn.transaction()?;
-    let stay_id = check_in_in_tx(&tx, payload)?;
+    let stay_id = check_in_in_tx(&tx, payload, &root)?;
     tx.commit()?;
     db::get_stay(conn, stay_id)
 }
 
 #[cfg(test)]
 fn check_in_on_failing(conn: &mut Connection, payload: CheckInPayload) -> AppResult<Stay> {
+    let root = outbox::resolve_operation_id(&payload.operation_id);
     let tx = conn.transaction()?;
-    let _stay_id = check_in_in_tx(&tx, payload)?;
+    let _stay_id = check_in_in_tx(&tx, payload, &root)?;
     Err(AppError::msg("fallo inyectado"))
 }
 
-fn check_in_in_tx(conn: &Connection, payload: CheckInPayload) -> AppResult<i64> {
+fn check_in_in_tx(conn: &Connection, payload: CheckInPayload, operation_id: &str) -> AppResult<i64> {
     let room = db::get_room(conn, payload.room_id)?;
     if !room.active {
         return Err(AppError::msg("La habitación ya no está habilitada"));
@@ -534,8 +622,10 @@ fn check_in_in_tx(conn: &Connection, payload: CheckInPayload) -> AppResult<i64> 
             error.into()
         }
     })?;
+    let stay_id = conn.last_insert_rowid();
     db::set_room_status(conn, room.id, "occupied")?;
-    Ok(conn.last_insert_rowid())
+    enqueue_guest_stay_room(conn, operation_id, guest_id, stay_id, room.id, reservation_id)?;
+    Ok(stay_id)
 }
 
 pub fn preview_bill(conn: &Connection, stay_id: i64) -> AppResult<BillPreview> {
@@ -554,7 +644,7 @@ pub fn get_stay_detail(
     Ok((stay, bill, charges, payments))
 }
 
-pub fn convert_to_overnight(conn: &Connection, stay_id: i64) -> AppResult<Stay> {
+pub fn convert_to_overnight(conn: &mut Connection, stay_id: i64) -> AppResult<Stay> {
     let stay = db::get_stay(conn, stay_id)?;
     if stay.status != "open" {
         return Err(AppError::conflict("La estadía ya está cerrada"));
@@ -568,11 +658,24 @@ pub fn convert_to_overnight(conn: &Connection, stay_id: i64) -> AppResult<Stay> 
             .with_timezone(&chrono::Utc)
             .to_rfc3339()
     });
-    conn.execute(
+    let root = outbox::resolve_operation_id(&None);
+    let tx = conn.transaction()?;
+    tx.execute(
         "UPDATE stays SET converted_to_overnight = 1, overnight_rate_plan_id = ?1, expected_checkout_at = COALESCE(?2, expected_checkout_at) WHERE id = ?3",
         params![overnight.id, expected_checkout, stay_id],
     )?;
-    db::get_stay(conn, stay_id)
+    outbox::enqueue(
+        &tx,
+        &root,
+        &[OutboxOp::upsert(
+            Entity::Stay,
+            db::uid_of(&tx, "stays", stay_id)?,
+            db::payload_for_stay(&tx, stay_id)?,
+        )],
+    )?;
+    let stay = db::get_stay(&tx, stay_id)?;
+    tx.commit()?;
+    Ok(stay)
 }
 
 pub fn save_product(
@@ -581,6 +684,11 @@ pub fn save_product(
     payload: SaveProductPayload,
 ) -> AppResult<Product> {
     authorize(actor, Operation::SaveProduct)?;
+    accept_reserved_fields(&payload.operation_id, &payload.expected_version)?;
+    if let Some(id) = payload.id {
+        let current = db::get_product(conn, id)?;
+        assert_expected_version(current.version, &payload.expected_version)?;
+    }
     db::save_product(
         conn,
         payload.id,
@@ -602,7 +710,7 @@ pub fn set_product_active(
     db::set_product_active(conn, product_id, active)
 }
 
-pub fn add_charge(conn: &Connection, actor: &Actor, payload: AddChargePayload) -> AppResult<Charge> {
+pub fn add_charge(conn: &mut Connection, actor: &Actor, payload: AddChargePayload) -> AppResult<Charge> {
     authorize(actor, Operation::AddCharge)?;
     accept_reserved_fields(&payload.operation_id, &payload.expected_version)?;
     let stay = db::get_stay(conn, payload.stay_id)?;
@@ -627,13 +735,26 @@ pub fn add_charge(conn: &Connection, actor: &Actor, payload: AddChargePayload) -
     if payload.amount_cents == 0 {
         return Err(AppError::msg("El importe del cargo debe ser distinto de cero"));
     }
+    let root = outbox::resolve_operation_id(&payload.operation_id);
     let now = now_rfc3339();
-    conn.execute(
+    let tx = conn.transaction()?;
+    tx.execute(
         "INSERT INTO charges (stay_id, kind, description, amount_cents, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
         params![payload.stay_id, kind, payload.description.trim(), amount, now],
     )?;
+    let charge_id = tx.last_insert_rowid();
+    outbox::enqueue(
+        &tx,
+        &root,
+        &[OutboxOp::upsert(
+            Entity::Charge,
+            db::uid_of(&tx, "charges", charge_id)?,
+            db::payload_for_charge(&tx, charge_id)?,
+        )],
+    )?;
+    tx.commit()?;
     Ok(Charge {
-        id: conn.last_insert_rowid(),
+        id: charge_id,
         stay_id: payload.stay_id,
         kind: kind.into(),
         description: payload.description.trim().into(),
@@ -643,7 +764,7 @@ pub fn add_charge(conn: &Connection, actor: &Actor, payload: AddChargePayload) -
 }
 
 pub fn add_product_charge(
-    conn: &Connection,
+    conn: &mut Connection,
     payload: AddProductChargePayload,
 ) -> AppResult<Charge> {
     accept_reserved_fields(&payload.operation_id, &payload.expected_version)?;
@@ -660,13 +781,26 @@ pub fn add_product_charge(
     if product.price_cents <= 0 {
         return Err(AppError::msg("El precio del producto no es válido"));
     }
+    let root = outbox::resolve_operation_id(&payload.operation_id);
     let now = now_rfc3339();
-    conn.execute(
+    let tx = conn.transaction()?;
+    tx.execute(
         "INSERT INTO charges (stay_id, kind, description, amount_cents, created_at) VALUES (?1, 'surcharge', ?2, ?3, ?4)",
         params![payload.stay_id, product.name, product.price_cents, now],
     )?;
+    let charge_id = tx.last_insert_rowid();
+    outbox::enqueue(
+        &tx,
+        &root,
+        &[OutboxOp::upsert(
+            Entity::Charge,
+            db::uid_of(&tx, "charges", charge_id)?,
+            db::payload_for_charge(&tx, charge_id)?,
+        )],
+    )?;
+    tx.commit()?;
     Ok(Charge {
-        id: conn.last_insert_rowid(),
+        id: charge_id,
         stay_id: payload.stay_id,
         kind: "surcharge".into(),
         description: product.name,
@@ -675,11 +809,11 @@ pub fn add_product_charge(
     })
 }
 
-pub fn delete_charge(conn: &Connection, actor: &Actor, charge_id: i64) -> AppResult<()> {
+pub fn delete_charge(conn: &mut Connection, actor: &Actor, charge_id: i64) -> AppResult<()> {
     authorize(actor, Operation::DeleteCharge)?;
     let stay_id: i64 = conn
         .query_row(
-            "SELECT stay_id FROM charges WHERE id = ?1",
+            "SELECT stay_id FROM charges WHERE id = ?1 AND deleted_at IS NULL",
             [charge_id],
             |row| row.get(0),
         )
@@ -690,10 +824,26 @@ pub fn delete_charge(conn: &Connection, actor: &Actor, charge_id: i64) -> AppRes
             "No se pueden modificar cargos de una cuenta cerrada",
         ));
     }
-    conn.execute(
-        "DELETE FROM charges WHERE id = ?1 AND kind IN ('surcharge', 'discount')",
-        [charge_id],
+    let root = outbox::resolve_operation_id(&None);
+    let now = now_rfc3339();
+    let tx = conn.transaction()?;
+    tx.execute(
+        "UPDATE charges SET deleted_at = ?1 WHERE id = ?2 AND kind IN ('surcharge', 'discount') AND deleted_at IS NULL",
+        params![now, charge_id],
     )?;
+    if tx.changes() != 1 {
+        return Err(AppError::not_found("Cargo no encontrado"));
+    }
+    outbox::enqueue(
+        &tx,
+        &root,
+        &[OutboxOp::delete(
+            Entity::Charge,
+            db::uid_of(&tx, "charges", charge_id)?,
+            db::payload_for_charge(&tx, charge_id)?,
+        )],
+    )?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -705,7 +855,7 @@ pub fn check_out(conn: &mut Connection, payload: &CheckOutPayload) -> AppResult<
     }
     let bill = build_preview(conn, &stay)?;
     let checkout_at = now_rfc3339();
-    close_account(conn, &stay, &bill, &checkout_at)?;
+    close_account(conn, &stay, &bill, &checkout_at, payload.operation_id.clone())?;
     let mut stay = stay;
     stay.status = "closed".into();
     stay.check_out_at = Some(checkout_at);
@@ -743,8 +893,9 @@ pub fn create_reservation_on(
     payload: CreateReservationPayload,
 ) -> AppResult<Reservation> {
     accept_reserved_fields(&payload.operation_id, &payload.expected_version)?;
+    let root = outbox::resolve_operation_id(&payload.operation_id);
     let tx = conn.transaction()?;
-    let reservation_id = create_reservation_in_tx(&tx, payload)?;
+    let reservation_id = create_reservation_in_tx(&tx, payload, &root)?;
     tx.commit()?;
     db::get_reservation(conn, reservation_id)
 }
@@ -754,12 +905,17 @@ fn create_reservation_on_failing(
     conn: &mut Connection,
     payload: CreateReservationPayload,
 ) -> AppResult<Reservation> {
+    let root = outbox::resolve_operation_id(&payload.operation_id);
     let tx = conn.transaction()?;
-    let _reservation_id = create_reservation_in_tx(&tx, payload)?;
+    let _reservation_id = create_reservation_in_tx(&tx, payload, &root)?;
     Err(AppError::msg("fallo inyectado"))
 }
 
-fn create_reservation_in_tx(conn: &Connection, payload: CreateReservationPayload) -> AppResult<i64> {
+fn create_reservation_in_tx(
+    conn: &Connection,
+    payload: CreateReservationPayload,
+    operation_id: &str,
+) -> AppResult<i64> {
     let room = db::get_room(conn, payload.room_id)?;
     if !room.active {
         return Err(AppError::msg("La habitación ya no está habilitada"));
@@ -809,11 +965,28 @@ fn create_reservation_in_tx(conn: &Connection, payload: CreateReservationPayload
             now_rfc3339()
         ],
     )?;
-    Ok(conn.last_insert_rowid())
+    let reservation_id = conn.last_insert_rowid();
+    outbox::enqueue(
+        conn,
+        operation_id,
+        &[
+            OutboxOp::upsert(
+                Entity::Guest,
+                db::uid_of(conn, "guests", guest.id)?,
+                db::payload_for_guest(conn, guest.id)?,
+            ),
+            OutboxOp::upsert(
+                Entity::Reservation,
+                db::uid_of(conn, "reservations", reservation_id)?,
+                db::payload_for_reservation(conn, reservation_id)?,
+            ),
+        ],
+    )?;
+    Ok(reservation_id)
 }
 
 pub fn set_reservation_status(
-    conn: &Connection,
+    conn: &mut Connection,
     reservation_id: i64,
     status: String,
 ) -> AppResult<Reservation> {
@@ -827,11 +1000,24 @@ pub fn set_reservation_status(
             "Solo se pueden actualizar reservas en espera",
         ));
     }
-    conn.execute(
+    let root = outbox::resolve_operation_id(&None);
+    let tx = conn.transaction()?;
+    tx.execute(
         "UPDATE reservations SET status = ?1 WHERE id = ?2",
         params![status, reservation_id],
     )?;
-    db::get_reservation(conn, reservation_id)
+    outbox::enqueue(
+        &tx,
+        &root,
+        &[OutboxOp::upsert(
+            Entity::Reservation,
+            db::uid_of(&tx, "reservations", reservation_id)?,
+            db::payload_for_reservation(&tx, reservation_id)?,
+        )],
+    )?;
+    let reservation = db::get_reservation(&tx, reservation_id)?;
+    tx.commit()?;
+    Ok(reservation)
 }
 
 pub fn check_in_reservation(conn: &mut Connection, reservation_id: i64) -> AppResult<Stay> {
@@ -846,7 +1032,7 @@ pub fn check_in_reservation(conn: &mut Connection, reservation_id: i64) -> AppRe
             rate_plan_id: reservation.rate_plan_id,
             expected_hours: Some(reservation.expected_nights * 24),
             reservation_id: Some(reservation.id),
-            operation_id: None,
+            operation_id: Some(outbox::resolve_operation_id(&None)),
             expected_version: None,
         },
     )
@@ -967,7 +1153,7 @@ mod tests {
         let (mut conn, stay) = open_stay_fixture()?;
         assert!(receipt_bytes(&conn, stay.id).is_err());
         let bill = build_preview(&conn, &stay)?;
-        close_account(&mut conn, &stay, &bill, &now_rfc3339())?;
+        close_account(&mut conn, &stay, &bill, &now_rfc3339(), None)?;
         let original = receipt_bytes(&conn, stay.id)?;
         conn.execute("UPDATE rate_plans SET base_amount_cents=999999", [])?;
         conn.execute("UPDATE rooms SET number='CAMBIADA' WHERE id=1", [])?;
@@ -984,7 +1170,7 @@ mod tests {
         let (mut conn, stay) = open_stay_fixture()?;
         conn.execute_batch("CREATE TRIGGER fail_receipt BEFORE INSERT ON receipt_snapshots BEGIN SELECT RAISE(ABORT, 'injected'); END;")?;
         let bill = build_preview(&conn, &stay)?;
-        assert!(close_account(&mut conn, &stay, &bill, &now_rfc3339()).is_err());
+        assert!(close_account(&mut conn, &stay, &bill, &now_rfc3339(), None).is_err());
         assert_eq!(db::get_stay(&conn, stay.id)?.status, "open");
         assert_eq!(conn.query_row::<i64, _, _>("SELECT COUNT(*) FROM charges", [], |r| r.get(0))?, 0);
         Ok(())
@@ -1039,7 +1225,7 @@ mod tests {
     fn closing_account_persists_total_and_does_not_create_payment() -> AppResult<()> {
         let (mut conn, stay) = open_stay_fixture()?;
         let bill = build_preview(&conn, &stay)?;
-        close_account(&mut conn, &stay, &bill, &now_rfc3339())?;
+        close_account(&mut conn, &stay, &bill, &now_rfc3339(), None)?;
 
         conn.execute("UPDATE rate_plans SET base_amount_cents = 9999999 WHERE id = 1", [])?;
         let closed = db::get_stay(&conn, stay.id)?;
@@ -1065,8 +1251,8 @@ mod tests {
     fn closing_same_account_twice_is_rejected_without_rewriting_history() -> AppResult<()> {
         let (mut conn, stay) = open_stay_fixture()?;
         let bill = build_preview(&conn, &stay)?;
-        close_account(&mut conn, &stay, &bill, &now_rfc3339())?;
-        let error = close_account(&mut conn, &stay, &bill, &now_rfc3339()).expect_err("duplicate close");
+        close_account(&mut conn, &stay, &bill, &now_rfc3339(), None)?;
+        let error = close_account(&mut conn, &stay, &bill, &now_rfc3339(), None).expect_err("duplicate close");
         assert!(error.to_string().contains("ya está cerrada"));
         assert_eq!(error.code(), ErrorCode::Conflict);
         let count: i64 = conn.query_row(
@@ -1147,7 +1333,7 @@ mod tests {
     fn preview_bill_keeps_closed_snapshot_after_rate_and_tax_change() -> AppResult<()> {
         let (mut conn, stay) = open_stay_fixture()?;
         let bill = build_preview(&conn, &stay)?;
-        close_account(&mut conn, &stay, &bill, &now_rfc3339())?;
+        close_account(&mut conn, &stay, &bill, &now_rfc3339(), None)?;
         conn.execute(
             "UPDATE rate_plans SET base_amount_cents = 9999999, kind = 'night' WHERE id = 1",
             [],
@@ -1171,7 +1357,7 @@ mod tests {
             .next()
             .expect("seed products");
         add_product_charge(
-            &conn,
+            &mut conn,
             AddProductChargePayload {
                 stay_id: stay.id,
                 product_id: product.id,
@@ -1204,7 +1390,7 @@ mod tests {
         let mut conn = db::open(Path::new(":memory:"))?;
         let stay = check_in_on(&mut conn, walk_in_payload(1))?;
         let charge = add_charge(
-            &conn,
+            &mut conn,
             &admin_actor(),
             AddChargePayload {
                 stay_id: stay.id,
@@ -1215,9 +1401,9 @@ mod tests {
                 expected_version: None,
             },
         )?;
-        let denied = delete_charge(&conn, &reception_actor(), charge.id).expect_err("forbidden");
+        let denied = delete_charge(&mut conn, &reception_actor(), charge.id).expect_err("forbidden");
         assert_eq!(denied.code(), ErrorCode::Forbidden);
-        delete_charge(&conn, &admin_actor(), charge.id)?;
+        delete_charge(&mut conn, &admin_actor(), charge.id)?;
         Ok(())
     }
 
@@ -1228,6 +1414,181 @@ mod tests {
         payload.operation_id = Some("   ".into());
         let error = check_in_on(&mut conn, payload).expect_err("empty op id");
         assert_eq!(error.code(), ErrorCode::Validation);
+        Ok(())
+    }
+
+    fn outbox_entities(conn: &Connection, root: &str) -> AppResult<Vec<String>> {
+        let root = crate::sync::outbox::resolve_operation_id(&Some(root.to_string()));
+        let mut stmt = conn.prepare(
+            "SELECT entity FROM sync_outbox WHERE root_operation_id = ?1 ORDER BY id",
+        )?;
+        let rows = stmt.query_map([root], |row| row.get::<_, String>(0))?;
+        Ok(rows.filter_map(|row| row.ok()).collect())
+    }
+
+    fn pending_outbox(conn: &Connection) -> AppResult<i64> {
+        conn.query_row(
+            "SELECT COUNT(*) FROM sync_outbox WHERE status = 'pending'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(Into::into)
+    }
+
+    #[test]
+    fn check_in_writes_outbox_for_guest_stay_and_room() -> AppResult<()> {
+        let mut conn = db::open(Path::new(":memory:"))?;
+        let mut payload = walk_in_payload(1);
+        payload.operation_id = Some("op-checkin-1".into());
+        check_in_on(&mut conn, payload)?;
+        let entities = outbox_entities(&conn, "op-checkin-1")?;
+        assert_eq!(entities, ["guest", "stay", "room"]);
+        assert_eq!(pending_outbox(&conn)?, 3);
+        Ok(())
+    }
+
+    #[test]
+    fn checkout_outbox_shares_root_and_rolls_back_with_receipt_failure() -> AppResult<()> {
+        let mut conn = db::open(Path::new(":memory:"))?;
+        let stay = check_in_on(&mut conn, walk_in_payload(1))?;
+        let before = pending_outbox(&conn)?;
+        conn.execute_batch(
+            "CREATE TRIGGER fail_receipt BEFORE INSERT ON receipt_snapshots BEGIN SELECT RAISE(ABORT, 'injected'); END;",
+        )?;
+        let bill = build_preview(&conn, &stay)?;
+        assert!(close_account(
+            &mut conn,
+            &stay,
+            &bill,
+            &now_rfc3339(),
+            Some("op-checkout-fail".into())
+        )
+        .is_err());
+        assert_eq!(pending_outbox(&conn)?, before);
+        assert_eq!(db::get_stay(&conn, stay.id)?.status, "open");
+
+        conn.execute_batch("DROP TRIGGER fail_receipt;")?;
+        let stay = db::get_stay(&conn, stay.id)?;
+        let bill = build_preview(&conn, &stay)?;
+        close_account(
+            &mut conn,
+            &stay,
+            &bill,
+            &now_rfc3339(),
+            Some("op-checkout-ok".into()),
+        )?;
+        let entities = outbox_entities(&conn, "op-checkout-ok")?;
+        assert!(entities.contains(&"stay".into()));
+        assert!(entities.contains(&"charge".into()));
+        assert!(entities.contains(&"room".into()));
+        assert!(entities.iter().all(|_| true));
+        let roots: i64 = conn.query_row(
+            "SELECT COUNT(DISTINCT root_operation_id) FROM sync_outbox WHERE root_operation_id = ?1",
+            [crate::sync::outbox::resolve_operation_id(&Some(
+                "op-checkout-ok".into(),
+            ))],
+            |row| row.get(0),
+        )?;
+        assert_eq!(roots, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn injected_check_in_failure_leaves_no_outbox_row() -> AppResult<()> {
+        let mut conn = db::open(Path::new(":memory:"))?;
+        let mut payload = walk_in_payload(1);
+        payload.operation_id = Some("op-checkin-fail".into());
+        assert!(check_in_on_failing(&mut conn, payload).is_err());
+        assert_eq!(pending_outbox(&conn)?, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn repeating_operation_id_is_conflict_without_second_stay() -> AppResult<()> {
+        let mut conn = db::open(Path::new(":memory:"))?;
+        let mut first = walk_in_payload(1);
+        first.operation_id = Some("op-same".into());
+        check_in_on(&mut conn, first)?;
+        let mut second = walk_in_payload(2);
+        second.operation_id = Some("op-same".into());
+        let error = check_in_on(&mut conn, second).expect_err("duplicate op");
+        assert_eq!(error.code(), ErrorCode::Conflict);
+        let stays: i64 = conn.query_row("SELECT COUNT(*) FROM stays", [], |row| row.get(0))?;
+        assert_eq!(stays, 1);
+        let outbox: i64 = conn.query_row("SELECT COUNT(*) FROM sync_outbox", [], |row| row.get(0))?;
+        assert_eq!(outbox, 3);
+        Ok(())
+    }
+
+    #[test]
+    fn delete_charge_is_logical_and_enqueues_delete() -> AppResult<()> {
+        let mut conn = db::open(Path::new(":memory:"))?;
+        let stay = check_in_on(&mut conn, walk_in_payload(1))?;
+        let charge = add_charge(
+            &mut conn,
+            &admin_actor(),
+            AddChargePayload {
+                stay_id: stay.id,
+                kind: "surcharge".into(),
+                description: "Extra".into(),
+                amount_cents: 5_000,
+                operation_id: Some("op-add-charge".into()),
+                expected_version: None,
+            },
+        )?;
+        delete_charge(&mut conn, &admin_actor(), charge.id)?;
+        let deleted_at: Option<String> = conn.query_row(
+            "SELECT deleted_at FROM charges WHERE id = ?1",
+            [charge.id],
+            |row| row.get(0),
+        )?;
+        assert!(deleted_at.is_some());
+        assert!(db::list_charges(&conn, stay.id)?.is_empty());
+        let preview = preview_bill(&conn, stay.id)?;
+        assert!(!preview.lines.iter().any(|line| line.kind == "surcharge"));
+        let ops: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sync_outbox WHERE entity = 'charge' AND op = 'delete'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(ops, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn save_room_rejects_stale_expected_version() -> AppResult<()> {
+        let conn = db::open(Path::new(":memory:"))?;
+        let room = db::get_room(&conn, 1)?;
+        let error = save_room(
+            &conn,
+            &admin_actor(),
+            SaveRoomPayload {
+                id: Some(room.id),
+                number: room.number.clone(),
+                room_type: room.room_type.clone(),
+                floor: room.floor,
+                notes: room.notes.clone(),
+                operation_id: None,
+                expected_version: Some(room.version - 1),
+            },
+        )
+        .expect_err("stale version");
+        assert_eq!(error.code(), ErrorCode::Conflict);
+        let updated = save_room(
+            &conn,
+            &admin_actor(),
+            SaveRoomPayload {
+                id: Some(room.id),
+                number: "99".into(),
+                room_type: room.room_type,
+                floor: room.floor,
+                notes: room.notes,
+                operation_id: None,
+                expected_version: Some(room.version),
+            },
+        )?;
+        assert_eq!(updated.version, room.version + 1);
+        assert_eq!(updated.number, "99");
         Ok(())
     }
 }
