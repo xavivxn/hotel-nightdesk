@@ -1,8 +1,9 @@
+import { Ban, Bath, BrushCleaning, CalendarClock, Check, Crown, Hourglass, Timer } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { forwardRef, useEffect, useRef, useState, type CSSProperties } from "react";
 import { formatDuration, formatMoney, statusLabel } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { BoardRoom } from "@/lib/types";
-import { Ban, Bath, BrushCleaning, CalendarClock, Check, Crown, Hourglass, Timer } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 
 const fills: Record<string, string> = {
   available: "room-available",
@@ -77,29 +78,69 @@ function roomKind(type: string) {
   return { isJacuzzi, isSuite: !isStandard && !isJacuzzi };
 }
 
-export function RoomCard({
-  item,
-  currency,
-  onClick,
-}: {
-  item: BoardRoom;
-  currency: string;
-  onClick: () => void;
-}) {
+export const RoomCard = forwardRef<
+  HTMLButtonElement,
+  {
+    item: BoardRoom;
+    currency: string;
+    onClick: () => void;
+    enterDelayMs?: number;
+    onStatusChanged?: (roomId: number, status: string, el: HTMLButtonElement) => void;
+  }
+>(function RoomCard(
+  { item, currency, onClick, enterDelayMs = 0, onStatusChanged },
+  ref,
+) {
   const status = item.display_status;
   const Icon = icons[status] ?? Check;
   const time = timeStatus(item);
   const { isJacuzzi, isSuite } = roomKind(item.room.room_type);
   const showJacuzzi = isJacuzzi && !item.stay;
-  const total = item.stay && Number.isFinite(Number(item.estimated_total_cents))
-    ? Number(item.estimated_total_cents)
-    : null;
+  const total =
+    item.stay && Number.isFinite(Number(item.estimated_total_cents))
+      ? Number(item.estimated_total_cents)
+      : null;
+
+  const localRef = useRef<HTMLButtonElement | null>(null);
+  const prevStatus = useRef(status);
+  const [statusFlash, setStatusFlash] = useState(false);
+  const [bodyKey, setBodyKey] = useState(0);
+
+  useEffect(() => {
+    if (prevStatus.current === status) return;
+    prevStatus.current = status;
+    setStatusFlash(true);
+    setBodyKey((k) => k + 1);
+    const el = localRef.current;
+    if (el) onStatusChanged?.(item.room.id, status, el);
+    const id = window.setTimeout(() => setStatusFlash(false), 320);
+    return () => window.clearTimeout(id);
+  }, [status, item.room.id, onStatusChanged]);
+
+  function setRefs(node: HTMLButtonElement | null) {
+    localRef.current = node;
+    if (typeof ref === "function") ref(node);
+    else if (ref) ref.current = node;
+  }
+
   return (
     <button
+      ref={setRefs}
+      type="button"
       onClick={onClick}
+      data-status={status}
+      data-room-id={item.room.id}
+      style={
+        {
+          "--enter-delay": `${enterDelayMs}ms`,
+          viewTransitionName: `room-card-${item.room.id}`,
+        } as CSSProperties
+      }
       className={cn(
         "room-card focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]",
         fills[status] ?? fills.available,
+        statusFlash && "room-card--status-flash",
+        statusFlash && `room-card--to-${status}`,
       )}
     >
       {status === "dirty" ? <span className="room-dirty-sheen" aria-hidden="true" /> : null}
@@ -123,14 +164,24 @@ export function RoomCard({
             </span>
           ) : null}
         </span>
-        <span className="room-head-status">
+        <span
+          key={status}
+          className={cn(
+            "room-head-status room-head-status--swap",
+            status === "reserved" && "room-head-status--shimmer",
+            status === "reserved" && statusFlash && "room-head-status--pop",
+          )}
+        >
           <Icon size={12} className="shrink-0" />
           <span>{statusLabel(status)}</span>
         </span>
       </div>
-      <div className="room-body">
+      <div className="room-body" key={bodyKey}>
         {item.stay ? (
-          <div className={cn("room-panel", time?.overdue && "is-overdue")}>
+          <div
+            key={item.stay.id}
+            className={cn("room-panel room-panel--enter", time?.overdue && "is-overdue")}
+          >
             <p className="room-timer-label">{time?.label}</p>
             <p className="room-timer">
               <Hourglass size={14} className="room-hourglass shrink-0" />
@@ -146,7 +197,7 @@ export function RoomCard({
             ) : null}
           </div>
         ) : (
-          <p className="room-note">
+          <p key={status} className="room-note room-note--enter">
             <Icon size={15} className="room-status-icon shrink-0" />
             <span>{notes[status] ?? notes.available}</span>
           </p>
@@ -154,4 +205,4 @@ export function RoomCard({
       </div>
     </button>
   );
-}
+});

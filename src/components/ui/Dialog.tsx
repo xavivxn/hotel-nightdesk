@@ -36,22 +36,22 @@ export function Dialog({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
+    <div className="nd-dialog-root fixed inset-0 z-40 flex items-center justify-center p-4">
       {dismissible ? (
         <button
-          className="absolute inset-0 bg-black/50 backdrop-blur-[2px]"
+          className="nd-dialog-overlay absolute inset-0 bg-black/50 backdrop-blur-[2px]"
           onClick={onClose}
           aria-label="Cerrar"
         />
       ) : (
-        <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px]" />
+        <div className="nd-dialog-overlay absolute inset-0 bg-black/50 backdrop-blur-[2px]" />
       )}
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="nightdesk-dialog-title"
         className={cn(
-          "relative z-10 flex w-full flex-col overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--surface)] shadow-2xl",
+          "nd-dialog-panel relative z-10 flex w-full flex-col overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--surface)] shadow-2xl",
           size === "lg"
             ? "h-[min(92vh,820px)] max-w-[1040px]"
             : "max-h-[min(92vh,720px)] max-w-md",

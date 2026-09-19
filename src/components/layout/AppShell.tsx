@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { BedDouble, CalendarClock, History, LayoutGrid, Moon, Package, Settings2, Sun } from "lucide-react";
 import { LoveNestLogo } from "@/components/layout/BrandLogo";
 import { DutyClock } from "@/components/layout/DutyClock";
@@ -42,6 +42,7 @@ export function AppShell({
   const { theme, toggle } = useTheme();
   const [sync, setSync] = useState<SyncStatus | null>(null);
   const [enter] = useState(() => consumeShellEnter());
+  const location = useLocation();
 
   useEffect(() => {
     if (deviceMode !== "reception") return;
@@ -119,7 +120,7 @@ export function AppShell({
         </div>
       </aside>
       <div className="app-shell-main flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <main className="app-shell-content min-h-0 min-w-0 flex-1 overflow-auto">
+        <main key={location.pathname} className="app-shell-content app-route-enter min-h-0 min-w-0 flex-1 overflow-auto">
           <Outlet />
         </main>
       </div>
