@@ -15,8 +15,8 @@ Este documento registra el alcance confirmado por Naser y los valores concretos 
 | Equipos y aplicaciones | Dos aplicaciones de escritorio Windows: recepción y administración. |
 | Operación local | Habitaciones, reservas, estadías, tarifas, consumos, cuentas e historial sin depender de internet. |
 | Usuarios | Cuentas individuales; roles `admin` y `recepcion`. |
-| Administración remota | Consultar y modificar datos autorizados mediante API privada autenticada y VPN WireGuard. |
-| Disponibilidad remota | Ambas PCs conectadas y recepción encendida. Durante un corte, recepción continúa y administración no puede guardar cambios remotos. |
+| Administración remota | Consultar tablero/historial/reservas (réplica) y editar catálogo, ajustes de negocio y usuarios de la app vía Supabase. |
+| Disponibilidad remota | Recepción opera sin internet. El admin lee la réplica aunque recepción esté apagada; los cambios de catálogo llegan al reconectar. |
 | Persistencia | Una única base operativa SQLite, en disco local de recepción. No compartir su archivo ni crear dos bases editables independientes. |
 | Tickets | Impresión y reimpresión de tickets internos únicamente en recepción. Naser realiza las pruebas físicas. |
 | Informe | Resumen diario exportable a PDF local. |
@@ -91,16 +91,16 @@ El detalle de permisos es la propuesta documentada para I04 y deberá quedar apl
 
 | Elemento | Dato disponible | Registro pendiente para instalación |
 |---|---|---|
-| PC recepción | Windows; app local, SQLite e impresora. Debe permanecer encendida para permitir acceso remoto. | Nombre del equipo, versión/arquitectura de Windows, RAM, disco libre, cuenta del servicio y permisos. |
-| PC administración | Windows; consulta y escritura autorizada por API/VPN. | Nombre del equipo, Windows, ubicación de conexión y usuario operativo. |
+| PC recepción | Windows; app local, SQLite e impresora. Opera sin internet; la cola de sync se drena al reconectar. | Nombre del equipo, versión/arquitectura de Windows, RAM, disco libre y permisos. |
+| PC administración | Windows; consulta de réplica y edición de catálogo vía Supabase (HTTPS). | Nombre del equipo, Windows, ubicación de conexión y usuario operativo. |
 | SQLite | Identificador actual `com.nightdesk.hotel`; archivo `nightdesk.db` en el directorio de datos de la aplicación. | Ruta efectiva de instalación y cuenta propietaria, sin carpeta compartida o sincronizada como base activa. |
 | Impresora | Solo recepción. Código ESC/POS para 58/80 mm. Naser tiene la impresora para probar. | Marca, modelo, driver, conexión, nombre exacto de cola o puerto, ancho físico y disponibilidad para N03. |
-| Red/VPN | WireGuard + API privada autenticada. | I03 documentó el protocolo y dejó D08 como impedimento hasta el relevamiento (ver [viabilidad](viabilidad-conectividad-respaldos.md)). I07 implementa tras la prueba. |
-| Servicio | Objetivo: iniciar con Windows y seguir disponible con la ventana cerrada. | Implementación y empaquetado de I07; integración del instalador en N09. |
+| Red | HTTPS saliente a Supabase (Auth, PostgREST, Realtime, Storage). Sin WireGuard ni API HTTP privada. | Credenciales del dispositivo y anon key por canal seguro (D09). I07 implementa el worker de sync. |
+| Servicio | Worker de sync y planificador de respaldo viven dentro de la app de recepción. No hay servicio Windows de API. | Empaquetado en N09; I07/I08 implementan. |
 
 **Ajustes actuales de demostración:** impresora desactivada; nombre/ruta vacíos; papel 80 mm; impresión al cierre activada como preferencia; tema oscuro; pie «Gracias por su visita». `Nightdesk Inn` y `Av. Principal 100` son valores de ejemplo, no datos del establecimiento. El ticket actual elimina tildes para producir ASCII; N03/N05 deben verificar legibilidad, márgenes y corte físicos.
 
-**Secuencia para preparar la instalación:** registrar equipos y datos faltantes; conciliar habitaciones/tarifas/productos; preparar respaldo consistente previo de una base existente; validar migración sobre una copia; instalar recepción y verificar operación local; configurar usuarios y probar impresora; instalar administración/API/VPN y probar lectura/escritura y cortes; configurar el destino externo y restaurar en otro equipo; ejecutar checklist de N09/N10. Las etapas dependen de sus implementaciones en Jira y no se consideran ejecutadas por este documento.
+**Secuencia para preparar la instalación:** registrar equipos y datos faltantes; conciliar habitaciones/tarifas/productos; preparar respaldo consistente previo de una base existente; validar migración sobre una copia; instalar recepción y verificar operación local; configurar usuarios y probar impresora; instalar administración remota (Supabase) y probar lectura de réplica, catálogo y cortes; configurar el destino Storage y restaurar en otro equipo; ejecutar checklist de N09/N10. Las etapas dependen de sus implementaciones en Jira y no se consideran ejecutadas por este documento.
 
 ## 7. Respaldo y recuperación
 
@@ -108,14 +108,14 @@ El detalle de permisos es la propuesta documentada para I04 y deberá quedar apl
 |---|---|
 | Frecuencia | Diaria, acordada. |
 | Consistencia y cifrado | Snapshot consistente, cifrado antes de subir, cola persistente y reintentos. |
-| Destino | Servidor externo acordado. I03 no contrata: opciones S3-compatible o VPS/equipo de Naser, con costos a cotizar. Proveedor concreto y dirección: D09, Naser nombra. Detalle en [viabilidad](viabilidad-conectividad-respaldos.md) §4. |
-| Responsable operativo | Nombre y contacto de quien supervisa copias y restauraciones: no informado. Naser registra (D09); I08 implementa. |
+| Destino | Supabase Storage, bucket privado `backups`. Detalle en [viabilidad](viabilidad-conectividad-respaldos.md) §4. URL y claves por canal seguro (D09). I08 sube. |
+| Responsable operativo | Nombre y contacto de quien supervisa copias y restauraciones: no informado. Naser registra (D10); I08 implementa. |
 | Horario | 04:00 sigue como propuesta técnica; no confirmado para instalación. |
 | Retención | 7 locales, 30 diarias y 12 mensuales remotas: **confirmada en capacidad** por I03 (mes sintético gzip ≈ 132 KiB; remoto 30+12 ≈ 5,4 MiB). Definición operativa y prueba de restauración: I08. |
 | Custodia de clave | Fuera de la PC de recepción; persona nombrada + copia protegida. Naser nombra al custodio (D10). Procedimiento en [viabilidad](viabilidad-conectividad-respaldos.md) §5. |
 | Recuperación | Admin; detener escrituras, copia previa, validar integridad/compatibilidad, restaurar y verificar en otro equipo. |
 
-El backup externo no es una segunda base operativa. No se copia únicamente el `.db` mientras WAL está activo (en desarrollo el WAL era ~1 MiB frente a 4 KiB del archivo principal). I03 midió snapshot con `.backup` / `VACUUM INTO`: ver [viabilidad](viabilidad-conectividad-respaldos.md) §3. La conexión directa de WireGuard **sigue sin comprobarse** (impedimento D08). No se ha contratado almacenamiento ni un intermediario de red.
+El backup externo no es una segunda base operativa. No se copia únicamente el `.db` mientras WAL está activo (en desarrollo el WAL era ~1 MiB frente a 4 KiB del archivo principal). I03 midió snapshot con `.backup` / `VACUUM INTO`: ver [viabilidad](viabilidad-conectividad-respaldos.md) §3. D08 no aplica (Supabase HTTPS). El destino es Storage del mismo proyecto (§4); no se contrata S3/VPS ni intermediario de red.
 
 ## 8. Plan del mes y revisión de capacidad
 
@@ -150,8 +150,8 @@ Se conserva una tarea principal en curso por persona, actualización diaria, con
 | D05 | Usuarios operativos, rol de cada uno y responsable administrador. | Naser / N04; implementación I04. | Alta de usuarios de producción. |
 | D06 | Inventario técnico de ambas PCs y cuenta/ruta local de datos. | Naser / N09; servicio I07. | Instalación y actualización. |
 | D07 | Modelo/driver, cola o puerto, ancho de papel y disponibilidad de impresora física. | Naser / N03. | Prueba física e impresión real. |
-| D08 | Proveedor/router, condición de CGNAT/IPv6, endpoint y resultado de conectividad entre ubicaciones. | **Impedimento I03 (16/09/2026):** protocolo listo, handshake no ejecutado. Naser facilita datos; I07 implementa tras la prueba. | Habilitar acceso remoto. |
-| D09 | Dirección/proveedor/protocolo/capacidad del destino externo y responsable operativo nombrado. | I03 definió opciones y costos a cotizar (S3-compatible o VPS); Naser nombra proveedor y responsable. I08 sube. | Subida real de respaldos. |
+| D08 | Conectividad VPN (router/CGNAT/IPv6/handshake WireGuard). | **Cerrado 17/09/2026:** no aplica. Acceso remoto = HTTPS a Supabase. Ver [viabilidad](viabilidad-conectividad-respaldos.md) V05. | — |
+| D09 | Proyecto Supabase: URL, anon key, usuario device de recepción y usuario admin. | Reemplaza S3/VPS. En git/Jira solo «configurado»; valores por canal seguro. I07/I08/N07 los usan. | Sync y subida de respaldos. |
 | D10 | Horario, retención, tamaño de copia, custodia de clave y responsable de probar restauración. | I03: retención 7/30/12 viable (gzip diario ≈ 132 KiB); horario 04:00 propuesto; custodio aún sin nombrar. Naser nombra; I08 cifra y prueba restauración. | Respaldo/recuperación de producción. |
 | D11 | Fecha de inicio y horas semanales efectivas de ambos desarrolladores. | Naser / planificación del mes. | Comprometer calendario. |
 

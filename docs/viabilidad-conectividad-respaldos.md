@@ -1,12 +1,12 @@
 # I03 — Viabilidad de conectividad y destino de respaldos
 
-**Nota 17/09/2026:** WireGuard quedó descartado. La arquitectura vigente es [arquitectura-offline-supabase.md](arquitectura-offline-supabase.md). D08 (handshake VPN) ya no aplica; D09 (destino S3/VPS) pasa a Supabase Storage. El dimensionamiento de snapshot §3 y la custodia de clave §5 se conservan y los usa I08. El cierre formal de filas V05 / §2 / §4 y de D08–D09 en [configuración operativa](configuracion-operativa.md) es [MOT-38 · I03.1](https://naserfer.atlassian.net/browse/MOT-38).
+**Nota 17/09/2026:** WireGuard quedó descartado. La arquitectura vigente es [arquitectura-offline-supabase.md](arquitectura-offline-supabase.md). D08 (handshake VPN) ya no aplica; D09 (destino S3/VPS) pasa a Supabase Storage. El dimensionamiento de snapshot §3 y la custodia de clave §5 se conservan y los usa I08. El cierre formal de filas V05 / §2 / §4 y de D08–D09 en [configuración operativa](configuracion-operativa.md) es [MOT-38 · I03.1](https://ivanortiz.atlassian.net/browse/MOT-38).
 
-**Entregable:** [MOT-14 · I03](https://naserfer.atlassian.net/browse/MOT-14), con [MOT-38 · I03.1](https://naserfer.atlassian.net/browse/MOT-38) y [MOT-39 · I03.2](https://naserfer.atlassian.net/browse/MOT-39).  
-**Versión:** 1.0 · 16 de septiembre de 2026.  
+**Entregable:** [MOT-14 · I03](https://ivanortiz.atlassian.net/browse/MOT-14), con [MOT-38 · I03.1](https://ivanortiz.atlassian.net/browse/MOT-38) y [MOT-39 · I03.2](https://ivanortiz.atlassian.net/browse/MOT-39).  
+**Versión:** 1.1 · 18 de septiembre de 2026 (cierre I03.1).  
 **Responsable técnico de este registro:** Iván Ortiz.  
-**Datos de red y destino operativo:** Naser facilita; no constan en el repositorio ni en Jira.  
-**Estado:** dimensionamiento de snapshot vigente. Handshake WireGuard **no se ejecutará**. Este documento no contiene secretos.
+**Datos de red y destino operativo:** no constan en el repositorio ni en Jira.  
+**Estado:** D08 y D09 cerrados por decisión 17/09/2026. Dimensionamiento de snapshot §3 y custodia §5 vigentes para I08. Este documento no contiene secretos.
 
 Complementa [N01 — Configuración operativa](configuracion-operativa.md) y [arquitectura Supabase](arquitectura-offline-supabase.md) §7–§8. No implementa sync ni subida cifrada (I07/I08).
 
@@ -14,14 +14,17 @@ Complementa [N01 — Configuración operativa](configuracion-operativa.md) y [ar
 
 | ID | Fecha | Contexto | Decisión | Responsable |
 |---|---|---|---|---|
-| V01 | 16/09/2026 | No hay proveedor, router, IP WAN ni ubicación de la PC admin en N01 ni en Jira. Inventar un handshake no cumple MOT-38. | **WireGuard sigue siendo el transporte propuesto.** La viabilidad **directa vs intermediario queda no comprobada**. D08 es impedimento real hasta el relevamiento y la prueba del §3. | Iván registra; Naser facilita datos de ambas ubicaciones. |
-| V02 | 16/09/2026 | CGNAT es frecuente en ISP residenciales/PYME de Paraguay. WireGuard no tiene cuota; un relay sí. | Si recepción está en CGNAT IPv4 y sin IPv6 alcanzable: **intermediario** (VPS propio con WireGuard o servicio autorizado). Costo mensual **a cotizar**; no se asume gratuito. No contratar en I03. | Naser cotiza/autoriza gasto; I07 implementa. |
-| V03 | 16/09/2026 | Snapshot medido: un mes sintético a 3 estadías/hab/día comprime a **132 KiB**. Retención 7/30/12 cabe en pocos MiB. | **Mantener la retención propuesta 7 locales / 30 diarias remotas / 12 mensuales remotas.** Horario **04:00** sigue como propuesta hasta confirmación operativa. Destino: objeto S3-compatible **o** mismo VPS que un eventual relay, con permisos separados. No contratar en I03. | Iván dimensiona; Naser nombra destino y custodio (D09/D10). |
+| V01 | 16/09/2026 | No hay proveedor, router, IP WAN ni ubicación de la PC admin en N01 ni en Jira. Inventar un handshake no cumple MOT-38. | **Histórico I03:** WireGuard era el transporte propuesto. La viabilidad directa vs intermediario quedó no comprobada. Superado por V05. | Iván registra; Naser facilita datos de ambas ubicaciones. |
+| V02 | 16/09/2026 | CGNAT es frecuente en ISP residenciales/PYME de Paraguay. WireGuard no tiene cuota; un relay sí. | **Histórico I03:** si recepción estaba en CGNAT IPv4 y sin IPv6, se cotizaba intermediario. Superado por V05: no se contrata relay. | Naser cotiza/autoriza gasto; I07 implementa. |
+| V03 | 16/09/2026 | Snapshot medido: un mes sintético a 3 estadías/hab/día comprime a **132 KiB**. Retención 7/30/12 cabe en pocos MiB. | **Mantener la retención propuesta 7 locales / 30 diarias remotas / 12 mensuales remotas.** Horario **04:00** sigue como propuesta hasta confirmación operativa. Destino actualizado en V05 / §4 (Supabase Storage). | Iván dimensiona; Naser nombra custodio (D10). |
 | V04 | 16/09/2026 | La clave de descifrado en la PC de recepción no sobrevive a un disco perdido. | Custodia **fuera** de esa PC: persona nombrada + copia en ubicación protegida. En git/Jira solo «custodio: nombre». Procedimiento: §5. Naser nombra a la persona; no consta hoy. | Naser nombra; I08 implementa cifrado; la prueba de restauración en otro equipo es criterio de I08/N10. |
+| V05 | 17/09/2026 | El handshake WireGuard entre ubicaciones no se ejecutará. CGNAT, UDP 51820 e intermediario de VPN dejan de aplicar. | Conectividad remota = **HTTPS saliente a Supabase** (Auth + PostgREST + Realtime + Storage). **D08 cerrado (no aplica).** **D09 reemplazado:** destino de respaldos = bucket privado `backups` del proyecto Supabase. El dimensionamiento §3 y la custodia §5 siguen vigentes para I08. | Iván registra; Naser revisa. |
 
-## 2. Conectividad (MOT-38)
+## 2. Conectividad (WireGuard) — no aplicable
 
-### 2.1 Checklist por ubicación
+**Cierre I03.1 (V05):** no se completa el checklist ni se ejecuta el protocolo. El bloque se conserva como histórico de I03 (16/09/2026). La conectividad remota es HTTPS hacia Supabase; no hay UDP 51820, port-forward ni intermediario WireGuard.
+
+### 2.1 Checklist por ubicación (histórico)
 
 Completar una fila para **recepción** y otra para **administración**. No pegar claves, PSK ni IPs internas de producción en este archivo.
 
@@ -39,9 +42,9 @@ Completar una fila para **recepción** y otra para **administración**. No pegar
 
 Comparar la IPv4 WAN del router con un visor externo (por ejemplo la IP que muestra un servicio «what's my IP» desde esa red). Si coinciden y UDP 51820 llega, hay camino para **WireGuard directo** (peer recepción = servidor, admin = cliente, o al revés si la pública está en admin). Si la WAN es CGNAT y no hay IPv6, hace falta **intermediario**.
 
-### 2.2 Protocolo de prueba (reproducible)
+### 2.2 Protocolo de prueba (histórico)
 
-Ejecutar cuando existan las dos PCs Windows y los datos del §2.1. No forma parte de este cierre.
+Quedó redactado para cuando existieran las dos PCs Windows y los datos del §2.1. **No se ejecuta.**
 
 1. Instalar el cliente oficial WireGuard en ambas PCs. Generar un par de claves **en cada equipo** (`wg genkey` / `wg pubkey`). No copiar claves privadas a chat, git ni Jira.
 2. Decidir roles: si hay IPv4/IPv6 pública en un lado, ese equipo (o el router con port-forward UDP 51820) es el listener. Si ambos están en CGNAT, el listener es el intermediario.
@@ -49,19 +52,19 @@ Ejecutar cuando existan las dos PCs Windows y los datos del §2.1. No forma part
 4. Traer la interfaz: handshake visible en `wg show` (campo *latest handshake* reciente) y `ping` a la IP VPN del otro extremo.
 5. Registrar aquí: fecha, quién ejecutó, resultado (éxito / fallo / timeout), RTT. Registrar en Jira «prueba ejecutada, handshake OK/FAIL», sin pegar la config.
 
-**Resultado al 16/09/2026:** no ejecutado. Faltan las dos ubicaciones reales y D08.
+**Resultado:** cerrado sin ejecutar (decisión 17/09/2026, V05). El 16/09/2026 no se había corrido por falta de ubicaciones reales.
 
-### 2.3 Intermediario (si la prueba directa falla o es imposible)
+### 2.3 Intermediario — no se contrata
 
-Opciones, costos **a cotizar**, no contratadas:
+Opciones que I03 cotizó y **no se contratan**. Cierre V05: no hay relay VPN.
 
 | Opción | Qué cubre | Orden de magnitud (público, 2026) | Notas |
 |---|---|---|---|
-| VPS pequeño (p. ej. Hetzner CX22 o equivalente) con WireGuard | Relay/endpoint estable; puede alojar también el destino de copias | ≈ 4–6 EUR/mes + IVA | Relay VPN y backup son funciones distintas: usuarios y discos/ACL separados. |
-| Servicio mesh autorizado (Tailscale, Netbird u homólogo) | Conectividad sin abrir puertos en el motel | plan gratuito limitado o ≈ 5+ USD/usuario/mes | Evaluar residencia de datos y si el motel acepta un tercero. |
-| Equipo de Naser con IP pública | Endpoint propio | costo de ese enlace, no del software | Solo si hay IP estable y UDP permitido. |
+| VPS pequeño (p. ej. Hetzner CX22 o equivalente) con WireGuard | Relay/endpoint estable; puede alojar también el destino de copias | ≈ 4–6 EUR/mes + IVA | Relay VPN y backup son funciones distintas. Descartado. |
+| Servicio mesh autorizado (Tailscale, Netbird u homólogo) | Conectividad sin abrir puertos en el motel | plan gratuito limitado o ≈ 5+ USD/usuario/mes | Descartado. |
+| Equipo de Naser con IP pública | Endpoint propio | costo de ese enlace, no del software | Descartado. |
 
-WireGuard en sí **no tiene licencia de pago**. El costo es el de la IP alcanzable (router/ISP o VPS/servicio).
+WireGuard en sí **no tiene licencia de pago**. El costo habría sido el de la IP alcanzable. Con Supabase no aplica.
 
 ## 3. Medición de snapshot SQLite (MOT-39)
 
@@ -91,41 +94,50 @@ Sobre el gzip del mes sintético (cota diaria = una copia de ese tamaño):
 | Remoto 30 + 12 gzip | 42 × 132 KiB | **5,4 MiB** |
 | Mismo remoto a 5 estadías/hab/día | × 5/3 | **≈ 9 MiB** |
 
-I08 cifrará antes de subir: el tamaño cifrado es del mismo orden (ligero overhead). **La retención 7/30/12 no está limitada por capacidad** a este volumen. El cuello será el ancho de subida del motel (no medido): 132 KiB son unos 2 s a 512 Kib/s. Ancho de banda del enlace: **pendiente de medir** en el relevamiento D08.
+I08 cifrará antes de subir: el tamaño cifrado es del mismo orden (ligero overhead). **La retención 7/30/12 no está limitada por capacidad** a este volumen. El cuello será el ancho de subida del motel (no medido en esta sesión): 132 KiB son unos 2 s a 512 Kib/s. Medir el enlace en la instalación; I08 confirma la subida real.
 
-## 4. Destino de respaldos (MOT-39)
+## 4. Destino de respaldos
 
-El servidor externo **no** es base operativa ni origen de sync hacia recepción. Credenciales de subida y de borrado separadas cuando el proveedor lo permita. Credenciales por canal seguro, nunca en este Markdown.
+El destino remoto **no** es base operativa ni origen de sync hacia recepción. Credenciales por canal seguro, nunca en este Markdown.
 
-| Opción | Protocolo | Capacidad frente a 7/30/12 | Costo explícito | Cuándo preferirla |
+**Destino acordado (V05, 17/09/2026):** Supabase Storage, bucket privado `backups`, HTTPS. Manifiesto en la tabla `backups` (motel, backup_id, fecha, schema/app, size, checksum, storage_path). I08 implementa la subida cifrada. En git/Jira solo «configurado».
+
+Capacidad: 10 MiB de retención es despreciable frente a los planes de Storage; las cifras de §3 siguen aplicando.
+
+### 4.1 Histórico I03 — opciones descartadas (16/09/2026)
+
+I03 no contrató. Estas filas quedaron como alternativas S3/VPS y **no se eligen**:
+
+| Opción | Protocolo | Capacidad frente a 7/30/12 | Costo explícito | Cuándo se habría preferido |
 |---|---|---|---|---|
 | A. Almacenamiento de objetos S3-compatible (Backblaze B2, Cloudflare R2, AWS S3 u homólogo regional) | HTTPS (API de objetos), nombre de objeto único por respaldo | 10 MiB de retención es despreciable frente a 1 GiB+ de los planes | Almacenamiento típico ≈ 6 USD/TB·mes; a este volumen **≪ 1 USD/mes** o tramo gratuito. Egreso y mínimo de cuenta **a cotizar**. | Destino solo de copias, sin VPS que administrar. |
-| B. VPS propio (puede ser el mismo de V02) | SFTP o HTTPS a un bucket/disco con ACL de backup | Disco de 20–40 GiB de sobra | Ya cubierto por el VPS ≈ 4–6 EUR/mes si se comparte infra; si es solo backup, el objeto (A) suele ser más barato | Si ya hay relay WireGuard y se quiere un solo proveedor. |
+| B. VPS propio (puede ser el mismo de V02) | SFTP o HTTPS a un bucket/disco con ACL de backup | Disco de 20–40 GiB de sobra | Ya cubierto por el VPS ≈ 4–6 EUR/mes si se comparte infra; si es solo backup, el objeto (A) suele ser más barato | Si ya había relay WireGuard y se quería un solo proveedor. |
 | C. Equipo de Naser | SFTP/HTTPS en red controlada | Según disco de ese equipo | Costo del hardware/enlace existente | Solo con responsable operativo nombrado y copias fuera del motel. |
 
-**Decisión de I03:** no contratar. I08 implementa contra el destino que Naser elija (A, B o C) usando las cifras de §3. Mientras D09 siga sin proveedor nombrado, la subida real permanece bloqueada.
-
-Responsable operativo de copias y restauraciones: **no informado** (D09). Naser lo registra.
+El nombre del responsable operativo de copias y restauraciones sigue pendiente (D10 / I08). No reabre D09 como S3/VPS.
 
 ## 5. Custodia de la clave de descifrado
+
+I08 referencia esta sección. Sin cambio de regla:
 
 - La clave **no** vive solo en la PC de recepción.
 - Custodio: persona nombrada por Naser (aún no consta). Segunda copia en ubicación protegida (caja / gestor de secretos / sobre lacrado — el medio lo elige el custodio).
 - Recuperación: el custodio entrega la clave por canal seguro al administrador que restaura; se rotará después de usarla si hubo compromiso del disco.
-- Quién prueba la restauración en otro equipo: el mismo responsable operativo de D09, en I08/N10. Una copia solo se considera recuperable después de esa prueba.
+- Quién prueba la restauración en otro equipo: el mismo responsable operativo, en I08/N10. Una copia solo se considera recuperable después de esa prueba.
 - En Jira: «clave configurada, custodio [nombre]». Nunca el material criptográfico.
 
 ## 6. Qué queda para I07 / I08
 
-- I07: instalar WireGuard (directo o con intermediario según el resultado del §2.2), servicio Windows, abrir UDP solo donde V01/V02 lo permitan.
-- I08: snapshot Online Backup, cifrado, cola, subida al destino de §4, retención 7/30/12, aviso si pasan 24 h sin copia remota confirmada, restauración en otro equipo.
-- Naser: completar D08 (ISP/router/CGNAT/IPv6) y D09 (proveedor + responsable). Sin eso no hay handshake ni contrato de almacenamiento.
+- I07: worker de sincronización en recepción (push/pull/Realtime). Sin WireGuard, sin servicio Windows de API privada, sin UDP 51820.
+- I08: snapshot Online Backup, cifrado, cola, subida al bucket `backups` de Supabase Storage (§4), retención 7/30/12, aviso si pasan 24 h sin copia remota confirmada, restauración en otro equipo. Usa §3 y §5.
+- Naser: revisar esta documentación y nombrar custodio / responsable de restauración (D10). D08 y D09 no se reabren.
 
 ## 7. Evidencia de este cierre
 
 | Criterio | Cómo se cubre |
 |---|---|
-| Router/ISP, CGNAT/IPv6 y prueba documentados, o impedimento | §2.1 vacío a propósito; §2.2 protocolo; V01 = impedimento D08 |
-| Servidor, capacidad, retención, custodia, intermediario, costos | V02–V04, §3–§5; nada contratado |
-| Sin secretos en git ni Jira | Este archivo no incluye claves, contraseñas, endpoints privados ni IPs de producción |
+| Conectividad remota | V05: HTTPS a Supabase. §2 WireGuard no aplicable; handshake no ejecutado a propósito. |
+| Destino de respaldos | §4: Supabase Storage, bucket `backups`. Opciones S3/VPS en §4.1 como histórico descartado. |
+| Capacidad, retención, custodia | V03–V04, §3 y §5; I08 implementa. Intermediario VPN: §2.3, no se contrata. |
+| Sin secretos en git ni Jira | Este archivo no incluye URL de proyecto, anon key, claves, contraseñas ni IPs de producción |
 | Snapshot medido | §3, comandos `.backup` / `VACUUM INTO`, cifras en bytes |
