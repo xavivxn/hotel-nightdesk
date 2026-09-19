@@ -413,3 +413,50 @@ pub struct ContractInfo {
     pub app_version: String,
     pub schema_migrations: Vec<String>,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct DeviceModeSetPayload {
+    pub mode: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RemoteConfigurePayload {
+    pub project_url: String,
+    pub anon_key: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SyncConfigureDevicePayload {
+    pub project_url: String,
+    pub anon_key: String,
+    pub device_email: String,
+    pub device_password: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct HashPasswordPayload {
+    pub password: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct HashPasswordResult {
+    pub hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncStatus {
+    pub connected: bool,
+    pub pending_outbox: i64,
+    pub last_push_at: Option<String>,
+    pub last_pull_at: Option<String>,
+    pub last_error: Option<String>,
+    pub configured: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BackupStatus {
+    pub last_local_at: Option<String>,
+    pub last_remote_at: Option<String>,
+    pub pending: i64,
+    pub last_error: Option<String>,
+}

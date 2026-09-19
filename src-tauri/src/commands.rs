@@ -288,3 +288,77 @@ pub fn reprint_receipt(state: State<AppState>, session_token: Option<String>, ap
     let data_dir = app_data_dir(&app)?;
     printer::print_bytes(&bytes, &settings, &data_dir, &format!("reprint-{stay_id}"))
 }
+
+#[tauri::command]
+pub fn device_mode_get(state: State<AppState>) -> AppResult<Option<String>> {
+    let conn = conn(&state);
+    service::device_mode_get(&conn)
+}
+
+#[tauri::command]
+pub fn device_mode_set(state: State<AppState>, payload: DeviceModeSetPayload) -> AppResult<()> {
+    let conn = conn(&state);
+    service::device_mode_set(&conn, &payload.mode)
+}
+
+#[tauri::command]
+pub fn remote_configure(app: AppHandle, payload: RemoteConfigurePayload) -> AppResult<()> {
+    let data_dir = app_data_dir(&app)?;
+    crate::credentials::save_remote(&data_dir, &payload.project_url, &payload.anon_key)
+}
+
+#[tauri::command]
+pub fn remote_configured(app: AppHandle) -> AppResult<bool> {
+    let data_dir = app_data_dir(&app)?;
+    Ok(crate::credentials::remote_configured(&data_dir))
+}
+
+#[tauri::command]
+pub fn remote_get_config(app: AppHandle) -> AppResult<Option<RemoteConfigurePayload>> {
+    let data_dir = app_data_dir(&app)?;
+    Ok(crate::credentials::load_remote(&data_dir)?.map(|(project_url, anon_key)| {
+        RemoteConfigurePayload {
+            project_url,
+            anon_key,
+        }
+    }))
+}
+
+#[tauri::command]
+pub fn hash_password(payload: HashPasswordPayload) -> AppResult<HashPasswordResult> {
+    service::hash_password(&payload.password)
+}
+
+#[tauri::command]
+pub fn sync_status(app: AppHandle) -> AppResult<SyncStatus> {
+    let data_dir = app_data_dir(&app)?;
+    Ok(service::sync_status_stub(&data_dir))
+}
+
+#[tauri::command]
+pub fn sync_pull_now() -> AppResult<()> {
+    // Stub until I07 worker exists.
+    Ok(())
+}
+
+#[tauri::command]
+pub fn sync_configure_device(app: AppHandle, payload: SyncConfigureDevicePayload) -> AppResult<()> {
+    let data_dir = app_data_dir(&app)?;
+    crate::credentials::save_device(
+        &data_dir,
+        &payload.project_url,
+        &payload.anon_key,
+        &payload.device_email,
+        &payload.device_password,
+    )
+}
+
+#[tauri::command]
+pub fn backup_status() -> AppResult<BackupStatus> {
+    Ok(BackupStatus {
+        last_local_at: None,
+        last_remote_at: None,
+        pending: 0,
+        last_error: Some("Respaldos pendientes de I08".into()),
+    })
+}

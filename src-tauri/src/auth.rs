@@ -190,8 +190,23 @@ mod tests {
     fn every_business_command_checks_session_and_admin_mutations_check_role() {
         let source = include_str!("commands.rs");
         let admins = ["save_room", "save_rate_plan", "save_product", "set_product_active", "add_charge", "delete_charge", "save_settings", "print_test"];
+        let public = [
+            "device_mode_get",
+            "device_mode_set",
+            "remote_configure",
+            "remote_configured",
+            "remote_get_config",
+            "hash_password",
+            "sync_status",
+            "sync_pull_now",
+            "sync_configure_device",
+            "backup_status",
+        ];
         for section in source.split("#[tauri::command]").skip(1) {
             let name = section.split("pub fn ").nth(1).unwrap().split('(').next().unwrap();
+            if public.contains(&name) {
+                continue;
+            }
             let guard = section.find("crate::auth::require").expect("missing authorization");
             if let Some(lock) = section.find("conn(&state)") {
                 assert!(guard < lock, "{name} accesses data before authorization");

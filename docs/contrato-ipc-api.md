@@ -141,14 +141,16 @@ Solo tienen sentido en recepción salvo donde se indica. Seguir `nightdesk-add-c
 
 | Comando | Payload → resultado | Notas |
 |---|---|---|
-| `device_mode_get` | `{}` → `"reception" \| "remote"` | Ajuste de dispositivo. |
+| `device_mode_get` | `{}` → `"reception" \| "remote" \| null` | Ajuste de dispositivo. `null` = primer arranque. Siempre IPC local. |
 | `device_mode_set` | `{ mode }` → `void` | Primer arranque. No se sincroniza. |
-| `sync_configure_device` | `{ project_url, anon_key, device_email, device_password }` → `void` | Credenciales a Credential Manager. Nunca en `settings` ni en la respuesta. |
-| `sync_status` | `{}` → `{ connected, pending_outbox, last_push_at, last_pull_at, last_error }` | Indicador de `AppShell`. |
-| `sync_pull_now` | `{}` → `void` | Pull incremental; emite `sync:catalog-updated`. |
-| `hash_password` | `{ password }` → `{ hash }` | Argon2id, mismo formato que `auth.rs`. Solo para modo remoto al crear usuarios. |
+| `remote_configure` | `{ project_url, anon_key }` → `void` | Solo PC admin. Credenciales en app data; nunca en `settings`. |
+| `remote_configured` / `remote_get_config` | `{}` → `bool` / payload | Lectura local de URL/anon. |
+| `sync_configure_device` | `{ project_url, anon_key, device_email, device_password }` → `void` | Credenciales a app data / Credential Manager. Nunca en `settings` ni en la respuesta. |
+| `sync_status` | `{}` → `{ connected, pending_outbox, last_push_at, last_pull_at, last_error, configured }` | Indicador de `AppShell`. Stub hasta I07. |
+| `sync_pull_now` | `{}` → `void` | Pull incremental; emite `sync:catalog-updated`. Stub hasta I07. |
+| `hash_password` | `{ password }` → `{ hash }` | Argon2id, mismo formato que `auth.rs`. Siempre IPC local (también en modo remoto). |
 | `backup_run_now` | `{}` → `{ backup_id }` | Admin local. Encola snapshot. |
-| `backup_status` | `{}` → `{ last_local_at, last_remote_at, pending, last_error }` | Recepción y, en remoto, lectura de tabla `backups`. |
+| `backup_status` | `{}` → `{ last_local_at, last_remote_at, pending, last_error }` | Recepción y, en remoto, lectura de tabla `backups`. Stub hasta I08. |
 
 ## Payloads de mutación (v1)
 

@@ -2,14 +2,16 @@ import { Button } from "@/components/ui/Button";
 import { Field, Input, Select, Textarea } from "@/components/ui/Field";
 import { api } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
-import type { AppSettings } from "@/lib/types";
-import { useState } from "react";
+import type { AppSettings, DeviceMode, SyncStatus } from "@/lib/types";
+import { useEffect, useState } from "react";
 
 export function SettingsPage({
   settings,
+  deviceMode = "reception",
   onSaved,
 }: {
   settings: AppSettings;
+  deviceMode?: DeviceMode;
   onSaved: (settings: AppSettings) => void;
 }) {
   const { setTheme } = useTheme();
@@ -19,6 +21,18 @@ export function SettingsPage({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [printers, setPrinters] = useState<string[]>([]);
+  const [sync, setSync] = useState<SyncStatus | null>(null);
+  const [deviceForm, setDeviceForm] = useState({
+    project_url: "",
+    anon_key: "",
+    device_email: "",
+    device_password: "",
+  });
+
+  useEffect(() => {
+    if (deviceMode !== "reception") return;
+    void api.syncStatus().then(setSync).catch(() => setSync(null));
+  }, [deviceMode]);
 
   async function save(clearPin = false) {
     setBusy(true);
@@ -171,6 +185,106 @@ export function SettingsPage({
             ) : null}
           </div>
         </section>
+        {deviceMode === "reception" && (
+          <section className="card space-y-4 rounded-lg p-5 lg:col-span-2">
+            <h2 className="text-lg font-semibold tracking-tight">Sincronización</h2>
+            <p className="text-sm text-[var(--muted)]">
+              Estado provisional hasta I07. Las credenciales no se muestran después de guardar.
+            </p>
+            <dl className="grid gap-2 text-sm sm:grid-cols-2">
+              <div>
+                <dt className="text-[var(--muted)]">Configurado</dt>
+                <dd>{sync?.configured ? "Sí" : "No"}</dd>
+              </div>
+              <div>
+                <dt className="text-[var(--muted)]">Cola pendiente</dt>
+                <dd>{sync?.pending_outbox ?? 0}</dd>
+              </div>
+              <div>
+                <dt className="text-[var(--muted)]">Último push</dt>
+                <dd>{sync?.last_push_at ?? "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-[var(--muted)]">Último pull</dt>
+                <dd>{sync?.last_pull_at ?? "—"}</dd>
+              </div>
+              <div className="sm:col-span-2">
+                <dt className="text-[var(--muted)]">Último error</dt>
+                <dd>{sync?.last_error ?? "—"}</dd>
+              </div>
+            </dl>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="secondary"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  setError(null);
+                  try {
+                    await api.syncPullNow();
+                    window.dispatchEvent(new Event("sync:catalog-updated"));
+                    setSync(await api.syncStatus());
+                    setNotice("Pull solicitado (stub I07).");
+                  } catch (e) {
+                    setError(String(e));
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                Sincronizar ahora
+              </Button>
+            </div>
+            <div className="grid gap-3 border-t border-[var(--line)] pt-4 md:grid-cols-2">
+              <Field label="URL del proyecto">
+                <Input
+                  value={deviceForm.project_url}
+                  onChange={(e) => setDeviceForm({ ...deviceForm, project_url: e.target.value })}
+                  placeholder="https://xxxx.supabase.co"
+                />
+              </Field>
+              <Field label="Clave anónima">
+                <Input
+                  type="password"
+                  value={deviceForm.anon_key}
+                  onChange={(e) => setDeviceForm({ ...deviceForm, anon_key: e.target.value })}
+                />
+              </Field>
+              <Field label="Email del dispositivo">
+                <Input
+                  value={deviceForm.device_email}
+                  onChange={(e) => setDeviceForm({ ...deviceForm, device_email: e.target.value })}
+                />
+              </Field>
+              <Field label="Contraseña del dispositivo">
+                <Input
+                  type="password"
+                  value={deviceForm.device_password}
+                  onChange={(e) => setDeviceForm({ ...deviceForm, device_password: e.target.value })}
+                />
+              </Field>
+            </div>
+            <Button
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                setError(null);
+                try {
+                  await api.syncConfigureDevice(deviceForm);
+                  setDeviceForm({ project_url: "", anon_key: "", device_email: "", device_password: "" });
+                  setSync(await api.syncStatus());
+                  setNotice("Dispositivo configurado en este equipo.");
+                } catch (e) {
+                  setError(String(e));
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              Configurar dispositivo
+            </Button>
+          </section>
+        )}
       </div>
       {error ? <p className="mt-4 text-[var(--danger)]">{error}</p> : null}
       {notice ? <p className="mt-4 text-sm text-[var(--muted)]">{notice}</p> : null}

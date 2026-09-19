@@ -632,6 +632,68 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
     case "reprint_receipt":
       if (!db.stays.some(s => s.id === Number(args.stay_id) && s.status === "closed")) fail("Solo se reimprimen cuentas cerradas");
       return db.settings.printer_enabled ? "Simulación: reimpresión en el navegador" : null;
+    case "device_mode_get": {
+      const mode = localStorage.getItem("nightdesk.device_mode");
+      return mode === "reception" || mode === "remote" ? mode : null;
+    }
+    case "device_mode_set": {
+      const payload = args.payload as { mode: string };
+      if (localStorage.getItem("nightdesk.device_mode")) fail("El modo de este equipo ya está definido");
+      if (payload.mode !== "reception" && payload.mode !== "remote") fail("Elegí Recepción o Administración remota");
+      localStorage.setItem("nightdesk.device_mode", payload.mode);
+      return;
+    }
+    case "remote_configure": {
+      const payload = args.payload as { project_url: string; anon_key: string };
+      if (!payload.project_url?.trim() || !payload.anon_key?.trim()) fail("Ingresá la URL del proyecto y la clave anónima");
+      localStorage.setItem(
+        "nightdesk.remote_config",
+        JSON.stringify({ project_url: payload.project_url.trim(), anon_key: payload.anon_key.trim() }),
+      );
+      return;
+    }
+    case "remote_configured":
+      return Boolean(localStorage.getItem("nightdesk.remote_config"));
+    case "remote_get_config": {
+      const raw = localStorage.getItem("nightdesk.remote_config");
+      return raw ? JSON.parse(raw) : null;
+    }
+    case "hash_password": {
+      const payload = args.payload as { password: string };
+      return { hash: `mock-argon2:${payload.password}` };
+    }
+    case "sync_status":
+      return {
+        connected: false,
+        pending_outbox: 0,
+        last_push_at: null,
+        last_pull_at: null,
+        last_error: "Sincronización pendiente de I07",
+        configured: Boolean(localStorage.getItem("nightdesk.device_config")),
+      };
+    case "sync_pull_now":
+      window.dispatchEvent(new Event("sync:catalog-updated"));
+      return;
+    case "sync_configure_device": {
+      const payload = args.payload as {
+        project_url: string;
+        anon_key: string;
+        device_email: string;
+        device_password: string;
+      };
+      if (!payload.project_url || !payload.anon_key || !payload.device_email || !payload.device_password) {
+        fail("Completá URL, clave anónima y credenciales del dispositivo");
+      }
+      localStorage.setItem("nightdesk.device_config", "1");
+      return;
+    }
+    case "backup_status":
+      return {
+        last_local_at: null,
+        last_remote_at: null,
+        pending: 0,
+        last_error: "Respaldos pendientes de I08",
+      };
     default:
       fail(`Comando no implementado: ${name}`);
   }

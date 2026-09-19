@@ -244,3 +244,33 @@ export type DailyReport = {
   occupied_rooms: number; closed_total_cents: number; adjustments_total_cents: number;
   accounts: DailyAccount[]; adjustments: Charge[];
 };
+
+export type DeviceMode = "reception" | "remote";
+
+export type RemoteConfigurePayload = {
+  project_url: string;
+  anon_key: string;
+};
+
+export type SyncConfigureDevicePayload = RemoteConfigurePayload & {
+  device_email: string;
+  device_password: string;
+};
+
+export type SyncStatus = {
+  connected: boolean;
+  pending_outbox: number;
+  last_push_at: string | null;
+  last_pull_at: string | null;
+  last_error: string | null;
+  configured: boolean;
+};
+
+export type BackupStatus = {
+  last_local_at: string | null;
+  last_remote_at: string | null;
+  pending: number;
+  last_error: string | null;
+};
+
+export type HashPasswordResult = { hash: string };

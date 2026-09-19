@@ -1,0 +1,568 @@
+import { createClient, type RealtimeChannel, type SupabaseClient } from "@supabase/supabase-js";
+import { previewBill as previewBillLocal } from "./billing";
+import { fail } from "./errors";
+import type {
+  AppSettings,
+  BillPreview,
+  BoardRoom,
+  Charge,
+  ContractInfo,
+  HistoryStay,
+  LineItem,
+  Payment,
+  Product,
+  RatePlan,
+  Reservation,
+  Room,
+  SaveProductPayload,
+  SaveRatePlanPayload,
+  SaveRoomPayload,
+  SessionInfo,
+  SessionUser,
+  Stay,
+} from "./types";
+
+let client: SupabaseClient | null = null;
+let authSession: SessionInfo | null = null;
+let boardChannel: RealtimeChannel | null = null;
+
+const FORBIDDEN_OPS = new Set([
+  "check_in",
+  "check_out",
+  "add_charge",
+  "add_product_charge",
+  "delete_charge",
+  "convert_to_overnight",
+  "set_room_status",
+  "create_reservation",
+  "set_reservation_status",
+  "check_in_reservation",
+  "save_daily_pdf",
+  "verify_pin",
+  "pin_required",
+  "print_test",
+  "list_printers",
+  "reprint_receipt",
+  "auth_setup",
+  "auth_setup_required",
+  "daily_report",
+]);
+
+export function clearSupabaseClient() {
+  if (boardChannel && client) void client.removeChannel(boardChannel);
+  boardChannel = null;
+  client = null;
+  authSession = null;
+}
+
+export function initSupabase(projectUrl: string, anonKey: string) {
+  clearSupabaseClient();
+  client = createClient(projectUrl, anonKey, {
+    auth: { persistSession: false, autoRefreshToken: true, detectSessionInUrl: false },
+  });
+}
+
+function sb(): SupabaseClient {
+  if (!client) fail("forbidden", "Configurá la URL y la clave anónima de Supabase en este equipo");
+  return client;
+}
+
+function mapAuthUser(user: { id: string; email?: string | null; app_metadata?: Record<string, unknown> }): SessionUser {
+  const role = String(user.app_metadata?.role ?? "admin");
+  return {
+    id: 0,
+    username: user.email ?? user.id,
+    role: role === "recepcion" ? "recepcion" : "admin",
+  };
+}
+
+function mapRoom(row: Record<string, unknown>): Room {
+  return {
+    id: Number(row.local_id ?? 0),
+    number: String(row.number ?? ""),
+    room_type: String(row.room_type ?? ""),
+    floor: Number(row.floor ?? 0),
+    status: String(row.status ?? "available"),
+    notes: (row.notes as string | null) ?? null,
+    active: Boolean(row.active ?? true),
+    version: Number(row.version ?? 1),
+  };
+}
+
+function mapRate(row: Record<string, unknown>): RatePlan {
+  return {
+    id: Number(row.local_id ?? 0),
+    name: String(row.name ?? ""),
+    kind: row.kind as RatePlan["kind"],
+    base_amount_cents: Number(row.base_amount_cents ?? 0),
+    extra_hour_cents: Number(row.extra_hour_cents ?? 0),
+    included_hours: Number(row.included_hours ?? 1),
+    grace_minutes: Number(row.grace_minutes ?? 0),
+    night_cutoff_hour: Number(row.night_cutoff_hour ?? 10),
+    active: Boolean(row.active ?? true),
+    version: Number(row.version ?? 1),
+  };
+}
+
+function mapProduct(row: Record<string, unknown>): Product {
+  return {
+    id: Number(row.local_id ?? 0),
+    name: String(row.name ?? ""),
+    category: String(row.category ?? ""),
+    price_cents: Number(row.price_cents ?? 0),
+    active: Boolean(row.active ?? true),
+    sort_order: Number(row.sort_order ?? 0),
+    version: Number(row.version ?? 1),
+  };
+}
+
+function rpcConflict(message: string): never {
+  if (/conflict/i.test(message)) fail("conflict", "Otro cambio ya se guardó. Recargá e intentá de nuevo.");
+  fail("validation", message || "No se pudo guardar");
+}
+
+async function settingsFromKv(): Promise<AppSettings> {
+  const { data, error } = await sb().from("business_settings").select("key,value");
+  if (error) fail("storage", error.message);
+  const map = new Map((data ?? []).map((r) => [String((r as { key: string }).key), String((r as { value: string }).value)]));
+  return {
+    business_name: map.get("business_name") ?? "MotelApp",
+    address: map.get("address") ?? "",
+    phone: map.get("phone") ?? "",
+    tax_percent: Number(map.get("tax_percent") ?? 0),
+    currency_symbol: map.get("currency_symbol") ?? "Gs.",
+    theme: "light",
+    receipt_footer: map.get("receipt_footer") ?? "",
+    printer_enabled: false,
+    printer_path: "",
+    printer_name: "",
+    paper_width: 80,
+    auto_print_on_checkout: false,
+    require_guest_name: map.get("require_guest_name") === "true",
+    pin_hash: "",
+    has_pin: false,
+  };
+}
+
+export async function supabaseInvoke<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
+  if (FORBIDDEN_OPS.has(name)) fail("forbidden", "Esta operación solo está disponible en recepción");
+
+  switch (name) {
+    case "auth_login": {
+      const payload = args.payload as { username: string; password: string };
+      const email = payload.username.trim();
+      const { data, error } = await sb().auth.signInWithPassword({ email, password: payload.password });
+      if (error || !data.session || !data.user) fail("invalid_credentials", "Usuario o contraseña incorrectos");
+      if (String(data.user.app_metadata?.role ?? "") !== "admin") {
+        await sb().auth.signOut();
+        fail("forbidden", "Esta cuenta no es administración remota");
+      }
+      authSession = {
+        token: data.session.access_token,
+        user: mapAuthUser(data.user),
+        expires_at: Math.floor(Date.now() / 1000) + (data.session.expires_in ?? 3600),
+      };
+      return authSession as T;
+    }
+    case "auth_session": {
+      if (!authSession) fail("session_expired", "Iniciá sesión para continuar");
+      const { data } = await sb().auth.getSession();
+      if (!data.session) fail("session_expired", "La sesión terminó. Volvé a ingresar");
+      return authSession as T;
+    }
+    case "auth_logout": {
+      await sb().auth.signOut();
+      authSession = null;
+      return undefined as T;
+    }
+    case "contract_info":
+      return {
+        contract_version: 1,
+        app_version: "0.1.0",
+        schema_migrations: ["supabase"],
+      } satisfies ContractInfo as T;
+    case "list_rooms": {
+      const { data, error } = await sb().from("rooms").select("*").order("number");
+      if (error) fail("storage", error.message);
+      return (data ?? []).map((r) => mapRoom(r as Record<string, unknown>)) as T;
+    }
+    case "list_rate_plans": {
+      let q = sb().from("rate_plans").select("*").order("name");
+      if (args.active_only) q = q.eq("active", true);
+      const { data, error } = await q;
+      if (error) fail("storage", error.message);
+      return (data ?? []).map((r) => mapRate(r as Record<string, unknown>)) as T;
+    }
+    case "list_products": {
+      let q = sb().from("products").select("*").order("sort_order");
+      if (args.active_only !== false) q = q.eq("active", true);
+      const { data, error } = await q;
+      if (error) fail("storage", error.message);
+      return (data ?? []).map((r) => mapProduct(r as Record<string, unknown>)) as T;
+    }
+    case "list_board": {
+      const { data: rooms, error: e1 } = await sb().from("rooms").select("*").order("number");
+      if (e1) fail("storage", e1.message);
+      const { data: stays, error: e2 } = await sb()
+        .from("stays")
+        .select("*, room:rooms(local_id, number, status), guest:guests(name), rate_plan:rate_plans(local_id, name, kind)")
+        .eq("status", "open");
+      if (e2) fail("storage", e2.message);
+      const byRoomUid = new Map((stays ?? []).map((s) => [String((s as { room_uid: string }).room_uid), s]));
+      const board: BoardRoom[] = (rooms ?? []).map((raw) => {
+        const row = raw as Record<string, unknown>;
+        const room = mapRoom(row);
+        const stayRow = byRoomUid.get(String(row.uid)) as Record<string, unknown> | undefined;
+        let stay: Stay | null = null;
+        if (stayRow) {
+          const guest = stayRow.guest as { name?: string } | null;
+          const rate = stayRow.rate_plan as { local_id?: number; name?: string; kind?: string } | null;
+          stay = {
+            id: Number(stayRow.local_id ?? 0),
+            room_id: room.id,
+            room_number: room.number,
+            guest_id: 0,
+            guest_name: String(guest?.name ?? ""),
+            guest_document: null,
+            guest_phone: null,
+            rate_plan_id: Number(rate?.local_id ?? 0),
+            rate_plan_name: String(rate?.name ?? ""),
+            rate_kind: (rate?.kind as Stay["rate_kind"]) ?? "hourly",
+            reservation_id: null,
+            check_in_at: String(stayRow.check_in_at ?? ""),
+            expected_checkout_at: (stayRow.expected_checkout_at as string | null) ?? null,
+            check_out_at: null,
+            status: "open",
+            converted_to_overnight: Boolean(stayRow.converted_to_overnight),
+            overnight_rate_plan_id: null,
+            notes: (stayRow.notes as string | null) ?? null,
+          };
+        }
+        const display_status = stay
+          ? "occupied"
+          : room.status === "dirty"
+            ? "dirty"
+            : room.status === "blocked"
+              ? "blocked"
+              : "available";
+        return {
+          room,
+          stay,
+          reservation: null,
+          display_status,
+          estimated_total_cents: null,
+          elapsed_minutes: stay
+            ? Math.max(0, Math.floor((Date.now() - new Date(stay.check_in_at).getTime()) / 60000))
+            : null,
+        };
+      });
+      return board as T;
+    }
+    case "list_reservations": {
+      const { data, error } = await sb()
+        .from("reservations")
+        .select("*, room:rooms(local_id, number), guest:guests(name, document, phone), rate_plan:rate_plans(local_id, name)")
+        .order("expected_arrival_at");
+      if (error) fail("storage", error.message);
+      return (data ?? []).map((r) => {
+        const row = r as Record<string, unknown>;
+        const guest = row.guest as { name?: string; document?: string; phone?: string } | null;
+        const room = row.room as { local_id?: number; number?: string } | null;
+        const rate = row.rate_plan as { local_id?: number; name?: string } | null;
+        return {
+          id: Number(row.local_id ?? 0),
+          guest_id: 0,
+          guest_name: String(guest?.name ?? ""),
+          guest_document: guest?.document ?? null,
+          guest_phone: guest?.phone ?? null,
+          room_id: Number(room?.local_id ?? 0),
+          room_number: String(room?.number ?? ""),
+          rate_plan_id: Number(rate?.local_id ?? 0),
+          rate_plan_name: String(rate?.name ?? ""),
+          expected_arrival_at: String(row.expected_arrival_at ?? ""),
+          expected_nights: Number(row.expected_nights ?? 1),
+          status: String(row.status ?? "booked"),
+          notes: (row.notes as string | null) ?? null,
+        } satisfies Reservation;
+      }) as T;
+    }
+    case "list_history": {
+      let q = sb()
+        .from("stays")
+        .select("*, room:rooms(local_id, number), guest:guests(name), rate_plan:rate_plans(local_id, name, kind)")
+        .eq("status", "closed")
+        .order("check_out_at", { ascending: false })
+        .limit(200);
+      if (args.date) {
+        const day = String(args.date);
+        q = q.gte("check_out_at", `${day}T00:00:00`).lte("check_out_at", `${day}T23:59:59.999Z`);
+      }
+      const { data, error } = await q;
+      if (error) fail("storage", error.message);
+      return (data ?? []).map((r) => {
+        const row = r as Record<string, unknown>;
+        const guest = row.guest as { name?: string } | null;
+        const room = row.room as { local_id?: number; number?: string } | null;
+        const rate = row.rate_plan as { local_id?: number; name?: string; kind?: string } | null;
+        const stay: Stay = {
+          id: Number(row.local_id ?? 0),
+          room_id: Number(room?.local_id ?? 0),
+          room_number: String(room?.number ?? ""),
+          guest_id: 0,
+          guest_name: String(guest?.name ?? ""),
+          guest_document: null,
+          guest_phone: null,
+          rate_plan_id: Number(rate?.local_id ?? 0),
+          rate_plan_name: String(rate?.name ?? ""),
+          rate_kind: (rate?.kind as Stay["rate_kind"]) ?? "hourly",
+          reservation_id: null,
+          check_in_at: String(row.check_in_at ?? ""),
+          expected_checkout_at: null,
+          check_out_at: (row.check_out_at as string | null) ?? null,
+          status: "closed",
+          converted_to_overnight: Boolean(row.converted_to_overnight),
+          overnight_rate_plan_id: null,
+          notes: null,
+        };
+        return { stay, total_cents: 0, payment_method: null } satisfies HistoryStay;
+      }) as T;
+    }
+    case "get_stay_detail": {
+      const stayId = Number(args.stay_id);
+      const { data: stayRow, error } = await sb()
+        .from("stays")
+        .select("*, room:rooms(local_id, number), guest:guests(name), rate_plan:rate_plans(*)")
+        .eq("local_id", stayId)
+        .maybeSingle();
+      if (error) fail("storage", error.message);
+      if (!stayRow) fail("not_found", "Estadía no encontrada");
+      const row = stayRow as Record<string, unknown>;
+      const guest = row.guest as { name?: string } | null;
+      const room = row.room as { local_id?: number; number?: string } | null;
+      const rateRow = row.rate_plan as Record<string, unknown> | null;
+      const stay: Stay = {
+        id: stayId,
+        room_id: Number(room?.local_id ?? 0),
+        room_number: String(room?.number ?? ""),
+        guest_id: 0,
+        guest_name: String(guest?.name ?? ""),
+        guest_document: null,
+        guest_phone: null,
+        rate_plan_id: Number(rateRow?.local_id ?? 0),
+        rate_plan_name: String(rateRow?.name ?? ""),
+        rate_kind: (rateRow?.kind as Stay["rate_kind"]) ?? "hourly",
+        reservation_id: null,
+        check_in_at: String(row.check_in_at ?? ""),
+        expected_checkout_at: (row.expected_checkout_at as string | null) ?? null,
+        check_out_at: (row.check_out_at as string | null) ?? null,
+        status: String(row.status ?? "open"),
+        converted_to_overnight: Boolean(row.converted_to_overnight),
+        overnight_rate_plan_id: null,
+        notes: null,
+      };
+      const { data: charges } = await sb().from("charges").select("*").eq("stay_uid", row.uid).is("deleted_at", null);
+      const chargeList: Charge[] = (charges ?? []).map((c) => {
+        const cr = c as Record<string, unknown>;
+        return {
+          id: Number(cr.local_id ?? 0),
+          stay_id: stayId,
+          kind: String(cr.kind ?? "other"),
+          description: String(cr.description ?? ""),
+          amount_cents: Number(cr.amount_cents ?? 0),
+          created_at: String(cr.created_at ?? ""),
+        };
+      });
+      const settings = await settingsFromKv();
+      const rate = rateRow ? mapRate(rateRow) : null;
+      const manualLines: LineItem[] = chargeList
+        .filter((c) => c.kind === "surcharge" || c.kind === "discount")
+        .map((c) => ({ kind: c.kind, description: c.description, amount_cents: c.amount_cents }));
+      const bill: BillPreview = rate
+        ? {
+            ...previewBillLocal({
+              stayId: stay.id,
+              checkIn: new Date(stay.check_in_at),
+              now: new Date(),
+              rate,
+              converted: stay.converted_to_overnight,
+              manualLines,
+              taxPercent: settings.tax_percent,
+            }),
+            duration_label: `Estimativo · ${previewBillLocal({
+              stayId: stay.id,
+              checkIn: new Date(stay.check_in_at),
+              now: new Date(),
+              rate,
+              converted: stay.converted_to_overnight,
+              manualLines,
+              taxPercent: settings.tax_percent,
+            }).duration_label}`,
+          }
+        : {
+            stay_id: stay.id,
+            lines: [],
+            subtotal_cents: 0,
+            tax_percent: settings.tax_percent,
+            tax_cents: 0,
+            total_cents: 0,
+            applied_kind: "hourly",
+            duration_label: "Estimativo",
+            overnight_applied: false,
+          };
+      const payments: Payment[] = [];
+      return [stay, bill, chargeList, payments] as T;
+    }
+    case "preview_bill": {
+      const detail = await supabaseInvoke<[Stay, BillPreview, Charge[], Payment[]]>("get_stay_detail", {
+        stay_id: args.stay_id,
+      });
+      return detail[1] as T;
+    }
+    case "get_settings":
+      return (await settingsFromKv()) as T;
+    case "save_room": {
+      const payload = args.payload as SaveRoomPayload;
+      let uid = crypto.randomUUID() as string;
+      let expected = payload.expected_version ?? 0;
+      if (payload.id != null) {
+        const { data } = await sb().from("rooms").select("uid, version").eq("local_id", payload.id).maybeSingle();
+        if (data) {
+          uid = String((data as { uid: string }).uid);
+          expected = payload.expected_version ?? Number((data as { version: number }).version);
+        }
+      }
+      let { error } = await sb().rpc(
+        "catalog_upsert_room",
+        {
+          p_uid: uid,
+          p_expected_version: expected,
+          p_number: payload.number,
+          p_room_type: payload.room_type,
+          p_floor: payload.floor,
+          p_notes: payload.notes ?? null,
+          p_active: true,
+          p_local_id: payload.id ?? null,
+        } as never,
+      );
+      if (error) rpcConflict(error.message);
+      const rooms = await supabaseInvoke<Room[]>("list_rooms", {});
+      const found = rooms.find((r) => r.number === payload.number);
+      if (!found) fail("not_found", "Habitación no encontrada tras guardar");
+      return found as T;
+    }
+    case "save_rate_plan": {
+      const payload = args.payload as SaveRatePlanPayload;
+      let uid = crypto.randomUUID() as string;
+      let expected = payload.expected_version ?? 0;
+      if (payload.id != null) {
+        const { data } = await sb().from("rate_plans").select("uid, version").eq("local_id", payload.id).maybeSingle();
+        if (data) {
+          uid = String((data as { uid: string }).uid);
+          expected = payload.expected_version ?? Number((data as { version: number }).version);
+        }
+      }
+      const { error } = await sb().rpc(
+        "catalog_upsert_rate_plan",
+        {
+          p_uid: uid,
+          p_expected_version: expected,
+          p_name: payload.name,
+          p_kind: payload.kind,
+          p_base_amount_cents: payload.base_amount_cents,
+          p_extra_hour_cents: payload.extra_hour_cents,
+          p_included_hours: payload.included_hours,
+          p_grace_minutes: payload.grace_minutes,
+          p_night_cutoff_hour: payload.night_cutoff_hour,
+          p_active: payload.active,
+          p_local_id: payload.id ?? null,
+        } as never,
+      );
+      if (error) rpcConflict(error.message);
+      const rates = await supabaseInvoke<RatePlan[]>("list_rate_plans", { active_only: false });
+      return (rates.find((r) => r.name === payload.name) ?? rates[0]) as T;
+    }
+    case "save_product": {
+      const payload = args.payload as SaveProductPayload;
+      let uid = crypto.randomUUID() as string;
+      let expected = payload.expected_version ?? 0;
+      if (payload.id != null) {
+        const { data } = await sb().from("products").select("uid, version").eq("local_id", payload.id).maybeSingle();
+        if (data) {
+          uid = String((data as { uid: string }).uid);
+          expected = payload.expected_version ?? Number((data as { version: number }).version);
+        }
+      }
+      const { error } = await sb().rpc(
+        "catalog_upsert_product",
+        {
+          p_uid: uid,
+          p_expected_version: expected,
+          p_name: payload.name,
+          p_category: payload.category,
+          p_price_cents: payload.price_cents,
+          p_active: payload.active,
+          p_sort_order: payload.sort_order ?? 0,
+          p_local_id: payload.id ?? null,
+        } as never,
+      );
+      if (error) rpcConflict(error.message);
+      const products = await supabaseInvoke<Product[]>("list_products", { active_only: false });
+      return (products.find((p) => p.name === payload.name) ?? products[0]) as T;
+    }
+    case "set_product_active": {
+      const products = await supabaseInvoke<Product[]>("list_products", { active_only: false });
+      const product = products.find((p) => p.id === Number(args.product_id));
+      if (!product) fail("not_found", "Producto no encontrado");
+      return (await supabaseInvoke<Product>("save_product", {
+        payload: { ...product, active: Boolean(args.active), expected_version: product.version },
+      })) as T;
+    }
+    case "save_settings": {
+      const payload = args.payload as AppSettings;
+      const pairs: [string, string][] = [
+        ["business_name", payload.business_name],
+        ["address", payload.address],
+        ["phone", payload.phone],
+        ["tax_percent", String(payload.tax_percent)],
+        ["currency_symbol", payload.currency_symbol],
+        ["receipt_footer", payload.receipt_footer],
+        ["require_guest_name", payload.require_guest_name ? "true" : "false"],
+      ];
+      for (const [key, value] of pairs) {
+        const { data: existing } = await sb().from("business_settings").select("version").eq("key", key).maybeSingle();
+        const expected = existing ? Number((existing as { version: number }).version) : 0;
+        const { error } = await sb().rpc("catalog_upsert_settings", {
+          p_key: key,
+          p_value: value,
+          p_expected_version: expected,
+        });
+        if (error) rpcConflict(error.message);
+      }
+      return (await settingsFromKv()) as T;
+    }
+    case "auth_create_user":
+      fail("forbidden", "Creá usuarios desde recepción o completá el flujo remoto con hash_password en una iteración siguiente");
+      break;
+    default:
+      fail("forbidden", `Comando no disponible en administración remota: ${name}`);
+  }
+}
+
+export type OperationalListener = () => void;
+
+export function subscribeOperational(onChange: OperationalListener): () => void {
+  const c = sb();
+  if (boardChannel) void c.removeChannel(boardChannel);
+  boardChannel = c
+    .channel("n07-operational")
+    .on("postgres_changes", { event: "*", schema: "public", table: "stays" }, () => onChange())
+    .on("postgres_changes", { event: "*", schema: "public", table: "rooms" }, () => onChange())
+    .on("postgres_changes", { event: "*", schema: "public", table: "charges" }, () => onChange())
+    .subscribe();
+  return () => {
+    if (boardChannel) {
+      void c.removeChannel(boardChannel);
+      boardChannel = null;
+    }
+  };
+}

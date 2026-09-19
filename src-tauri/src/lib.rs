@@ -1,6 +1,7 @@
 mod billing;
 mod auth;
 mod commands;
+mod credentials;
 mod db;
 mod error;
 mod models;
@@ -71,6 +72,16 @@ pub fn run() {
             commands::print_test,
             commands::list_printers,
             commands::reprint_receipt,
+            commands::device_mode_get,
+            commands::device_mode_set,
+            commands::remote_configure,
+            commands::remote_configured,
+            commands::remote_get_config,
+            commands::hash_password,
+            commands::sync_status,
+            commands::sync_pull_now,
+            commands::sync_configure_device,
+            commands::backup_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Nightdesk");

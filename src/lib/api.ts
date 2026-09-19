@@ -12,16 +12,22 @@ import type {
   CheckOutResult,
   ContractInfo,
   CreateReservationPayload,
+  DeviceMode,
   HistoryStay,
+  HashPasswordResult,
   Payment,
   Product,
   RatePlan,
+  RemoteConfigurePayload,
   Reservation,
   Room,
   SaveProductPayload,
   SaveRatePlanPayload,
   SaveRoomPayload,
   Stay,
+  SyncConfigureDevicePayload,
+  SyncStatus,
+  BackupStatus,
 } from "./types";
 import { toApiError } from "./errors";
 
@@ -45,7 +51,40 @@ function withOperationId<T extends { operation_id?: string | null }>(payload: T)
   return { ...payload, operation_id: crypto.randomUUID() };
 }
 
-export async function cmd<T>(name: string, args?: Record<string, unknown>): Promise<T> {
+/** Always local IPC / mock — never supabaseInvoke. */
+const LOCAL_ALWAYS = new Set([
+  "device_mode_get",
+  "device_mode_set",
+  "remote_configure",
+  "remote_configured",
+  "remote_get_config",
+  "hash_password",
+  "sync_status",
+  "sync_pull_now",
+  "sync_configure_device",
+  "backup_status",
+]);
+
+let sessionToken: string | null = null;
+let cachedMode: DeviceMode | null | undefined;
+
+export async function refreshDeviceMode(): Promise<DeviceMode | null> {
+  cachedMode = undefined;
+  return getDeviceMode();
+}
+
+export async function getDeviceMode(): Promise<DeviceMode | null> {
+  if (cachedMode !== undefined) return cachedMode;
+  const mode = await cmdRaw<DeviceMode | null>("device_mode_get", {});
+  cachedMode = mode;
+  return mode;
+}
+
+export function peekDeviceMode(): DeviceMode | null | undefined {
+  return cachedMode;
+}
+
+async function cmdRaw<T>(name: string, args?: Record<string, unknown>): Promise<T> {
   const requestToken = sessionToken;
   const requestArgs = { ...args, session_token: requestToken };
   try {
@@ -65,7 +104,23 @@ export async function cmd<T>(name: string, args?: Record<string, unknown>): Prom
   }
 }
 
-let sessionToken: string | null = null;
+export async function cmd<T>(name: string, args?: Record<string, unknown>): Promise<T> {
+  const mode = LOCAL_ALWAYS.has(name) ? null : await getDeviceMode();
+  if (isTauri() && mode === "remote" && !LOCAL_ALWAYS.has(name)) {
+    const { supabaseInvoke } = await import("./supabase");
+    try {
+      return await supabaseInvoke<T>(name, { ...args, session_token: sessionToken });
+    } catch (error) {
+      const apiError = toApiError(error);
+      if (apiError.code === "session_expired") {
+        sessionToken = null;
+        window.dispatchEvent(new Event("nightdesk-session-expired"));
+      }
+      throw apiError;
+    }
+  }
+  return cmdRaw<T>(name, args);
+}
 
 export const api = {
   setupRequired: () => cmd<boolean>("auth_setup_required"),
@@ -127,4 +182,31 @@ export const api = {
   printTest: () => cmd<string | null>("print_test"),
   listPrinters: () => cmd<string[]>("list_printers"),
   reprintReceipt: (stay_id: number) => cmd<string | null>("reprint_receipt", { stay_id }),
+
+  deviceModeGet: () => refreshDeviceMode(),
+  deviceModeSet: async (mode: DeviceMode) => {
+    await cmd<void>("device_mode_set", { payload: { mode } });
+    cachedMode = mode;
+  },
+  remoteConfigure: async (payload: RemoteConfigurePayload) => {
+    await cmd<void>("remote_configure", { payload });
+    if (isTauri()) {
+      const { initSupabase } = await import("./supabase");
+      initSupabase(payload.project_url, payload.anon_key);
+    }
+  },
+  remoteConfigured: () => cmd<boolean>("remote_configured"),
+  remoteGetConfig: () => cmd<RemoteConfigurePayload | null>("remote_get_config"),
+  hashPassword: (password: string) => cmd<HashPasswordResult>("hash_password", { payload: { password } }),
+  syncStatus: () => cmd<SyncStatus>("sync_status"),
+  syncPullNow: () => cmd<void>("sync_pull_now"),
+  syncConfigureDevice: (payload: SyncConfigureDevicePayload) =>
+    cmd<void>("sync_configure_device", { payload }),
+  backupStatus: () => cmd<BackupStatus>("backup_status"),
+  subscribeOperational: async (onChange: () => void) => {
+    const mode = await getDeviceMode();
+    if (mode !== "remote") return () => {};
+    const { subscribeOperational } = await import("./supabase");
+    return subscribeOperational(onChange);
+  },
 };

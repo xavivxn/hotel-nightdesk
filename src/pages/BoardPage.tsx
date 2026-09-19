@@ -2,15 +2,16 @@ import { BedDouble, BrushCleaning, CalendarClock, Check, X } from "lucide-react"
 import { RoomCard, RoomStatusLegend } from "@/components/board/RoomCard";
 import { RoomDrawer } from "@/components/board/RoomDrawer";
 import { api } from "@/lib/api";
-import type { AppSettings, BoardRoom, RatePlan } from "@/lib/types";
+import type { AppSettings, BoardRoom, DeviceMode, RatePlan } from "@/lib/types";
 import { useEffect, useMemo, useState } from "react";
 
-export function BoardPage({ settings }: { settings: AppSettings }) {
+export function BoardPage({ settings, deviceMode = "reception" }: { settings: AppSettings; deviceMode?: DeviceMode }) {
   const [board, setBoard] = useState<BoardRoom[]>([]);
   const [rates, setRates] = useState<RatePlan[]>([]);
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [selected, setSelected] = useState<BoardRoom | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [liveNote, setLiveNote] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -25,10 +26,27 @@ export function BoardPage({ settings }: { settings: AppSettings }) {
   }
 
   useEffect(() => {
-    load();
-    const id = window.setInterval(load, 20000);
-    return () => window.clearInterval(id);
-  }, []);
+    void load();
+    const id = window.setInterval(load, deviceMode === "remote" ? 60000 : 20000);
+    function onCatalog() {
+      void load();
+    }
+    window.addEventListener("sync:catalog-updated", onCatalog);
+    let unsub = () => {};
+    if (deviceMode === "remote") {
+      void api.subscribeOperational(() => {
+        setLiveNote(`Actualizado ${new Date().toLocaleTimeString()}`);
+        void load();
+      }).then((fn) => {
+        unsub = fn;
+      });
+    }
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener("sync:catalog-updated", onCatalog);
+      unsub();
+    };
+  }, [deviceMode]);
 
   const filtered = useMemo(() => {
     return board
@@ -45,6 +63,9 @@ export function BoardPage({ settings }: { settings: AppSettings }) {
         <div>
           <p className="page-kicker">Recepción / Vista general</p>
           <h1 className="page-title">Tablero de habitaciones</h1>
+          {deviceMode === "remote" && (
+            <p className="text-sm text-[var(--muted)]">Solo lectura · {liveNote ?? "en vivo vía Supabase"}</p>
+          )}
         </div>
         <p className="occupancy-compact">{occupied} de {board.length} ocupadas</p>
       </header>

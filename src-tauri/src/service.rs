@@ -1142,6 +1142,57 @@ pub fn pin_required(conn: &Connection) -> AppResult<bool> {
     Ok(!db::get_setting(conn, "pin_hash", "")?.is_empty())
 }
 
+pub fn device_mode_get(conn: &Connection) -> AppResult<Option<String>> {
+    let raw = db::get_setting(conn, "device_mode", "")?;
+    if raw.is_empty() {
+        return Ok(None);
+    }
+    if raw != "reception" && raw != "remote" {
+        return Err(AppError::msg("Modo de equipo inválido"));
+    }
+    Ok(Some(raw))
+}
+
+pub fn device_mode_set(conn: &Connection, mode: &str) -> AppResult<()> {
+    let mode = mode.trim();
+    if mode != "reception" && mode != "remote" {
+        return Err(AppError::msg("Elegí Recepción o Administración remota"));
+    }
+    if device_mode_get(conn)?.is_some() {
+        return Err(AppError::msg("El modo de este equipo ya está definido"));
+    }
+    db::upsert_setting(conn, "device_mode", mode)
+}
+
+pub fn hash_password(password: &str) -> AppResult<crate::models::HashPasswordResult> {
+    use argon2::{
+        password_hash::{PasswordHasher, SaltString},
+        Argon2,
+    };
+    use rand_core::OsRng;
+    if password.is_empty() || password.len() > 128 {
+        return Err(AppError::msg("La contraseña debe tener entre 1 y 128 bytes"));
+    }
+    let salt = SaltString::generate(&mut OsRng);
+    let hash = Argon2::default()
+        .hash_password(password.as_bytes(), &salt)
+        .map_err(|_| AppError::msg("No se pudo proteger la contraseña"))?
+        .to_string();
+    Ok(crate::models::HashPasswordResult { hash })
+}
+
+pub fn sync_status_stub(app_data: &std::path::Path) -> crate::models::SyncStatus {
+    let pending = 0_i64;
+    crate::models::SyncStatus {
+        connected: false,
+        pending_outbox: pending,
+        last_push_at: None,
+        last_pull_at: None,
+        last_error: Some("Sincronización pendiente de I07".into()),
+        configured: crate::credentials::device_configured(app_data),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
