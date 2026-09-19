@@ -12,6 +12,7 @@ import { LoginPage } from "@/pages/LoginPage";
 import { UsersPage } from "@/pages/UsersPage";
 import { DeviceModePage } from "@/pages/DeviceModePage";
 import { RemoteConfigPage } from "@/pages/RemoteConfigPage";
+import { LoveNestLogo } from "@/components/layout/BrandLogo";
 import { api, refreshDeviceMode } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
 import type { AppSettings, DeviceMode, SessionInfo } from "@/lib/types";
@@ -188,9 +189,19 @@ export default function App() {
     );
   } else if (!loaded) {
     body = (
-      <div className="p-8">
-        <p role="alert">{error || "Cargando tu espacio…"}</p>
-        <Button onClick={logout}>Volver al acceso</Button>
+      <div className="login-stage login-stage--handoff grid h-full min-h-0 place-items-center p-6">
+        <div className="login-logo-slot">
+          <div className="login-logo-glow login-logo-glow--hold" />
+          <LoveNestLogo className="login-logo" />
+        </div>
+        <p className="mt-4 text-sm text-[var(--muted)]" role="status">
+          {error || "Cargando tu espacio…"}
+        </p>
+        {error ? (
+          <Button className="mt-4" onClick={logout}>
+            Volver al acceso
+          </Button>
+        ) : null}
       </div>
     );
   } else {

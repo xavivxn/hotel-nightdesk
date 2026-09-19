@@ -8,6 +8,7 @@ import type { DeviceMode, SessionUser, SyncStatus } from "@/lib/types";
 import { ADMIN_ROUTES } from "@/lib/permissions";
 import { Button } from "@/components/ui/Button";
 import { api } from "@/lib/api";
+import { consumeShellEnter } from "@/lib/login-transition";
 import { useEffect, useState } from "react";
 
 const links = [
@@ -40,6 +41,7 @@ export function AppShell({
 }) {
   const { theme, toggle } = useTheme();
   const [sync, setSync] = useState<SyncStatus | null>(null);
+  const [enter] = useState(() => consumeShellEnter());
 
   useEffect(() => {
     if (deviceMode !== "reception") return;
@@ -53,7 +55,7 @@ export function AppShell({
       }
     }
     void load();
-    const id = window.setInterval(load, 30000);
+    const id = window.setInterval(load, 30_000);
     return () => {
       cancelled = true;
       clearInterval(id);
@@ -61,14 +63,16 @@ export function AppShell({
   }, [deviceMode]);
 
   return (
-    <div className="flex h-full min-h-0 overflow-hidden">
-        <aside className="app-sidebar flex h-full w-[88px] flex-col border-r border-[var(--line)] bg-[var(--surface)] px-2 py-5 lg:w-56 lg:px-4">
-          <div className="sidebar-brand">
-            <LoveNestLogo />
-          </div>
-          <p className="nav-section hidden lg:block">OPERACIÓN</p>
-          <nav aria-label="Navegación principal" className="flex flex-1 flex-col gap-1">
-            {links.filter(link => user.role === "admin" || !ADMIN_ROUTES.has(link.to)).map((link) => (
+    <div className={cn("flex h-full min-h-0 overflow-hidden", enter && "app-shell--enter")}>
+      <aside className="app-sidebar app-shell-aside flex h-full w-[88px] flex-col border-r border-[var(--line)] bg-[var(--surface)] px-2 py-5 lg:w-56 lg:px-4">
+        <div className="sidebar-brand">
+          <LoveNestLogo />
+        </div>
+        <p className="nav-section hidden lg:block">OPERACIÓN</p>
+        <nav aria-label="Navegación principal" className="flex flex-1 flex-col gap-1">
+          {links
+            .filter((link) => user.role === "admin" || !ADMIN_ROUTES.has(link.to))
+            .map((link) => (
               <NavLink
                 key={link.to}
                 to={link.to}
@@ -86,33 +90,39 @@ export function AppShell({
                 <span className="hidden lg:inline">{link.label}</span>
               </NavLink>
             ))}
-          </nav>
-          <div className="sidebar-foot">
-            {deviceMode === "reception" && (
-              <p className="mb-2 truncate text-xs text-[var(--muted)]" title={sync?.last_error ?? undefined}>
-                Sync: {syncLabel(sync)}
-              </p>
-            )}
-            {deviceMode === "remote" && (
-              <p className="mb-2 truncate text-xs text-[var(--muted)]">Modo remoto</p>
-            )}
-            <p className="truncate text-xs" title={`${user.username} · ${user.role}`}>{user.username} · {user.role === "admin" ? "Admin" : "Recepción"}</p>
-            <Button variant="secondary" className="w-full" onClick={onLogout}>Salir</Button>
-            <div className="sidebar-dock">
-              <DutyClock />
-              <button
-                onClick={toggle}
-                className="theme-toggle flex w-full items-center justify-center gap-2 rounded-lg border border-[var(--line)] px-3 py-2 text-sm hover:bg-[var(--surface-2)] lg:justify-start"
-              >
-                {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
-                <span className="hidden lg:inline">{theme === "dark" ? "Modo claro" : "Modo oscuro"}</span>
-              </button>
-            </div>
+        </nav>
+        <div className="sidebar-foot">
+          {deviceMode === "reception" && (
+            <p className="mb-2 truncate text-xs text-[var(--muted)]" title={sync?.last_error ?? undefined}>
+              Sync: {syncLabel(sync)}
+            </p>
+          )}
+          {deviceMode === "remote" && (
+            <p className="mb-2 truncate text-xs text-[var(--muted)]">Modo remoto</p>
+          )}
+          <p className="truncate text-xs" title={`${user.username} · ${user.role}`}>
+            {user.username} · {user.role === "admin" ? "Admin" : "Recepción"}
+          </p>
+          <Button variant="secondary" className="w-full" onClick={onLogout}>
+            Salir
+          </Button>
+          <div className="sidebar-dock">
+            <DutyClock />
+            <button
+              onClick={toggle}
+              className="theme-toggle flex w-full items-center justify-center gap-2 rounded-lg border border-[var(--line)] px-3 py-2 text-sm hover:bg-[var(--surface-2)] lg:justify-start"
+            >
+              {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+              <span className="hidden lg:inline">{theme === "dark" ? "Modo claro" : "Modo oscuro"}</span>
+            </button>
           </div>
-        </aside>
-        <main className="min-w-0 flex-1 overflow-auto">
+        </div>
+      </aside>
+      <div className="app-shell-main flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <main className="app-shell-content min-h-0 min-w-0 flex-1 overflow-auto">
           <Outlet />
         </main>
+      </div>
     </div>
   );
 }
