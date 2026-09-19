@@ -31,8 +31,8 @@ Un solo binario Tauri. En el primer arranque se elige el rol del equipo (**Recep
 
 ### Después del modo
 
-- **Recepción:** flujo actual — `auth_setup_required` / setup admin local si hace falta → login **local** (SQLite + Argon2). Opera sin internet.
-- **Remoto:** si faltan URL + anon en keyring → pantalla de configuración (campos en claro solo al teclear; persistencia en Credential Manager / stub equivalente). Luego login **Supabase Auth**.
+- **Recepción:** flujo actual — `auth_setup_required` / setup admin local si hace falta → login **local** (SQLite + Argon2). Opera sin internet. Opcional más tarde: `sync_configure_device` (URL + anon + device email/password) para sync/backup.
+- **Remoto:** si faltan URL + anon en keyring → pantalla de configuración que llama a **`remote_configure`** `{ project_url, anon_key }` → Credential Manager (sin `device_*`; el admin no es un device). Luego login **Supabase Auth**.
 
 ### UI
 
@@ -45,8 +45,9 @@ Un solo binario Tauri. En el primer arranque se elige el rol del equipo (**Recep
 
 | Comando | Payload → resultado | Notas |
 |---|---|---|
-| `device_mode_get` | `{}` → `"reception" \| "remote" \| null` | `null` / ausente = primer arranque |
+| `device_mode_get` | `{}` → `"reception" \| "remote" \| null` | `null` / ausente = primer arranque. Actualizar `docs/contrato-ipc-api.md` (hoy no admite `null`). |
 | `device_mode_set` | `{ mode }` → `void` | Solo primer arranque / reset explícito |
+| `remote_configure` | `{ project_url, anon_key }` → `void` | Solo modo remoto. Keyring; nunca en `settings` ni respuesta. Distinto de `sync_configure_device` (recepción + device Auth). |
 
 ## 4. Transporte
 
@@ -60,7 +61,15 @@ UI → api.*() → cmd() → invoke | supabaseInvoke | mockInvoke
 |---|---|
 | No Tauri (`npm run dev`) | `mockInvoke` (mock puede simular modo remoto) |
 | Tauri + `reception` | `invoke` |
-| Tauri + `remote` | `supabaseInvoke` |
+| Tauri + `remote` | `supabaseInvoke` **salvo** la allowlist local abajo |
+
+**Siempre `invoke` (o mock), incluso en modo remoto** — nunca pasan por Supabase:
+
+| Comando | Motivo |
+|---|---|
+| `device_mode_get` / `device_mode_set` | Ajuste de dispositivo local; puede ejecutarse antes de tener modo/cliente |
+| `remote_configure` | Escribe URL/anon en Credential Manager de esa PC |
+| `hash_password` | Argon2id en Rust local del PC admin |
 
 Componentes **nunca** importan `@tauri-apps/api` ni `@supabase/supabase-js`.
 
@@ -103,7 +112,8 @@ Detalle comando a comando: tabla existente en `docs/contrato-ipc-api.md` (actual
 ## 6. Tablero en vivo (solo remoto)
 
 - Tablero, historial, reservas, detalle de cuenta: solo lectura.
-- Realtime `supabase-js` sobre `stays`, `rooms`, `charges` (sin polling como fuente primaria).
+- Realtime: suscripciones solo dentro de `src/lib/supabase.ts` (p. ej. `subscribeBoard(onChange)` / `unsubscribeBoard()`). La UI llama wrappers vía `api.ts` o un módulo fino reexportado; **no** abre canales desde páginas/componentes.
+- Realtime sobre `stays`, `rooms`, `charges` (sin polling como fuente primaria).
 - Indicador de conexión + última actualización.
 - Sin red: aviso visible; guardar deshabilitado.
 - `conflict` por `expected_version`: mensaje + recarga; no sobrescribir.
@@ -145,7 +155,7 @@ Pantallas de tablero/catálogo/ajustes escuchan `sync:catalog-updated` y refresc
 
 - Instalador **sin** secretos.
 - Recepción: una vez, `sync_configure_device` (URL + anon + device) → Credential Manager; sync/backup los leen en runtime.
-- Admin remoto: URL/anon en esa PC (misma idea de config / perfil); login Auth; sesión en memoria.
+- Admin remoto: `remote_configure` (solo URL + anon) en esa PC; login Auth; sesión en memoria. **No** reutilizar el payload de `sync_configure_device` (incluye device email/password).
 - En git/Jira solo «configurado». Cero `.env` embebido en el binario.
 
 ## 10. Fuera de alcance (no implementar en N07)
@@ -178,9 +188,9 @@ Pantallas de tablero/catálogo/ajustes escuchan `sync:catalog-updated` y refresc
 ## 13. Orden de implementación sugerido
 
 1. `device_mode_get/set` + pantalla de arranque + mock.
-2. `@supabase/supabase-js` + `supabase.ts` + `cmd()` por modo + casos lectura/`forbidden`.
-3. Login Auth remoto + config URL/anon.
-4. Realtime tablero/historial/reservas + preview estimativo.
+2. `remote_configure` + keyring stub; `@supabase/supabase-js` + `supabase.ts` + `cmd()` por modo (con allowlist local) + casos lectura/`forbidden`.
+3. Login Auth remoto.
+4. Realtime tablero/historial/reservas (wrappers en `supabase.ts`) + preview estimativo.
 5. Escrituras catálogo + `hash_password` + conflictos.
 6. Stubs `sync_*` + indicador AppShell + sección Ajustes + listener de evento.
-7. Actualizar `docs/contrato-ipc-api.md` / comentarios N07; evidencia en Jira (MOT-54…56).
+7. Actualizar `docs/contrato-ipc-api.md` (incl. `null` en `device_mode_get`, `remote_configure`) / evidencia en Jira (MOT-54…56).
