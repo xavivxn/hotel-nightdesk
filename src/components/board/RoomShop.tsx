@@ -38,11 +38,6 @@ export function RoomShop({
     return map;
   }, [charges]);
 
-  const shopTotal = useMemo(
-    () => charges.filter((c) => c.kind === "surcharge").reduce((sum, c) => sum + c.amount_cents, 0),
-    [charges],
-  );
-
   const visible = products.filter((p) => p.category === category);
 
   async function addProduct(product: Product) {
@@ -61,14 +56,11 @@ export function RoomShop({
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-end justify-between gap-3">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">Tienda</p>
-        {shopTotal > 0 ? (
-          <p className="font-mono text-sm font-semibold tabular-nums">{formatMoney(shopTotal, currency)}</p>
-        ) : null}
-      </div>
-      <div className="flex flex-wrap gap-1.5">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
+      <p className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">
+        Tienda
+      </p>
+      <div className="flex shrink-0 flex-wrap gap-1.5">
         {PRODUCT_CATEGORIES.map((item) => (
           <button
             key={item.id}
@@ -85,7 +77,7 @@ export function RoomShop({
           </button>
         ))}
       </div>
-      <div className="grid max-h-[220px] grid-cols-2 gap-2 overflow-y-auto pr-1 scrollbar-thin sm:grid-cols-3">
+      <div className="grid min-h-0 flex-1 grid-cols-2 content-start gap-2 overflow-y-auto pr-1 scrollbar-thin sm:grid-cols-3">
         {visible.map((product) => {
           const qty = counts.get(product.name) ?? 0;
           return (
@@ -102,7 +94,9 @@ export function RoomShop({
               <div className="flex items-start justify-between gap-2">
                 <span className="text-sm font-semibold leading-tight">{product.name}</span>
                 {qty > 0 ? (
-                  <span className="font-mono text-[11px] font-bold tabular-nums text-[var(--accent)]">×{qty}</span>
+                  <span className="font-mono text-[11px] font-bold tabular-nums text-[var(--accent)]">
+                    ×{qty}
+                  </span>
                 ) : null}
               </div>
               <span className="mt-1 block font-mono text-xs tabular-nums text-[var(--muted)]">
@@ -112,7 +106,7 @@ export function RoomShop({
           );
         })}
       </div>
-      {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
+      {error ? <p className="shrink-0 text-sm text-[var(--danger)]">{error}</p> : null}
     </div>
   );
 }

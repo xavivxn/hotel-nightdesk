@@ -47,7 +47,6 @@ pub fn authorize(actor: &Actor, operation: Operation) -> AppResult<()> {
             | Operation::SaveProduct
             | Operation::SetProductActive
             | Operation::AddCharge
-            | Operation::DeleteCharge
             | Operation::SaveSettings
             | Operation::PrintTest
             | Operation::CreateUser

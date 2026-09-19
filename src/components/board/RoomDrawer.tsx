@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Input } from "@/components/ui/Field";
 import { RoomShop } from "@/components/board/RoomShop";
+import { StayCart } from "@/components/board/StayCart";
 import { cn } from "@/lib/utils";
 
 function formatClock(date: Date) {
@@ -385,54 +386,40 @@ function StayDrawer({
       subtitle={subtitle}
       onClose={onClose}
     >
-      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden min-[800px]:grid-cols-2">
-        <div className="min-h-0 space-y-5 overflow-y-auto border-[var(--line)] p-6 scrollbar-thin min-[800px]:border-r">
-          <div className="rounded-lg border border-[var(--line)] bg-[var(--bg)] p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">Cuenta en vivo</p>
-            <p className="mt-1 font-mono text-4xl font-semibold tabular-nums tracking-tight">
-              {formatMoney(total, settings.currency_symbol)}
-            </p>
+      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden min-[800px]:grid-cols-[1.2fr_0.9fr]">
+        <div className="flex min-h-0 flex-col gap-4 overflow-hidden border-[var(--line)] p-6 min-[800px]:border-r">
+          <div className="shrink-0 space-y-3">
             {overnight ? (
-              <p className="mt-2 text-sm text-[var(--accent)]">Se está aplicando tarifa de dormida</p>
+              <p className="text-sm text-[var(--accent)]">Se está aplicando tarifa de dormida</p>
+            ) : null}
+            {!stay.converted_to_overnight && stay.rate_kind === "hourly" ? (
+              <div className="space-y-2">
+                <Button
+                  variant="secondary"
+                  className="w-full"
+                  onClick={async () => {
+                    setMutationBusy(true);
+                    setError(null);
+                    try {
+                      await api.convertToOvernight(stay.id);
+                      await refresh();
+                      onChanged();
+                    } catch (e) {
+                      setError(String(e));
+                    } finally {
+                      setMutationBusy(false);
+                    }
+                  }}
+                  disabled={mutationBusy || busy || !dormidaWindowOpen(now)}
+                >
+                  Convertir a dormida
+                </Button>
+                {!dormidaWindowOpen(now) ? (
+                  <p className="text-xs text-[var(--muted)]">{dormidaUnavailableMessage(now)}</p>
+                ) : null}
+              </div>
             ) : null}
           </div>
-          <ul className="space-y-2 text-sm">
-            {lines.map((line, i) => (
-              <li key={`${line.description}-${i}`} className="flex justify-between gap-4">
-                <span>{line.description}</span>
-                <span className="font-mono font-medium tabular-nums">
-                  {formatMoney(line.amount_cents, settings.currency_symbol)}
-                </span>
-              </li>
-            ))}
-          </ul>
-          {!stay.converted_to_overnight && stay.rate_kind === "hourly" ? (
-            <div className="space-y-2">
-              <Button
-                variant="secondary"
-                className="w-full"
-                onClick={async () => {
-                  setMutationBusy(true);
-                  setError(null);
-                  try {
-                    await api.convertToOvernight(stay.id);
-                    await refresh();
-                    onChanged();
-                  } catch (e) {
-                    setError(String(e));
-                  } finally {
-                    setMutationBusy(false);
-                  }
-                }}
-                disabled={mutationBusy || busy || !dormidaWindowOpen(now)}
-              >
-                Convertir a dormida
-              </Button>
-              {!dormidaWindowOpen(now) ? (
-                <p className="text-xs text-[var(--muted)]">{dormidaUnavailableMessage(now)}</p>
-              ) : null}
-            </div>
-          ) : null}
           <RoomShop
             stayId={stay.id}
             currency={settings.currency_symbol}
@@ -443,79 +430,82 @@ function StayDrawer({
               onChanged();
             }}
           />
-          {admin && <div className="grid grid-cols-[1fr_120px_auto] gap-2">
-            <Input value={extraDesc} onChange={(e) => setExtraDesc(e.target.value)} placeholder="Otro cargo" />
-            <Input
-              value={extraAmount}
-              onChange={(e) => setExtraAmount(e.target.value)}
-              placeholder="0"
-              inputMode="numeric"
-            />
-            <Button
-              variant="secondary"
-              onClick={async () => {
-                setMutationBusy(true);
-                setError(null);
-                try {
-                  await api.addCharge({
-                    stay_id: stay.id,
-                    kind: parseGuaranies(extraAmount) < 0 ? "discount" : "surcharge",
-                    description: extraDesc,
-                    amount_cents: parseGuaranies(extraAmount),
-                  });
-                  setExtraAmount("");
-                  await refresh();
-                } catch (e) {
-                  setError(String(e));
-                } finally {
-                  setMutationBusy(false);
-                }
-              }}
-              disabled={mutationBusy || busy}
-            >
-              Sumar
-            </Button>
-          </div>}
-          {charges.map((charge) => (
-            <div key={charge.id} className="flex items-center justify-between text-sm">
-              <span>
-                {charge.description} · {formatMoney(charge.amount_cents, settings.currency_symbol)}
-              </span>
-              {admin && <button
-                className="text-[var(--danger)]"
-                onClick={async () => {
-                  setMutationBusy(true);
-                  setError(null);
-                  try {
-                    await api.deleteCharge(charge.id);
-                    await refresh();
-                  } catch (e) {
-                    setError(String(e));
-                  } finally {
-                    setMutationBusy(false);
-                  }
-                }}
-                disabled={mutationBusy || busy}
-              >
-                Quitar
-              </button>}
-            </div>
-          ))}
         </div>
         <div className="flex min-h-0 flex-col p-6">
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto scrollbar-thin">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">Cerrar cuenta</p>
-            <div className="rounded-lg border border-[var(--line)] bg-[var(--surface-2)] p-4 text-sm">
-              <p className="font-semibold">Total operativo</p>
-              <p className="mt-1 font-mono text-2xl font-semibold tabular-nums">{formatMoney(total, settings.currency_symbol)}</p>
-              <p className="mt-2 text-[var(--muted)]">El total se calcula en SQLite y queda guardado para el historial.</p>
-            </div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">
+              Cuenta
+            </p>
+            <ul className="space-y-2 text-sm">
+              {lines
+                .filter((line) => line.kind !== "surcharge" && line.kind !== "discount")
+                .map((line, i) => (
+                  <li key={`${line.description}-${i}`} className="flex justify-between gap-4">
+                    <span>{line.description}</span>
+                    <span className="font-mono font-medium tabular-nums">
+                      {formatMoney(line.amount_cents, settings.currency_symbol)}
+                    </span>
+                  </li>
+                ))}
+            </ul>
+            <StayCart
+              stayId={stay.id}
+              currency={settings.currency_symbol}
+              charges={charges}
+              onBusyChange={setMutationBusy}
+              onChanged={async () => {
+                await refresh();
+                onChanged();
+              }}
+            />
+            {admin ? (
+              <div className="grid grid-cols-[1fr_100px_auto] gap-2 border-t border-[var(--line)] pt-4">
+                <Input
+                  value={extraDesc}
+                  onChange={(e) => setExtraDesc(e.target.value)}
+                  placeholder="Otro cargo"
+                />
+                <Input
+                  value={extraAmount}
+                  onChange={(e) => setExtraAmount(e.target.value)}
+                  placeholder="0"
+                  inputMode="numeric"
+                />
+                <Button
+                  variant="secondary"
+                  onClick={async () => {
+                    setMutationBusy(true);
+                    setError(null);
+                    try {
+                      await api.addCharge({
+                        stay_id: stay.id,
+                        kind: parseGuaranies(extraAmount) < 0 ? "discount" : "surcharge",
+                        description: extraDesc,
+                        amount_cents: parseGuaranies(extraAmount),
+                      });
+                      setExtraAmount("");
+                      await refresh();
+                    } catch (e) {
+                      setError(String(e));
+                    } finally {
+                      setMutationBusy(false);
+                    }
+                  }}
+                  disabled={mutationBusy || busy}
+                >
+                  Sumar
+                </Button>
+              </div>
+            ) : null}
+          </div>
+          <div className="mt-4 shrink-0 space-y-3 border-t border-[var(--line)] pt-4">
+            <p className="font-mono text-3xl font-semibold tabular-nums tracking-tight">
+              {formatMoney(total, settings.currency_symbol)}
+            </p>
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={print} onChange={(e) => setPrint(e.target.checked)} />
               Imprimir ticket al cerrar
             </label>
-          </div>
-          <div className="mt-4 shrink-0 space-y-3 border-t border-[var(--line)] pt-4">
             {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
             {printError ? <p className="text-sm text-[var(--warn)]">{printError}</p> : null}
             <Button

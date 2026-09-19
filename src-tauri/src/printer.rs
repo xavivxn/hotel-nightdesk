@@ -1,5 +1,5 @@
 use crate::error::AppResult;
-use crate::models::{AppSettings, BillPreview, Stay};
+use crate::models::{AppSettings, BillPreview, LineItem, Stay};
 #[cfg(windows)]
 #[path = "windows_spooler.rs"]
 mod windows_spooler;
@@ -23,9 +23,6 @@ pub fn build_receipt(
     write_brand_header(&mut out);
     set_font(&mut out, 1, 1);
     set_emphasis(&mut out, true);
-    if !settings.address.is_empty() {
-        writeln_ticket(&mut out, &settings.address);
-    }
     if !settings.phone.is_empty() {
         writeln_ticket(&mut out, &settings.phone);
     }
@@ -45,19 +42,13 @@ pub fn build_receipt(
     }
     writeln_ascii(&mut out, &format!("Duracion: {}", bill.duration_label));
     writeln_ascii(&mut out, &"-".repeat(width));
-    for line in &bill.lines {
-        let description = encode_ticket(&line.description);
-        let amount = format_money(line.amount_cents, &settings.currency_symbol);
-        let room = width.saturating_sub(amount.len() + 1).max(1);
-        let chunks: Vec<&[u8]> = description.chunks(room).collect();
-        for part in chunks.iter().take(chunks.len().saturating_sub(1)) {
-            writeln_raw(&mut out, part);
-        }
-        write_money_line(
+    for (description, amount_cents) in collapse_receipt_lines(&bill.lines) {
+        write_bill_line(
             &mut out,
             width,
-            chunks.last().copied().unwrap_or_default(),
-            &amount,
+            &description,
+            amount_cents,
+            &settings.currency_symbol,
         );
     }
     writeln_ascii(&mut out, &"-".repeat(width));
@@ -87,7 +78,6 @@ pub fn build_receipt(
         &kv_line(width, "TOTAL", bill.total_cents, &settings.currency_symbol),
     );
     out.extend_from_slice(&[0x1B, 0x45, 0]);
-    writeln_ascii(&mut out, "Cuenta interna - sin cobro");
     writeln_ascii(&mut out, &"-".repeat(width));
     out.extend_from_slice(&[0x1B, 0x61, 1]);
     writeln_ticket(&mut out, &settings.receipt_footer);
@@ -246,6 +236,33 @@ fn writeln_raw(out: &mut Vec<u8>, bytes: &[u8]) {
     out.push(b'\n');
 }
 
+/// Merge identical descriptions for the ticket: three "Coca" lines → "Coca x3" with summed amount.
+fn collapse_receipt_lines(lines: &[LineItem]) -> Vec<(String, i64)> {
+    let mut collapsed: Vec<(String, i64, usize)> = Vec::new();
+    for line in lines {
+        if let Some(entry) = collapsed
+            .iter_mut()
+            .find(|(description, _, _)| description == &line.description)
+        {
+            entry.1 += line.amount_cents;
+            entry.2 += 1;
+        } else {
+            collapsed.push((line.description.clone(), line.amount_cents, 1));
+        }
+    }
+    collapsed
+        .into_iter()
+        .map(|(description, amount_cents, count)| {
+            let label = if count > 1 {
+                format!("{description} x{count}")
+            } else {
+                description
+            };
+            (label, amount_cents)
+        })
+        .collect()
+}
+
 fn write_money_line(out: &mut Vec<u8>, width: usize, label: &[u8], amount: &str) {
     let amount = encode_ticket(amount);
     let max_label = width.saturating_sub(amount.len() + 1);
@@ -254,6 +271,51 @@ fn write_money_line(out: &mut Vec<u8>, width: usize, label: &[u8], amount: &str)
     line.push(b' ');
     line.extend_from_slice(&amount);
     writeln_raw(out, &line);
+}
+
+/// One charge line: single kv line if it fits; otherwise wrap description at full width, then amount alone.
+fn write_bill_line(out: &mut Vec<u8>, width: usize, description: &str, cents: i64, symbol: &str) {
+    let description = encode_ticket(description);
+    let amount = format_money(cents, symbol);
+    let max_label = width.saturating_sub(amount.len() + 1);
+    if description.len() <= max_label {
+        write_money_line(out, width, &description, &amount);
+        return;
+    }
+    for part in wrap_bytes(&description, width) {
+        writeln_raw(out, &part);
+    }
+    write_money_line(out, width, &[], &amount);
+}
+
+fn wrap_bytes(bytes: &[u8], width: usize) -> Vec<Vec<u8>> {
+    let width = width.max(1);
+    if bytes.is_empty() {
+        return vec![Vec::new()];
+    }
+    let mut lines = Vec::new();
+    let mut start = 0;
+    while start < bytes.len() {
+        let end = (start + width).min(bytes.len());
+        if end == bytes.len() {
+            lines.push(bytes[start..end].to_vec());
+            break;
+        }
+        let window = &bytes[start..end];
+        let break_at = window
+            .iter()
+            .rposition(|&b| b == b' ')
+            .filter(|&i| i > 0)
+            .map(|i| start + i)
+            .unwrap_or(end);
+        lines.push(bytes[start..break_at].to_vec());
+        start = if break_at < end && bytes.get(break_at) == Some(&b' ') {
+            break_at + 1
+        } else {
+            break_at
+        };
+    }
+    lines
 }
 
 /// PC850 / shared page-0 bytes. Controls, including ESC, become `?` so text cannot inject commands.
@@ -400,5 +462,144 @@ mod tests {
         assert_eq!(thousand_sep(0), "0");
         assert_eq!(thousand_sep(80_000), "80.000");
         assert_eq!(thousand_sep(1_250_000), "1.250.000");
+    }
+
+    fn sample_stay() -> Stay {
+        Stay {
+            id: 1,
+            room_id: 1,
+            room_number: "101".into(),
+            guest_id: 1,
+            guest_name: "Test".into(),
+            guest_document: None,
+            guest_phone: None,
+            rate_plan_id: 1,
+            rate_plan_name: "Hora".into(),
+            rate_kind: crate::models::RateKind::Hourly,
+            reservation_id: None,
+            check_in_at: "2026-09-19T12:00:00-03:00".into(),
+            expected_checkout_at: None,
+            check_out_at: Some("2026-09-19T14:00:00-03:00".into()),
+            status: "closed".into(),
+            converted_to_overnight: false,
+            overnight_rate_plan_id: None,
+            notes: None,
+        }
+    }
+
+    #[test]
+    fn receipt_omits_address_and_internal_account_line() {
+        let mut settings = AppSettings::default();
+        settings.paper_width = 80;
+        settings.address = "Av. Principal 100".into();
+        settings.phone = "0991 000 000".into();
+        let bill = BillPreview {
+            stay_id: 1,
+            lines: vec![LineItem {
+                kind: "base".into(),
+                description: "Tarifa base".into(),
+                amount_cents: 80_000,
+            }],
+            subtotal_cents: 80_000,
+            tax_percent: 0.0,
+            tax_cents: 0,
+            total_cents: 80_000,
+            applied_kind: crate::models::RateKind::Hourly,
+            duration_label: "2 h".into(),
+            overnight_applied: false,
+        };
+        let bytes = build_receipt(&settings, &sample_stay(), &bill);
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(!text.contains("Av. Principal 100"));
+        assert!(!text.contains("Cuenta interna"));
+        assert!(text.contains("0991 000 000"));
+        assert!(text.contains("TOTAL"));
+    }
+
+    #[test]
+    fn long_line_item_puts_amount_on_its_own_line() {
+        let mut settings = AppSettings::default();
+        settings.paper_width = 80;
+        let description = "Adicional 30 min (48)";
+        let amount_cents = 720_000;
+        let bill = BillPreview {
+            stay_id: 1,
+            lines: vec![LineItem {
+                kind: "extra".into(),
+                description: description.into(),
+                amount_cents,
+            }],
+            subtotal_cents: amount_cents,
+            tax_percent: 0.0,
+            tax_cents: 0,
+            total_cents: amount_cents,
+            applied_kind: crate::models::RateKind::Hourly,
+            duration_label: "48 h".into(),
+            overnight_applied: false,
+        };
+        let bytes = build_receipt(&settings, &sample_stay(), &bill);
+        let text = String::from_utf8_lossy(&bytes);
+        let amount = format_money(amount_cents, &settings.currency_symbol);
+        assert!(
+            !text.contains(&format!(") {amount}")),
+            "closing paren must not sit on the same line as the amount: {text}"
+        );
+        let desc_pos = text.find(description).expect("description present");
+        let amount_pos = text.find(&amount).expect("amount present");
+        assert!(
+            amount_pos > desc_pos,
+            "amount should follow description"
+        );
+        let between = &text[desc_pos + description.len()..amount_pos];
+        assert!(
+            between.contains('\n'),
+            "amount must be on a separate line from a long description: {text}"
+        );
+    }
+
+    #[test]
+    fn repeated_items_collapse_to_quantity_on_receipt() {
+        let mut settings = AppSettings::default();
+        settings.paper_width = 80;
+        let bill = BillPreview {
+            stay_id: 1,
+            lines: vec![
+                LineItem {
+                    kind: "surcharge".into(),
+                    description: "Coca".into(),
+                    amount_cents: 5_000,
+                },
+                LineItem {
+                    kind: "surcharge".into(),
+                    description: "Frigobar".into(),
+                    amount_cents: 10_000,
+                },
+                LineItem {
+                    kind: "surcharge".into(),
+                    description: "Coca".into(),
+                    amount_cents: 5_000,
+                },
+                LineItem {
+                    kind: "surcharge".into(),
+                    description: "Coca".into(),
+                    amount_cents: 5_000,
+                },
+            ],
+            subtotal_cents: 25_000,
+            tax_percent: 0.0,
+            tax_cents: 0,
+            total_cents: 25_000,
+            applied_kind: crate::models::RateKind::Hourly,
+            duration_label: "1 h".into(),
+            overnight_applied: false,
+        };
+        let bytes = build_receipt(&settings, &sample_stay(), &bill);
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(text.contains("Coca x3"));
+        assert!(text.contains(&format_money(15_000, "Gs.")));
+        assert!(text.contains("Frigobar"));
+        assert!(!text.contains("Frigobar x"));
+        let coca_count = text.matches("Coca").count();
+        assert_eq!(coca_count, 1, "Coca should appear once as Coca x3: {text}");
     }
 }

@@ -53,7 +53,7 @@ export function Dialog({
         className={cn(
           "relative z-10 flex w-full flex-col overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--surface)] shadow-2xl",
           size === "lg"
-            ? "h-[min(92vh,820px)] max-w-[960px]"
+            ? "h-[min(92vh,820px)] max-w-[1040px]"
             : "max-h-[min(92vh,720px)] max-w-md",
         )}
       >
