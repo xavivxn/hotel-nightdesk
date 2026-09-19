@@ -31,6 +31,12 @@ pub fn run() {
                 db: Mutex::new(conn),
                 auth: Mutex::new(auth::AuthState::default()),
             });
+            // Force window/taskbar icon (bundle icons alone often stay cached in `tauri dev` on Windows).
+            if let Some(window) = app.get_webview_window("main") {
+                let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))
+                    .map_err(|e| e.to_string())?;
+                let _ = window.set_icon(icon);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
