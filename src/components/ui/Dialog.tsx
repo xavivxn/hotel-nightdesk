@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils";
 import { X } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 export function Dialog({
   open,
@@ -35,8 +36,8 @@ export function Dialog({
 
   if (!open) return null;
 
-  return (
-    <div className="nd-dialog-root fixed inset-0 z-40 flex items-center justify-center p-4">
+  return createPortal(
+    <div className="nd-dialog-root fixed inset-0 z-[100] grid place-items-center p-4">
       {dismissible ? (
         <button
           className="nd-dialog-overlay absolute inset-0 bg-black/50 backdrop-blur-[2px]"
@@ -53,8 +54,8 @@ export function Dialog({
         className={cn(
           "nd-dialog-panel relative z-10 flex w-full flex-col overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--surface)] shadow-2xl",
           size === "lg"
-            ? "h-[min(92vh,820px)] max-w-[1040px]"
-            : "max-h-[min(92vh,720px)] max-w-md",
+            ? "h-[min(calc(100dvh-2rem),820px)] max-w-[1040px]"
+            : "max-h-[min(calc(100dvh-2rem),720px)] max-w-md",
         )}
       >
         <header className="flex shrink-0 items-start justify-between gap-4 border-b border-[var(--line)] px-6 py-5">
@@ -82,6 +83,7 @@ export function Dialog({
           {children}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

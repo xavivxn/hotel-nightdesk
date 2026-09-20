@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils";
 import { X } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 export function Drawer({
   open,
@@ -17,9 +18,24 @@ export function Drawer({
   children: ReactNode;
   wide?: boolean;
 }) {
+  useEffect(() => {
+    if (!open) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previous;
+    };
+  }, [open, onClose]);
+
   if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-40 flex justify-end">
+
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex justify-end">
       <button className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} aria-label="Cerrar" />
       <aside
         className={cn(
@@ -42,6 +58,7 @@ export function Drawer({
         </header>
         <div className="flex-1 overflow-y-auto p-6 scrollbar-thin">{children}</div>
       </aside>
-    </div>
+    </div>,
+    document.body,
   );
 }

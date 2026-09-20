@@ -38,11 +38,13 @@ export function TitleBar() {
       </button>
       <button
         type="button"
-        aria-label="Maximizar"
+        aria-label="Pantalla completa"
         data-tauri-drag-region="false"
         className="flex h-full w-11 cursor-pointer items-center justify-center text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)]"
         onClick={async () => {
-          await (await win()).toggleMaximize();
+          const window = await win();
+          const full = await window.isFullscreen();
+          await window.setFullscreen(!full);
         }}
       >
         <Square size={12} />
