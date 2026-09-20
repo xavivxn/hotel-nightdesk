@@ -1,7 +1,7 @@
 # Operación local, administración remota y respaldos (Supabase)
 
 Fecha: 17 de septiembre de 2026.
-Estado: requisitos y arquitectura acordados. I12 y N12 documentados/aplicados; I06 (`014_sync`, outbox local) implementado. Pendientes I07, N07, I11 e I08.
+Estado: requisitos y arquitectura acordados. I12 y N12 documentados/aplicados; I06 (`014_sync`, outbox local) e I11 (write-through / `catalog_write` / auditoría) implementados. N07 modo remoto hecho. Pendientes I07 (worker) e I08 (backups).
 
 Este documento sustituye el 17/09/2026 a [arquitectura-offline-vpn-backups.md](arquitectura-offline-vpn-backups.md). La operación del motel sigue sin depender de internet. Supabase se usa para que el admin consulte y edite catálogo a distancia, para replicar la operación en lectura y para el respaldo diario cifrado. No describe funciones ya terminadas ni modifica el presupuesto comercial.
 
@@ -185,7 +185,7 @@ Trazado en Jira MOT. Documentación de este archivo: I12 (`MOT-79`).
 
 1. **I12** — este documento, contrato, AGENTS y skills.
 2. **I06** (`MOT-18`, S2) — hecho: `014_sync`, outbox en TX, lista blanca, `expected_version` local. En paralelo **N12** (`MOT-80`) — hecho: esquema, RLS, RPC, Realtime, Auth, bucket.
-3. **I07** (`MOT-21`, S3) — worker push/pull/Realtime. **I11** (`MOT-73`) — write-through y `hash_password`. **N07** (`MOT-19`) — modo remoto, `supabase.ts`, tablero en vivo, edición de catálogo.
+3. **I07** (`MOT-21`, S3) — worker push/pull/Realtime. **I11** (`MOT-73`) — write-through y `hash_password` (**hecho**). **N07** (`MOT-19`) — modo remoto (**hecho**).
 4. **I05** snapshot local; **I08** (`MOT-22`) subida a Storage; **N08** visibilidad.
 5. Instalador con selección de modo, pruebas (I09: RLS, replay, 6 h, Storage caído) y aceptación.
 

@@ -16,6 +16,19 @@ fn actor_from(user: &SessionUser) -> Actor {
     Actor::from(user)
 }
 
+pub(crate) async fn try_catalog(state: &AppState, app: &AppHandle, actor: &Actor, entity: &str, payload: serde_json::Value, operation_id: Option<String>) -> AppResult<Option<i64>> {
+    let dir = app_data_dir(app)?;
+    if !crate::sync::catalog::configured(&dir) { return Ok(None); }
+    let request = crate::sync::catalog::prepare(&conn(state), actor, entity, payload, operation_id)?;
+    if entity == "settings" && request["p_payload"]["values"].as_object().is_some_and(|v| v.is_empty()) { return Ok(Some(0)); }
+    let remote = crate::sync::remote::SupabaseRemote::load(&dir)?;
+    // Do not retain the database mutex during authentication/network IO.
+    let remote_request=request.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || crate::sync::catalog::execute(&remote, &remote_request)).await.map_err(|_| AppError::storage("No se pudo completar la operación remota"))??;
+    let id = crate::sync::catalog::apply_result(&mut conn(state), &request, &result)?;
+    Ok(Some(id))
+}
+
 fn app_data_dir(app: &AppHandle) -> AppResult<PathBuf> {
     app.path()
         .app_data_dir()
@@ -44,10 +57,11 @@ pub fn list_rooms(state: State<AppState>, session_token: Option<String>) -> AppR
 }
 
 #[tauri::command]
-pub fn save_room(state: State<AppState>, session_token: Option<String>, payload: SaveRoomPayload) -> AppResult<Room> {
+pub async fn save_room(state: State<'_, AppState>, session_token: Option<String>, app: AppHandle, payload: SaveRoomPayload) -> AppResult<Room> {
     let user = crate::auth::require(&state, session_token.as_deref(), true)?;
+    if let Some(id) = try_catalog(&state, &app, &actor_from(&user), "rooms", serde_json::to_value(&payload).unwrap(), None).await? { return db::get_room(&conn(&state), id); }
     let conn = conn(&state);
-    service::save_room(&conn, &actor_from(&user), payload)
+    crate::sync::catalog::local(&conn, &actor_from(&user), "rooms", |tx| service::save_room(tx, &actor_from(&user), payload))
 }
 
 #[tauri::command]
@@ -65,10 +79,11 @@ pub fn list_rate_plans(state: State<AppState>, session_token: Option<String>, ac
 }
 
 #[tauri::command]
-pub fn save_rate_plan(state: State<AppState>, session_token: Option<String>, payload: SaveRatePlanPayload) -> AppResult<RatePlan> {
+pub async fn save_rate_plan(state: State<'_, AppState>, session_token: Option<String>, app: AppHandle, payload: SaveRatePlanPayload) -> AppResult<RatePlan> {
     let user = crate::auth::require(&state, session_token.as_deref(), true)?;
+    if let Some(id) = try_catalog(&state, &app, &actor_from(&user), "rate_plans", serde_json::to_value(&payload).unwrap(), None).await? { return db::get_rate_plan(&conn(&state), id); }
     let conn = conn(&state);
-    service::save_rate_plan(&conn, &actor_from(&user), payload)
+    crate::sync::catalog::local(&conn, &actor_from(&user), "rate_plans", |tx| service::save_rate_plan(tx, &actor_from(&user), payload))
 }
 
 #[tauri::command]
@@ -111,17 +126,22 @@ pub fn list_products(state: State<AppState>, session_token: Option<String>, acti
 }
 
 #[tauri::command]
-pub fn save_product(state: State<AppState>, session_token: Option<String>, payload: SaveProductPayload) -> AppResult<Product> {
+pub async fn save_product(state: State<'_, AppState>, session_token: Option<String>, app: AppHandle, payload: SaveProductPayload) -> AppResult<Product> {
     let user = crate::auth::require(&state, session_token.as_deref(), true)?;
+    if let Some(id) = try_catalog(&state, &app, &actor_from(&user), "products", serde_json::to_value(&payload).unwrap(), None).await? { return db::get_product(&conn(&state), id); }
     let conn = conn(&state);
-    service::save_product(&conn, &actor_from(&user), payload)
+    crate::sync::catalog::local(&conn, &actor_from(&user), "products", |tx| service::save_product(tx, &actor_from(&user), payload))
 }
 
 #[tauri::command]
-pub fn set_product_active(state: State<AppState>, session_token: Option<String>, product_id: i64, active: bool) -> AppResult<Product> {
+pub async fn set_product_active(state: State<'_, AppState>, session_token: Option<String>, app: AppHandle, product_id: i64, active: bool, operation_id: Option<String>, expected_version: Option<i64>) -> AppResult<Product> {
     let user = crate::auth::require(&state, session_token.as_deref(), true)?;
+    let mut payload = serde_json::to_value(db::get_product(&conn(&state), product_id)?).unwrap();
+    payload["active"] = serde_json::json!(active);
+    payload["expected_version"] = serde_json::json!(expected_version);
+    if let Some(id) = try_catalog(&state, &app, &actor_from(&user), "products", payload, operation_id).await? { return db::get_product(&conn(&state), id); }
     let conn = conn(&state);
-    service::set_product_active(&conn, &actor_from(&user), product_id, active)
+    crate::sync::catalog::local(&conn, &actor_from(&user), "products", |tx| service::set_product_active(tx, &actor_from(&user), product_id, active))
 }
 
 #[tauri::command]
@@ -241,10 +261,16 @@ pub fn get_settings(state: State<AppState>, session_token: Option<String>) -> Ap
 }
 
 #[tauri::command]
-pub fn save_settings(state: State<AppState>, session_token: Option<String>, payload: AppSettings, new_pin: Option<String>) -> AppResult<AppSettings> {
+pub async fn save_settings(state: State<'_, AppState>, session_token: Option<String>, app: AppHandle, mut payload: AppSettings, new_pin: Option<String>, operation_id: Option<String>) -> AppResult<AppSettings> {
     let user = crate::auth::require(&state, session_token.as_deref(), true)?;
+    if try_catalog(&state, &app, &actor_from(&user), "settings", serde_json::to_value(&payload).unwrap(), operation_id).await?.is_some() {
+        let current = db::load_settings(&conn(&state))?;
+        payload.business_name=current.business_name; payload.address=current.address; payload.phone=current.phone;
+        payload.tax_percent=current.tax_percent; payload.currency_symbol=current.currency_symbol;
+        payload.receipt_footer=current.receipt_footer; payload.require_guest_name=current.require_guest_name;
+    }
     let conn = conn(&state);
-    service::save_settings(&conn, &actor_from(&user), payload, new_pin)
+    crate::sync::catalog::local(&conn, &actor_from(&user), "settings", |tx| service::save_settings(tx, &actor_from(&user), payload, new_pin))
 }
 
 #[tauri::command]
@@ -325,8 +351,8 @@ pub fn remote_get_config(app: AppHandle) -> AppResult<Option<RemoteConfigurePayl
 }
 
 #[tauri::command]
-pub fn hash_password(payload: HashPasswordPayload) -> AppResult<HashPasswordResult> {
-    service::hash_password(&payload.password)
+pub fn hash_password(payload: HashPasswordPayload, operation_id: Option<String>) -> AppResult<HashPasswordResult> {
+    service::hash_password_with_operation(&payload.password, operation_id.as_deref())
 }
 
 #[tauri::command]

@@ -1,7 +1,7 @@
-# Contrato IPC / API (versión 1)
+# Contrato IPC / API (versión 2)
 
-Fecha: 17 de septiembre de 2026.
-Estado: contrato v1 vigente en IPC Tauri. El transporte remoto es Supabase (N12/N07), no HTTP `/api/v1` ni VPN. Semántica de `operation_id` / `expected_version` documentada aquí; persistencia en I06/I11.
+Fecha: 20 de septiembre de 2026 (v2 / I11). Origen: 17/09/2026.
+Estado: contrato v2 vigente en IPC Tauri + `supabaseInvoke`. El transporte remoto es Supabase (N12/N07/I11), no HTTP `/api/v1` ni VPN. Semántica de `operation_id` / `expected_version` cerrada en I06 (outbox) e I11 (catálogo write-through).
 
 Este documento es la fuente de verdad de payloads, errores y semántica. El transporte cambia; las reglas de negocio no. Arquitectura: [arquitectura-offline-supabase.md](arquitectura-offline-supabase.md).
 
@@ -15,19 +15,19 @@ UI → api.ts → cmd()
                ├─ supabaseInvoke  modo Administración remota (PostgREST / RPC)
                └─ mockInvoke      navegador (`npm run dev`)
                       ↓
-         commands.rs (sesión, lock, impresión)     — solo invoke
+         commands.rs (sesión, lock, impresión, write-through)     — solo invoke
                       ↓
          service.rs (Actor, authorize, reglas, SQL, TX)
                       ↓
-         billing.rs / db.rs / sync outbox
+         billing.rs / db.rs / sync::{outbox,catalog,remote}
 ```
 
 `src/lib/supabase.ts` (N07) implementa `supabaseInvoke(name, args)`. Los componentes **nunca** importan `@tauri-apps/api` ni `@supabase/supabase-js`. No hay escritura remota directa sobre el archivo SQLite.
 
 | Camino | Quién | Fuente de datos |
 |---|---|---|
-| `invoke` | PC recepción | SQLite local vía `service.rs` |
-| `supabaseInvoke` | PC admin, modo remoto | PostgREST / RPC con sesión Auth `admin` |
+| `invoke` | PC recepción | SQLite local vía `service.rs`; catálogo con sync → write-through `catalog_write` |
+| `supabaseInvoke` | PC admin, modo remoto | PostgREST / RPC `catalog_write` con sesión Auth `admin` |
 | `mockInvoke` | Vite en navegador | `src/lib/mock.ts` |
 
 Impresión, reimpresión, `save_daily_pdf` y `list_printers` son solo `invoke` (equipo de recepción). En `supabaseInvoke` devuelven `forbidden`. Mutaciones operativas (`check_in`, `check_out`, `add_charge`, `add_product_charge`, `delete_charge`, `convert_to_overnight`, `set_room_status`, reservas) también `forbidden` en remoto.
@@ -39,20 +39,20 @@ Impresión, reimpresión, `save_daily_pdf` y `list_printers` son solo `invoke` (
 - Fechas persistidas: RFC3339 UTC. La UI muestra hora local.
 - Toda operación de negocio en recepción lleva `session_token` (excepto `auth_setup_required`, `auth_setup` y `auth_login`). En modo remoto la sesión es el JWT de Supabase Auth.
 - Mutaciones aceptan `operation_id` (UUID del cliente) y `expected_version` (entero ≥ 0). Vacío o negativo → `validation`.
-- **`operation_id`:** clave idempotente de extremo a extremo. `api.ts` la genera con `crypto.randomUUID()` en mutaciones de estadía/cargo/reserva. I06 la persiste en `sync_outbox`; N12 en `sync_applied_ops`. Repetir el mismo id no duplica el efecto. Hoy el IPC valida la forma y aún ignora el valor hasta I06.
-- **`expected_version`:** control de concurrencia del **catálogo** (`rooms`, `rate_plans`, `products`, ajustes de negocio, `users`). Si no coincide con `version` → `conflict` y recarga. Hoy el IPC valida la forma y aún ignora el valor hasta I06/I11.
-- `get_settings` / `save_settings` devuelven `pin_hash` vacío.
+- **`operation_id`:** clave idempotente de extremo a extremo. `api.ts` la genera con `crypto.randomUUID()` en mutaciones de estadía/cargo/reserva **y** en escrituras de catálogo (`save_*`, `set_product_active`, `save_settings`, `auth_create_user`). En recepción operativa, I06 la persiste en `sync_outbox` (sub-ops = UUID v5 del root). En catálogo I11, la misma clave llega a Postgres `nightdesk.catalog_operations` / `public.catalog_audit` vía RPC `catalog_write`; repetir el mismo id con el mismo payload no duplica el efecto. Reutilizar el id con otro payload → `conflict`.
+- **`expected_version`:** control de concurrencia del **catálogo** (`rooms`, `rate_plans`, `products`, ajustes de negocio, `users` / `app_users`). Si no coincide con `version` → `conflict` («La ficha cambió; recargá antes de guardar») y **no** se escribe SQLite local cuando hay sync. Con sync deshabilitado (instalación sin dispositivo), el IPC sigue validando en local.
+- `get_settings` / `save_settings` devuelven `pin_hash` vacío. `get_settings` incluye `catalog_versions` (mapa clave → versión de cada ajuste de negocio) para el write-through.
 - Impresora: `print_error: string | null`. Un fallo de impresión no revierte el cobro.
 
 ## Versión
 
-`CONTRACT_VERSION = 1`, expuesto por `contract_info`:
+`CONTRACT_VERSION = 2`, expuesto por `contract_info`:
 
 ```json
-{ "contract_version": 1, "app_version": "0.1.0", "schema_migrations": ["001_init", "002_products", "003_rooms_scope", "004_account_closure", "005_auth", "006_stay_integrity", "007_receipts", "008_ticket_header", "009_ticket_header_name", "010_jacuzzi_rooms", "011_jacuzzi_rooms_1_to_4", "012_love_nest_rates", "013_no_iva"] }
+{ "contract_version": 2, "app_version": "0.1.0", "schema_migrations": ["001_init", "002_products", "003_rooms_scope", "004_account_closure", "005_auth", "006_stay_integrity", "007_receipts", "008_ticket_header", "009_ticket_header_name", "010_jacuzzi_rooms", "011_jacuzzi_rooms_1_to_4", "012_love_nest_rates", "013_no_iva", "014_sync", "015_catalog_audit"] }
 ```
 
-I06 añadirá `014_sync`. Incrementar `CONTRACT_VERSION` solo si cambia un payload (I11.3).
+v2 (I11.3): `catalog_versions` en ajustes; `set_product_active` acepta `operation_id` / `expected_version`; `hash_password` acepta `operation_id` opcional (salt determinística Argon2id para reintentos idempotentes); write-through documentado.
 
 ## Errores
 
@@ -68,13 +68,15 @@ Shape único:
 |---|---|
 | `validation` | Datos inválidos o incompletos |
 | `not_found` | Recurso inexistente |
-| `conflict` | Estado incompatible (habitación ocupada, estadía cerrada, duplicado) |
+| `conflict` | Estado incompatible (habitación ocupada, estadía cerrada, duplicado, versión de catálogo) |
 | `forbidden` | Rol insuficiente |
 | `session_expired` | Sin sesión, vencida o usuario inactivo |
 | `rate_limited` | Demasiados intentos de acceso |
 | `invalid_credentials` | Usuario o contraseña incorrectos |
-| `storage` | SQLite / IO |
+| `storage` | SQLite / IO / sin conexión a administración (write-through) |
 | `printer` | Impresión (si se eleva a error; el checkout usa `print_error`) |
+
+Sin red y con sync habilitado, las escrituras de catálogo devuelven `storage` con mensaje «Requiere conexión con administración…» y **no** mutan SQLite.
 
 ## Roles
 
@@ -84,7 +86,7 @@ Autorización duplicada a propósito: `auth::require(..., admin)` en el adaptado
 
 ## Comandos → transporte → rol
 
-Leyenda de `supabaseInvoke`: `lectura` = PostgREST/vista; `catálogo` = RPC `catalog_upsert_*` con `expected_version`; `auth` = Supabase Auth; `forbidden` = `ApiError{code:'forbidden'}`.
+Leyenda de `supabaseInvoke`: `lectura` = PostgREST/vista; `catálogo` = RPC `catalog_write` (idempotente; envuelve `catalog_upsert_*` + auditoría); `auth` = Supabase Auth; `forbidden` = `ApiError{code:'forbidden'}`.
 
 | Comando | IPC recepción | supabaseInvoke (admin remoto) | Rol IPC |
 |---|---|---|---|
@@ -93,49 +95,33 @@ Leyenda de `supabaseInvoke`: `lectura` = PostgREST/vista; `catálogo` = RPC `cat
 | `auth_login` | sí (Argon2 local) | Auth email/password | público |
 | `auth_session` | sí | sesión Auth en memoria | autenticado |
 | `auth_logout` | sí | signOut Auth | autenticado |
-| `auth_create_user` | sí | `app_users` + hash vía `hash_password` | admin |
+| `auth_create_user` | admin; write-through si hay sync | `catalog_write` `app_users` + hash vía `hash_password` | admin |
 | `contract_info` | sí | constante de app | autenticado |
 | `list_board` | sí | lectura `stays`/`rooms` + Realtime | autenticado |
 | `list_rooms` | sí | lectura `rooms` | autenticado |
 | `save_room` | admin; write-through si hay sync | catálogo (sin `status`) | admin |
-| `set_room_status` | sí | forbidden | autenticado |
-| `list_rate_plans` | sí | lectura `rate_plans` | autenticado |
+| `set_room_status` | sí | `forbidden` | autenticado |
+| `list_rate_plans` | sí | lectura | autenticado |
 | `save_rate_plan` | admin; write-through si hay sync | catálogo | admin |
-| `check_in` | sí + outbox | forbidden | autenticado |
-| `preview_bill` | sí (`billing.rs`) | estimativo `billing.ts` | autenticado |
+| `check_in` | sí + outbox | `forbidden` | autenticado |
+| `preview_bill` | sí | estimativo local | autenticado |
 | `get_stay_detail` | sí | lectura | autenticado |
-| `convert_to_overnight` | sí + outbox | forbidden | autenticado |
-| `list_products` | sí | lectura `products` | autenticado |
+| `convert_to_overnight` | sí + outbox | `forbidden` | autenticado |
+| `list_products` | sí | lectura | autenticado |
 | `save_product` | admin; write-through si hay sync | catálogo | admin |
 | `set_product_active` | admin; write-through si hay sync | catálogo | admin |
-| `add_charge` | admin + outbox | forbidden | admin |
-| `add_product_charge` | sí + outbox | forbidden | autenticado |
-| `delete_charge` | admin; soft `deleted_at` + outbox | forbidden | admin |
-| `check_out` | sí + outbox; impresión después | forbidden | autenticado |
-| `list_reservations` | sí | lectura | autenticado |
-| `create_reservation` | sí + outbox | forbidden | autenticado |
-| `set_reservation_status` | sí + outbox | forbidden | autenticado |
-| `check_in_reservation` | sí + outbox | forbidden | autenticado |
-| `list_history` | sí | lectura | autenticado |
-| `daily_report` | sí | lectura (sin bytes de ticket) | autenticado |
-| `save_daily_pdf` | sí, solo local | forbidden | autenticado |
-| `get_settings` | sí | lectura claves de negocio | autenticado |
+| `add_charge` / `add_product_charge` / `delete_charge` | sí + outbox | `forbidden` | admin (cargos manuales / baja) |
+| `check_out` | sí + outbox + print | `forbidden` | autenticado |
+| `list_reservations` / `create_reservation` / … | sí (+ outbox en mutación) | lectura / `forbidden` | autenticado |
+| `list_history` / `daily_report` | sí | lectura | autenticado |
+| `save_daily_pdf` / `print_test` / `list_printers` / `reprint_receipt` | sí | `forbidden` | admin / autenticado |
+| `get_settings` | sí | lectura `business_settings` + `catalog_versions` | autenticado |
 | `save_settings` | admin; write-through de claves de negocio | catálogo lista blanca | admin |
-| `verify_pin` | sí | forbidden | autenticado |
-| `pin_required` | sí | forbidden | autenticado |
-| `print_test` | admin | forbidden | admin |
-| `list_printers` | admin | forbidden | admin |
-| `reprint_receipt` | sí | forbidden | autenticado |
+| `verify_pin` / `pin_required` | sí | no aplica / stub | autenticado |
+| `device_mode_*` / `remote_*` / `hash_password` | siempre IPC local | — | ver tabla abajo |
+| `sync_*` / `backup_*` | stubs / I07–I08 | lectura parcial | autenticado / admin |
 
-`daily_report {date}` devuelve `DailyReport`: `date`, `generated_at`, `cutoff_at`, `timezone`, `occupied_rooms`, `closed_total_cents`, `adjustments_total_cents`, `accounts` y `adjustments`. Cada cuenta tiene `stay_id`, `room_number`, `check_in_at`, `check_out_at`, `closed_on_day`, `open_at_cutoff` y `total_cents` (null si no cerró ese día). Movimientos: `Charge[]` de consumos/recargos/descuentos del día. No sumar el subtotal de movimientos al total cerrado.
-
-`save_daily_pdf {date, bytes}` guarda el documento en `informes/` con nombre único y devuelve la ruta. Fecha válida no futura, firma PDF, máximo 20 MB. El PDF no es fuente operativa.
-
-`list_printers {}` devuelve nombres de colas Windows. En mock, lista vacía. `print_error` distingue envío fallido; `null` es aceptación por la cola, no papel.
-
-Migración `007_receipts`: bytes del ticket en `receipt_snapshots`. No se sincronizan. Ver [tickets-informes.md](tickets-informes.md).
-
-### Comandos de sync, modo y respaldo (I06/I07/I08/N07)
+## Comandos de dispositivo / sync / hash
 
 Solo tienen sentido en recepción salvo donde se indica. Seguir `nightdesk-add-command`.
 
@@ -145,14 +131,14 @@ Solo tienen sentido en recepción salvo donde se indica. Seguir `nightdesk-add-c
 | `device_mode_set` | `{ mode }` → `void` | Primer arranque. No se sincroniza. |
 | `remote_configure` | `{ project_url, anon_key }` → `void` | Solo PC admin. Credenciales en app data; nunca en `settings`. |
 | `remote_configured` / `remote_get_config` | `{}` → `bool` / payload | Lectura local de URL/anon. |
-| `sync_configure_device` | `{ project_url, anon_key, device_email, device_password }` → `void` | Credenciales a app data / Credential Manager. Nunca en `settings` ni en la respuesta. |
+| `sync_configure_device` | `{ project_url, anon_key, device_email, device_password }` → `void` | Credenciales a app data / Credential Manager. Nunca en `settings` ni en la respuesta. Habilita write-through I11. |
 | `sync_status` | `{}` → `{ connected, pending_outbox, last_push_at, last_pull_at, last_error, configured }` | Indicador de `AppShell`. Stub hasta I07. |
 | `sync_pull_now` | `{}` → `void` | Pull incremental; emite `sync:catalog-updated`. Stub hasta I07. |
-| `hash_password` | `{ password }` → `{ hash }` | Argon2id, mismo formato que `auth.rs`. Siempre IPC local (también en modo remoto). |
+| `hash_password` | `{ password }` + `operation_id?` → `{ hash }` | Argon2id, mismo formato que `auth.rs`. Siempre IPC local (también en modo remoto). Con `operation_id` UUID el salt es determinístico (reintento idempotente de alta de usuario). |
 | `backup_run_now` | `{}` → `{ backup_id }` | Admin local. Encola snapshot. |
 | `backup_status` | `{}` → `{ last_local_at, last_remote_at, pending, last_error }` | Recepción y, en remoto, lectura de tabla `backups`. Stub hasta I08. |
 
-## Payloads de mutación (v1)
+## Payloads de mutación (v2)
 
 Campos reservados en todos: `operation_id?: string`, `expected_version?: number`. Vacío o negativo → `validation`.
 
@@ -176,9 +162,17 @@ Campos reservados en todos: `operation_id?: string`, `expected_version?: number`
 
 **add_charge** (admin) / **add_product_charge** → `Charge`. `conflict` sobre estadía cerrada.
 
-**save_room** / **save_rate_plan** / **save_product** (admin): `id` ausente crea, presente actualiza. `Room`, `RatePlan` y `Product` exponen `version`. Si `expected_version` no coincide con `version`, `conflict` («La ficha cambió; recargá antes de guardar»). Con sync habilitado, write-through a Supabase (I11). Sin conexión: no escribir local y devolver error claro.
+**save_room** / **save_rate_plan** / **save_product** (admin): `id` ausente crea, presente actualiza. `Room`, `RatePlan` y `Product` exponen `version`. Si `expected_version` no coincide con `version`, `conflict`. Con sync habilitado (`sync_configure_device` hecho): write-through a Supabase vía `catalog_write` y aplicación local de la fila + `catalog_audit`; sin conexión → `storage` y SQLite intacto. Sin sync: escritura local + auditoría local (`015_catalog_audit`).
+
+**set_product_active** (admin):
+
+```
+{ product_id, active, expected_version?, operation_id? }
+```
 
 **delete_charge** (admin): baja lógica (`charges.deleted_at`). `list_charges` / preview / detalle omiten filas borradas. La outbox registra `op=delete`.
+
+**auth_create_user** (admin): `{ payload: { username, password, role }, operation_id? }`. Con sync: hash local (`hash_password` + mismo `operation_id`) y `catalog_write` `app_users` (el hash viaja; la contraseña en claro no).
 
 Mutaciones operativas escriben `sync_outbox` en la misma TX. El `operation_id` de `api.ts` es `root_operation_id`; si una operación genera varias filas (checkout: stay + cargos + room), los sub-ops usan un UUID v5 derivado. Repetir el mismo `operation_id` → `conflict` y rollback (no hay segunda estadía ni segunda fila).
 
@@ -188,7 +182,8 @@ Consultas (`list_board`, `list_rooms`, `preview_bill`, `get_stay_detail`, `list_
 
 - **I06:** hecho (`014_sync`, outbox en TX, lista blanca, `expected_version` local).
 - **N12:** hecho (esquema Postgres, RLS, `sync_apply_ops`, `catalog_upsert_*`, Realtime, Auth, bucket `backups`).
-- **I07:** worker push/pull/Realtime y comandos `sync_*`.
-- **I11 / N07:** write-through, `hash_password`, `supabaseInvoke`, modo del equipo.
+- **N07:** hecho (modo remoto, `supabaseInvoke`, Auth, catálogo remoto).
+- **I11:** hecho (write-through recepción, `catalog_write` + auditoría, `hash_password` con salt por `operation_id`, contrato v2).
+- **I07:** worker push/pull/Realtime y comandos `sync_*` reales.
 - **I08:** `backup_run_now` / `backup_status`.
 - No duplicar reglas fuera de `service.rs`. No reintroducir `/api/v1` ni WireGuard.

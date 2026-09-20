@@ -223,6 +223,8 @@ pub struct BillPreview {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
+    #[serde(default)]
+    pub catalog_versions: std::collections::BTreeMap<String, i64>,
     pub business_name: String,
     pub address: String,
     pub phone: String,
@@ -243,6 +245,7 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            catalog_versions: Default::default(),
             business_name: "MotelApp".into(),
             address: "Av. Principal 100".into(),
             phone: "".into(),
@@ -287,7 +290,7 @@ pub struct CheckOutPayload {
     pub expected_version: Option<i64>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SaveRoomPayload {
     pub id: Option<i64>,
     pub number: String,
@@ -300,7 +303,7 @@ pub struct SaveRoomPayload {
     pub expected_version: Option<i64>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SaveRatePlanPayload {
     pub id: Option<i64>,
     pub name: String,
@@ -355,7 +358,7 @@ pub struct AddProductChargePayload {
     pub expected_version: Option<i64>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SaveProductPayload {
     pub id: Option<i64>,
     pub name: String,

@@ -313,7 +313,7 @@ function StayDrawer({
   const stay = item.stay!;
   const now = useNow();
   const [bill, setBill] = useState(item.estimated_total_cents);
-  const [lines, setLines] = useState<{ description: string; amount_cents: number }[]>([]);
+  const [lines, setLines] = useState<{ kind: string; description: string; amount_cents: number }[]>([]);
   const [charges, setCharges] = useState<Charge[]>([]);
   const [overnight, setOvernight] = useState(stay.converted_to_overnight);
   const admin = useContext(RoleContext) === "admin";

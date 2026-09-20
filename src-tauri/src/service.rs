@@ -5,7 +5,7 @@ use crate::models::*;
 use crate::sync::outbox::{self, Entity, OutboxOp};
 use rusqlite::{params, Connection, OptionalExtension};
 
-pub const CONTRACT_VERSION: u32 = 1;
+pub const CONTRACT_VERSION: u32 = 2;
 
 #[derive(Debug, Clone)]
 pub struct Actor {
@@ -47,6 +47,7 @@ pub fn authorize(actor: &Actor, operation: Operation) -> AppResult<()> {
             | Operation::SaveProduct
             | Operation::SetProductActive
             | Operation::AddCharge
+            | Operation::DeleteCharge
             | Operation::SaveSettings
             | Operation::PrintTest
             | Operation::CreateUser
@@ -1164,6 +1165,10 @@ pub fn device_mode_set(conn: &Connection, mode: &str) -> AppResult<()> {
 }
 
 pub fn hash_password(password: &str) -> AppResult<crate::models::HashPasswordResult> {
+    hash_password_with_operation(password, None)
+}
+
+pub fn hash_password_with_operation(password: &str, operation_id: Option<&str>) -> AppResult<crate::models::HashPasswordResult> {
     use argon2::{
         password_hash::{PasswordHasher, SaltString},
         Argon2,
@@ -1172,7 +1177,10 @@ pub fn hash_password(password: &str) -> AppResult<crate::models::HashPasswordRes
     if password.is_empty() || password.len() > 128 {
         return Err(AppError::msg("La contraseña debe tener entre 1 y 128 bytes"));
     }
-    let salt = SaltString::generate(&mut OsRng);
+    let salt = if let Some(id) = operation_id {
+        let id=uuid::Uuid::parse_str(id).map_err(|_|AppError::msg("operation_id debe ser UUID"))?;
+        SaltString::encode_b64(id.as_bytes()).map_err(|_|AppError::msg("Salt inválida"))?
+    } else { SaltString::generate(&mut OsRng) };
     let hash = Argon2::default()
         .hash_password(password.as_bytes(), &salt)
         .map_err(|_| AppError::msg("No se pudo proteger la contraseña"))?

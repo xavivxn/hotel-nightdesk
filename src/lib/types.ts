@@ -121,6 +121,7 @@ export type BillPreview = {
 };
 
 export type AppSettings = {
+  catalog_versions?: Record<string, number>;
   business_name: string;
   address: string;
   phone: string;

@@ -24,7 +24,7 @@ La UI usa los comandos de dominio `list_products(active_only)`, `save_product(pa
 }
 ```
 
-Las escrituras remotas van a Supabase (`catalog_upsert_*` con `expected_version`; ver [arquitectura](arquitectura-offline-supabase.md) y [contrato](contrato-ipc-api.md)). La aplicación administradora no accede al archivo SQLite de recepción. Sin conexión con administración la edición de catálogo se rechaza y recepción sigue operando. N11 dejó el menú local; I11/N07 cierran el write-through.
+Las escrituras remotas van a Supabase (`catalog_write` → `catalog_upsert_*` con `expected_version`; ver [arquitectura](arquitectura-offline-supabase.md) y [contrato](contrato-ipc-api.md)). La aplicación administradora no accede al archivo SQLite de recepción. Sin conexión con administración la edición de catálogo se rechaza y recepción sigue operando. N11 dejó el menú local; I11/N07 cierran el write-through.
 
 ## Revisión de uso
 

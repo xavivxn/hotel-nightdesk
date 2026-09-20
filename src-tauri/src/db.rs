@@ -76,6 +76,10 @@ const MIGRATIONS: &[Migration] = &[
         id: "014_sync",
         sql: include_str!("../migrations/014_sync.sql"),
     },
+    Migration {
+        id: "015_catalog_audit",
+        sql: include_str!("../migrations/015_catalog_audit.sql"),
+    },
 ];
 
 pub fn open(db_path: &Path) -> AppResult<Connection> {
@@ -430,6 +434,8 @@ pub fn load_settings(conn: &Connection) -> AppResult<AppSettings> {
         get_setting(conn, "require_guest_name", "false")? == "true";
     settings.pin_hash = get_setting(conn, "pin_hash", "")?;
     settings.has_pin = !settings.pin_hash.is_empty();
+    let mut stmt=conn.prepare("SELECT key,version FROM catalog_setting_versions")?;
+    settings.catalog_versions=stmt.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?)))?.collect::<Result<_,_>>()?;
     Ok(settings)
 }
 

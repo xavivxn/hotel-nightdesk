@@ -14,9 +14,6 @@ import type {
   RatePlan,
   Reservation,
   Room,
-  SaveProductPayload,
-  SaveRatePlanPayload,
-  SaveRoomPayload,
   SessionInfo,
   SessionUser,
   Stay,
@@ -25,6 +22,7 @@ import type {
 let client: SupabaseClient | null = null;
 let authSession: SessionInfo | null = null;
 let boardChannel: RealtimeChannel | null = null;
+let settingsVersions: Record<string,number> | null = null;
 
 const FORBIDDEN_OPS = new Set([
   "check_in",
@@ -53,6 +51,7 @@ export function clearSupabaseClient() {
   boardChannel = null;
   client = null;
   authSession = null;
+  settingsVersions = null;
 }
 
 export function initSupabase(projectUrl: string, anonKey: string) {
@@ -116,17 +115,15 @@ function mapProduct(row: Record<string, unknown>): Product {
   };
 }
 
-function rpcConflict(message: string): never {
-  if (/conflict/i.test(message)) fail("conflict", "Otro cambio ya se guardó. Recargá e intentá de nuevo.");
-  fail("validation", message || "No se pudo guardar");
-}
-
 async function settingsFromKv(): Promise<AppSettings> {
-  const { data, error } = await sb().from("business_settings").select("key,value");
+  const { data, error } = await sb().from("business_settings").select("key,value,version");
   if (error) fail("storage", error.message);
+  settingsVersions = Object.fromEntries((data ?? []).map(r => [r.key, Number(r.version)]));
+  for (const key of ["business_name","address","phone","tax_percent","currency_symbol","receipt_footer","require_guest_name"]) settingsVersions![key] ??= 0;
   const map = new Map((data ?? []).map((r) => [String((r as { key: string }).key), String((r as { value: string }).value)]));
   return {
     business_name: map.get("business_name") ?? "MotelApp",
+    catalog_versions: {...settingsVersions},
     address: map.get("address") ?? "",
     phone: map.get("phone") ?? "",
     tax_percent: Number(map.get("tax_percent") ?? 0),
@@ -420,129 +417,62 @@ export async function supabaseInvoke<T>(name: string, args: Record<string, unkno
     }
     case "get_settings":
       return (await settingsFromKv()) as T;
-    case "save_room": {
-      const payload = args.payload as SaveRoomPayload;
-      let uid = crypto.randomUUID() as string;
-      let expected = payload.expected_version ?? 0;
-      if (payload.id != null) {
-        const { data } = await sb().from("rooms").select("uid, version").eq("local_id", payload.id).maybeSingle();
-        if (data) {
-          uid = String((data as { uid: string }).uid);
-          expected = payload.expected_version ?? Number((data as { version: number }).version);
+    case "save_room":
+    case "save_rate_plan":
+    case "save_product":
+    case "set_product_active":
+    case "save_settings":
+    case "auth_create_user": {
+      if (!authSession || authSession.user.role !== "admin") fail("forbidden", "Esta operación requiere administración");
+      const entity = ({save_room:"rooms",save_rate_plan:"rate_plans",save_product:"products",set_product_active:"products",save_settings:"settings",auth_create_user:"app_users"} as Record<string,string>)[name];
+      const original = (args.payload ?? {}) as Record<string,unknown>;
+      const operation = String(args.operation_id ?? original.operation_id ?? crypto.randomUUID());
+      let payload: Record<string,unknown>;
+      if (name === "save_settings") {
+        const settings = original as unknown as AppSettings;
+        const values: Record<string,string> = {
+          business_name:settings.business_name,address:settings.address,phone:settings.phone,
+          tax_percent:String(settings.tax_percent),currency_symbol:settings.currency_symbol,
+          receipt_footer:settings.receipt_footer,require_guest_name:String(settings.require_guest_name),
+        };
+        if (!settingsVersions) fail("conflict","Recargá los ajustes antes de guardar");
+        payload = {values,versions:settings.catalog_versions ?? settingsVersions};
+      } else if (name === "auth_create_user") {
+        const {api} = await import("./api");
+        const {hash} = await api.hashPassword(String(original.password ?? ""), operation);
+        payload = {uid:operation,expected_version:0,username:String(original.username ?? "").trim().toLowerCase(),password_hash:hash,role:original.role,active:true};
+      } else {
+        const id = name === "set_product_active" ? args.product_id : original.id;
+        let row: Record<string,unknown> | null = null;
+        if (id != null) {
+          const {data,error} = await sb().from(entity).select("*").eq("local_id",id).maybeSingle();
+          if (error) fail("storage","Requiere conexión con administración");
+          if (!data) fail("not_found","Ficha de catálogo no encontrada");
+          row=data;
         }
+        payload = name === "set_product_active" ? {...row,active:Boolean(args.active)} : {...original};
+        payload.uid=row?.uid ?? operation;
+        payload.local_id=row?.local_id ?? null;
+        payload.expected_version=args.expected_version ?? original.expected_version ?? row?.version ?? 0;
+        delete payload.id; delete payload.operation_id;
+        if (entity==="rooms") { payload.active=row?.active ?? true; delete payload.status; }
+        if (entity==="products") payload.sort_order ??= 0;
       }
-      let { error } = await sb().rpc(
-        "catalog_upsert_room",
-        {
-          p_uid: uid,
-          p_expected_version: expected,
-          p_number: payload.number,
-          p_room_type: payload.room_type,
-          p_floor: payload.floor,
-          p_notes: payload.notes ?? null,
-          p_active: true,
-          p_local_id: payload.id ?? null,
-        } as never,
-      );
-      if (error) rpcConflict(error.message);
-      const rooms = await supabaseInvoke<Room[]>("list_rooms", {});
-      const found = rooms.find((r) => r.number === payload.number);
-      if (!found) fail("not_found", "Habitación no encontrada tras guardar");
-      return found as T;
-    }
-    case "save_rate_plan": {
-      const payload = args.payload as SaveRatePlanPayload;
-      let uid = crypto.randomUUID() as string;
-      let expected = payload.expected_version ?? 0;
-      if (payload.id != null) {
-        const { data } = await sb().from("rate_plans").select("uid, version").eq("local_id", payload.id).maybeSingle();
-        if (data) {
-          uid = String((data as { uid: string }).uid);
-          expected = payload.expected_version ?? Number((data as { version: number }).version);
-        }
+      const {data,error} = await sb().rpc("catalog_write",{
+        p_entity:entity,p_payload:payload,p_operation_id:operation,p_actor:null,
+      });
+      if (error) {
+        if (error.code==="42501") fail("forbidden","Sin permiso para modificar el catálogo");
+        if (error.message.includes("conflict:")) fail("conflict","La ficha cambió; recargá antes de guardar");
+        fail("storage","Requiere conexión con administración. Revisá los datos y la migración I11.");
       }
-      const { error } = await sb().rpc(
-        "catalog_upsert_rate_plan",
-        {
-          p_uid: uid,
-          p_expected_version: expected,
-          p_name: payload.name,
-          p_kind: payload.kind,
-          p_base_amount_cents: payload.base_amount_cents,
-          p_extra_hour_cents: payload.extra_hour_cents,
-          p_included_hours: payload.included_hours,
-          p_grace_minutes: payload.grace_minutes,
-          p_night_cutoff_hour: payload.night_cutoff_hour,
-          p_active: payload.active,
-          p_local_id: payload.id ?? null,
-        } as never,
-      );
-      if (error) rpcConflict(error.message);
-      const rates = await supabaseInvoke<RatePlan[]>("list_rate_plans", { active_only: false });
-      return (rates.find((r) => r.name === payload.name) ?? rates[0]) as T;
+      const row=(data as {row:Record<string,unknown>}).row;
+      if (entity==="rooms") return mapRoom(row) as T;
+      if (entity==="rate_plans") return mapRate(row) as T;
+      if (entity==="products") return mapProduct(row) as T;
+      if (entity==="app_users") return {id:Number(row.local_id),username:String(row.username),role:row.role} as T;
+      return await settingsFromKv() as T;
     }
-    case "save_product": {
-      const payload = args.payload as SaveProductPayload;
-      let uid = crypto.randomUUID() as string;
-      let expected = payload.expected_version ?? 0;
-      if (payload.id != null) {
-        const { data } = await sb().from("products").select("uid, version").eq("local_id", payload.id).maybeSingle();
-        if (data) {
-          uid = String((data as { uid: string }).uid);
-          expected = payload.expected_version ?? Number((data as { version: number }).version);
-        }
-      }
-      const { error } = await sb().rpc(
-        "catalog_upsert_product",
-        {
-          p_uid: uid,
-          p_expected_version: expected,
-          p_name: payload.name,
-          p_category: payload.category,
-          p_price_cents: payload.price_cents,
-          p_active: payload.active,
-          p_sort_order: payload.sort_order ?? 0,
-          p_local_id: payload.id ?? null,
-        } as never,
-      );
-      if (error) rpcConflict(error.message);
-      const products = await supabaseInvoke<Product[]>("list_products", { active_only: false });
-      return (products.find((p) => p.name === payload.name) ?? products[0]) as T;
-    }
-    case "set_product_active": {
-      const products = await supabaseInvoke<Product[]>("list_products", { active_only: false });
-      const product = products.find((p) => p.id === Number(args.product_id));
-      if (!product) fail("not_found", "Producto no encontrado");
-      return (await supabaseInvoke<Product>("save_product", {
-        payload: { ...product, active: Boolean(args.active), expected_version: product.version },
-      })) as T;
-    }
-    case "save_settings": {
-      const payload = args.payload as AppSettings;
-      const pairs: [string, string][] = [
-        ["business_name", payload.business_name],
-        ["address", payload.address],
-        ["phone", payload.phone],
-        ["tax_percent", String(payload.tax_percent)],
-        ["currency_symbol", payload.currency_symbol],
-        ["receipt_footer", payload.receipt_footer],
-        ["require_guest_name", payload.require_guest_name ? "true" : "false"],
-      ];
-      for (const [key, value] of pairs) {
-        const { data: existing } = await sb().from("business_settings").select("version").eq("key", key).maybeSingle();
-        const expected = existing ? Number((existing as { version: number }).version) : 0;
-        const { error } = await sb().rpc("catalog_upsert_settings", {
-          p_key: key,
-          p_value: value,
-          p_expected_version: expected,
-        });
-        if (error) rpcConflict(error.message);
-      }
-      return (await settingsFromKv()) as T;
-    }
-    case "auth_create_user":
-      fail("forbidden", "Creá usuarios desde recepción o completá el flujo remoto con hash_password en una iteración siguiente");
-      break;
     default:
       fail("forbidden", `Comando no disponible en administración remota: ${name}`);
   }

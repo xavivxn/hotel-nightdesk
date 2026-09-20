@@ -83,10 +83,17 @@ pub fn auth_setup(state: State<AppState>, payload: LoginPayload, legacy_pin: Opt
 }
 
 #[tauri::command]
-pub fn auth_create_user(state: State<AppState>, session_token: Option<String>, payload: CreateUserPayload) -> AppResult<SessionUser> {
+pub async fn auth_create_user(state: State<'_, AppState>, session_token: Option<String>, app: tauri::AppHandle, payload: CreateUserPayload, operation_id: Option<String>) -> AppResult<SessionUser> {
     let user = require(&state, session_token.as_deref(), true)?;
     crate::service::authorize(&crate::service::Actor::from(&user), crate::service::Operation::CreateUser)?;
-    insert_user(&state.db.lock().unwrap(), &payload)
+    if payload.username.trim().is_empty() || payload.username.len()>64 || !matches!(payload.role.as_str(), "admin"|"recepcion") { return Err(AppError::msg("Usuario o rol inválido")); }
+    let operation_id=Some(operation_id.unwrap_or_else(||uuid::Uuid::new_v4().to_string()));
+    let hash = crate::service::hash_password_with_operation(&payload.password, operation_id.as_deref())?.hash;
+    let data = serde_json::json!({"username":payload.username.trim().to_lowercase(),"password_hash":hash,"role":payload.role,"active":true});
+    if let Some(id) = crate::commands::try_catalog(&state, &app, &crate::service::Actor::from(&user), "app_users", data, operation_id).await? {
+        return state.db.lock().unwrap().query_row("SELECT id,username,role FROM users WHERE id=?1",[id],|r|Ok(map_user(r.get(0)?,r.get(1)?,r.get(2)?))).map_err(Into::into);
+    }
+    crate::sync::catalog::local(&state.db.lock().unwrap(), &crate::service::Actor::from(&user), "app_users", |tx| insert_user(tx, &payload))
 }
 
 #[tauri::command]
@@ -203,7 +210,7 @@ mod tests {
             "backup_status",
         ];
         for section in source.split("#[tauri::command]").skip(1) {
-            let name = section.split("pub fn ").nth(1).unwrap().split('(').next().unwrap();
+            let name = section.split("pub ").nth(1).unwrap().trim_start_matches("async ").trim_start_matches("fn ").split('(').next().unwrap();
             if public.contains(&name) {
                 continue;
             }

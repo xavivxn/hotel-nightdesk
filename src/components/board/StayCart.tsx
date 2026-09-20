@@ -58,7 +58,7 @@ export function StayCart({
 
   const groups = useMemo(() => groupCharges(charges), [charges]);
 
-  async function run(busyKey: number, action: () => Promise<void>) {
+  async function run(busyKey: number, action: () => Promise<unknown>) {
     setBusyId(busyKey);
     onBusyChange?.(true);
     setError(null);

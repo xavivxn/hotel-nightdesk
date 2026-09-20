@@ -13,12 +13,17 @@ struct RemoteCreds {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct DeviceCreds {
-    project_url: String,
-    anon_key: String,
-    device_email: String,
+pub(crate) struct DeviceCreds {
+    pub(crate) project_url: String,
+    pub(crate) anon_key: String,
+    pub(crate) device_email: String,
     /// Stored only for the sync worker; never returned to the UI.
-    device_password: String,
+    pub(crate) device_password: String,
+}
+
+pub(crate) fn load_device(app_data: &Path) -> AppResult<DeviceCreds> {
+    let raw = std::fs::read(device_path(app_data)).map_err(|_| AppError::storage("No se pudo leer la configuración del dispositivo"))?;
+    serde_json::from_slice(&raw).map_err(|_| AppError::storage("Configuración del dispositivo inválida"))
 }
 
 fn remote_path(app_data: &Path) -> PathBuf {

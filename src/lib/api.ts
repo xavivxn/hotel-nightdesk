@@ -133,23 +133,23 @@ export const api = {
   session: () => cmd<SessionInfo>("auth_session"),
   logout: async () => { try { await cmd<void>("auth_logout"); } finally { sessionToken = null; } },
   clearSession: () => { sessionToken = null; },
-  createUser: (payload: CreateUserPayload) => cmd<SessionUser>("auth_create_user", { payload }),
+  createUser: (payload: CreateUserPayload, operation_id = crypto.randomUUID()) => cmd<SessionUser>("auth_create_user", { payload, operation_id }),
   contractInfo: () => cmd<ContractInfo>("contract_info"),
   listBoard: () => cmd<BoardRoom[]>("list_board"),
   listRooms: () => cmd<Room[]>("list_rooms"),
-  saveRoom: (payload: SaveRoomPayload) => cmd<Room>("save_room", { payload }),
+  saveRoom: (payload: SaveRoomPayload) => cmd<Room>("save_room", { payload: withOperationId(payload) }),
   setRoomStatus: (room_id: number, status: string) => cmd<Room>("set_room_status", { room_id, status }),
   listRatePlans: (active_only = false) => cmd<RatePlan[]>("list_rate_plans", { active_only }),
-  saveRatePlan: (payload: SaveRatePlanPayload) => cmd<RatePlan>("save_rate_plan", { payload }),
+  saveRatePlan: (payload: SaveRatePlanPayload) => cmd<RatePlan>("save_rate_plan", { payload: withOperationId(payload) }),
   checkIn: (payload: CheckInPayload) => cmd<Stay>("check_in", { payload: withOperationId(payload) }),
   previewBill: (stay_id: number) => cmd<BillPreview>("preview_bill", { stay_id }),
   getStayDetail: (stay_id: number) =>
     cmd<[Stay, BillPreview, Charge[], Payment[]]>("get_stay_detail", { stay_id }),
   convertToOvernight: (stay_id: number) => cmd<Stay>("convert_to_overnight", { stay_id }),
   listProducts: (active_only = true) => cmd<Product[]>("list_products", { active_only }),
-  saveProduct: (payload: SaveProductPayload) => cmd<Product>("save_product", { payload }),
-  setProductActive: (product_id: number, active: boolean) =>
-    cmd<Product>("set_product_active", { product_id, active }),
+  saveProduct: (payload: SaveProductPayload) => cmd<Product>("save_product", { payload: withOperationId(payload) }),
+  setProductActive: (product_id: number, active: boolean, expected_version?: number, operation_id = crypto.randomUUID()) =>
+    cmd<Product>("set_product_active", { product_id, active, expected_version, operation_id }),
   addCharge: (payload: AddChargePayload) => cmd<Charge>("add_charge", { payload: withOperationId(payload) }),
   addProductCharge: (payload: AddProductChargePayload) =>
     cmd<Charge>("add_product_charge", { payload: withOperationId(payload) }),
@@ -175,8 +175,8 @@ export const api = {
     return "Carpeta de descargas del navegador (datos de demostración)";
   },
   getSettings: () => cmd<AppSettings>("get_settings"),
-  saveSettings: (payload: AppSettings, new_pin?: string) =>
-    cmd<AppSettings>("save_settings", new_pin === undefined ? { payload } : { payload, new_pin }),
+  saveSettings: (payload: AppSettings, new_pin?: string, operation_id = crypto.randomUUID()) =>
+    cmd<AppSettings>("save_settings", { payload, new_pin, operation_id }),
   verifyPin: (pin: string) => cmd<boolean>("verify_pin", { pin }),
   pinRequired: () => cmd<boolean>("pin_required"),
   printTest: () => cmd<string | null>("print_test"),
@@ -197,7 +197,7 @@ export const api = {
   },
   remoteConfigured: () => cmd<boolean>("remote_configured"),
   remoteGetConfig: () => cmd<RemoteConfigurePayload | null>("remote_get_config"),
-  hashPassword: (password: string) => cmd<HashPasswordResult>("hash_password", { payload: { password } }),
+  hashPassword: (password: string, operation_id?: string) => cmd<HashPasswordResult>("hash_password", { payload: { password }, operation_id }),
   syncStatus: () => cmd<SyncStatus>("sync_status"),
   syncPullNow: () => cmd<void>("sync_pull_now"),
   syncConfigureDevice: (payload: SyncConfigureDevicePayload) =>

@@ -127,7 +127,7 @@ export function CatalogPage({ settings }: { settings: AppSettings }) {
     setBusy(true);
     setError(null);
     try {
-      await api.setProductActive(product.id, !product.active);
+      await api.setProductActive(product.id, !product.active, product.version);
       await load();
       setNotice(product.active ? `${product.name} quedó inactivo. Sus cargos históricos se conservan.` : `${product.name} volvió a estar activo.`);
     } catch (e) {
