@@ -35,6 +35,14 @@ function isTauri() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
+if (typeof window !== "undefined" && isTauri()) {
+  void import("@tauri-apps/api/event").then(({ listen }) => {
+    void listen("sync:catalog-updated", () => {
+      window.dispatchEvent(new Event("sync:catalog-updated"));
+    });
+  });
+}
+
 /** Tauri 2 expects camelCase for top-level command args; nested payloads stay snake_case. */
 function toTauriArgs(args?: Record<string, unknown>) {
   if (!args) return undefined;

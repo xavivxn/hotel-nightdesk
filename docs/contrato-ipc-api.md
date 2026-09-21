@@ -19,7 +19,7 @@ UI → api.ts → cmd()
                       ↓
          service.rs (Actor, authorize, reglas, SQL, TX)
                       ↓
-         billing.rs / db.rs / sync::{outbox,catalog,remote}
+         billing.rs / db.rs / sync::{outbox,catalog,remote,push,pull,worker}
 ```
 
 `src/lib/supabase.ts` (N07) implementa `supabaseInvoke(name, args)`. Los componentes **nunca** importan `@tauri-apps/api` ni `@supabase/supabase-js`. No hay escritura remota directa sobre el archivo SQLite.
@@ -119,7 +119,7 @@ Leyenda de `supabaseInvoke`: `lectura` = PostgREST/vista; `catálogo` = RPC `cat
 | `save_settings` | admin; write-through de claves de negocio | catálogo lista blanca | admin |
 | `verify_pin` / `pin_required` | sí | no aplica / stub | autenticado |
 | `device_mode_*` / `remote_*` / `hash_password` | siempre IPC local | — | ver tabla abajo |
-| `sync_*` / `backup_*` | stubs / I07–I08 | lectura parcial | autenticado / admin |
+| `sync_*` / `backup_*` | I07 worker / I08 stub | lectura parcial | autenticado / admin |
 
 ## Comandos de dispositivo / sync / hash
 
@@ -131,9 +131,9 @@ Solo tienen sentido en recepción salvo donde se indica. Seguir `nightdesk-add-c
 | `device_mode_set` | `{ mode }` → `void` | Primer arranque. No se sincroniza. |
 | `remote_configure` | `{ project_url, anon_key }` → `void` | Solo PC admin. Credenciales en app data; nunca en `settings`. |
 | `remote_configured` / `remote_get_config` | `{}` → `bool` / payload | Lectura local de URL/anon. |
-| `sync_configure_device` | `{ project_url, anon_key, device_email, device_password }` → `void` | Credenciales a app data / Credential Manager. Nunca en `settings` ni en la respuesta. Habilita write-through I11. |
-| `sync_status` | `{}` → `{ connected, pending_outbox, last_push_at, last_pull_at, last_error, configured }` | Indicador de `AppShell`. Stub hasta I07. |
-| `sync_pull_now` | `{}` → `void` | Pull incremental; emite `sync:catalog-updated`. Stub hasta I07. |
+| `sync_configure_device` | `{ project_url, anon_key, device_email, device_password }` → `void` | Credenciales a app data (nunca en `settings` ni en la respuesta). Habilita write-through I11 y, en modo recepción, arranca el worker I07. |
+| `sync_status` | `{}` → `{ connected, pending_outbox, last_push_at, last_pull_at, last_error, configured, realtime_connected }` | Indicador de `AppShell`. `pending_outbox` se cuenta en SQLite; el resto sale del snapshot del worker. |
+| `sync_pull_now` | `{}` → `void` | Drena la outbox y hace pull. Espera hasta 20 s; sin worker o sin red → `storage`. Si el catálogo cambió, el worker emite `sync:catalog-updated` (Tauri → `window`). |
 | `hash_password` | `{ password }` + `operation_id?` → `{ hash }` | Argon2id, mismo formato que `auth.rs`. Siempre IPC local (también en modo remoto). Con `operation_id` UUID el salt es determinístico (reintento idempotente de alta de usuario). |
 | `backup_run_now` | `{}` → `{ backup_id }` | Admin local. Encola snapshot. |
 | `backup_status` | `{}` → `{ last_local_at, last_remote_at, pending, last_error }` | Recepción y, en remoto, lectura de tabla `backups`. Stub hasta I08. |
@@ -174,7 +174,9 @@ Campos reservados en todos: `operation_id?: string`, `expected_version?: number`
 
 **auth_create_user** (admin): `{ payload: { username, password, role }, operation_id? }`. Con sync: hash local (`hash_password` + mismo `operation_id`) y `catalog_write` `app_users` (el hash viaja; la contraseña en claro no).
 
-Mutaciones operativas escriben `sync_outbox` en la misma TX. El `operation_id` de `api.ts` es `root_operation_id`; si una operación genera varias filas (checkout: stay + cargos + room), los sub-ops usan un UUID v5 derivado. Repetir el mismo `operation_id` → `conflict` y rollback (no hay segunda estadía ni segunda fila).
+Mutaciones operativas escriben `sync_outbox` en la misma TX. El `operation_id` de `api.ts` es `root_operation_id`; si una operación genera varias filas (checkout: stay + cargos + room), los sub-ops usan un UUID v5 derivado. Repetir el mismo `operation_id` → `conflict` y rollback (no hay segunda estadía ni segunda fila). El adaptador IPC despierta al worker (`wake_push`) después de cada mutación operativa.
+
+Tras restaurar un snapshot (I05): borrar `sync_outbox`, `sync_state` (`bootstrap_done` y `pull_cursor:*`) y volver a bootstrap para no reenviar operaciones antiguas.
 
 Consultas (`list_board`, `list_rooms`, `preview_bill`, `get_stay_detail`, `list_history`, …) no llevan `operation_id`. Resultado = tipos de `models.rs` / `types.ts`.
 
@@ -184,6 +186,6 @@ Consultas (`list_board`, `list_rooms`, `preview_bill`, `get_stay_detail`, `list_
 - **N12:** hecho (esquema Postgres, RLS, `sync_apply_ops`, `catalog_upsert_*`, Realtime, Auth, bucket `backups`).
 - **N07:** hecho (modo remoto, `supabaseInvoke`, Auth, catálogo remoto).
 - **I11:** hecho (write-through recepción, `catalog_write` + auditoría, `hash_password` con salt por `operation_id`, contrato v2).
-- **I07:** worker push/pull/Realtime y comandos `sync_*` reales.
+- **I07:** hecho (worker push/pull/Realtime, bootstrap, `sync_status` / `sync_pull_now` / `sync_configure_device`).
 - **I08:** `backup_run_now` / `backup_status`.
 - No duplicar reglas fuera de `service.rs`. No reintroducir `/api/v1` ni WireGuard.

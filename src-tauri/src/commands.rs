@@ -16,6 +16,30 @@ fn actor_from(user: &SessionUser) -> Actor {
     Actor::from(user)
 }
 
+fn wake_push(state: &AppState) {
+    if let Ok(guard) = state.sync.lock() {
+        if let Some(handle) = guard.as_ref() {
+            handle.wake_push();
+        }
+    }
+}
+
+fn maybe_start_worker(state: &AppState, app: &AppHandle, data_dir: &std::path::Path) -> AppResult<()> {
+    let mode = service::device_mode_get(&conn(state))?;
+    if !crate::sync::worker::should_start(mode.as_deref(), true) {
+        return Ok(());
+    }
+    let mut slot = state.sync.lock().expect("sync lock");
+    if slot.is_none() {
+        *slot = Some(crate::sync::worker::start(
+            app.clone(),
+            data_dir.join("nightdesk.db"),
+            data_dir.to_path_buf(),
+        )?);
+    }
+    Ok(())
+}
+
 pub(crate) async fn try_catalog(state: &AppState, app: &AppHandle, actor: &Actor, entity: &str, payload: serde_json::Value, operation_id: Option<String>) -> AppResult<Option<i64>> {
     let dir = app_data_dir(app)?;
     if !crate::sync::catalog::configured(&dir) { return Ok(None); }
@@ -67,8 +91,12 @@ pub async fn save_room(state: State<'_, AppState>, session_token: Option<String>
 #[tauri::command]
 pub fn set_room_status(state: State<AppState>, session_token: Option<String>, room_id: i64, status: String) -> AppResult<Room> {
     crate::auth::require(&state, session_token.as_deref(), false)?;
-    let mut conn = conn(&state);
-    service::set_room_status(&mut conn, room_id, status)
+    let room = {
+        let mut conn = conn(&state);
+        service::set_room_status(&mut conn, room_id, status)?
+    };
+    wake_push(&state);
+    Ok(room)
 }
 
 #[tauri::command]
@@ -89,8 +117,12 @@ pub async fn save_rate_plan(state: State<'_, AppState>, session_token: Option<St
 #[tauri::command]
 pub fn check_in(state: State<AppState>, session_token: Option<String>, payload: CheckInPayload) -> AppResult<Stay> {
     crate::auth::require(&state, session_token.as_deref(), false)?;
-    let mut conn = conn(&state);
-    service::check_in_on(&mut conn, payload)
+    let stay = {
+        let mut conn = conn(&state);
+        service::check_in_on(&mut conn, payload)?
+    };
+    wake_push(&state);
+    Ok(stay)
 }
 
 #[tauri::command]
@@ -114,8 +146,12 @@ pub fn get_stay_detail(
 #[tauri::command]
 pub fn convert_to_overnight(state: State<AppState>, session_token: Option<String>, stay_id: i64) -> AppResult<Stay> {
     crate::auth::require(&state, session_token.as_deref(), false)?;
-    let mut conn = conn(&state);
-    service::convert_to_overnight(&mut conn, stay_id)
+    let stay = {
+        let mut conn = conn(&state);
+        service::convert_to_overnight(&mut conn, stay_id)?
+    };
+    wake_push(&state);
+    Ok(stay)
 }
 
 #[tauri::command]
@@ -147,22 +183,34 @@ pub async fn set_product_active(state: State<'_, AppState>, session_token: Optio
 #[tauri::command]
 pub fn add_charge(state: State<AppState>, session_token: Option<String>, payload: AddChargePayload) -> AppResult<Charge> {
     let user = crate::auth::require(&state, session_token.as_deref(), true)?;
-    let mut conn = conn(&state);
-    service::add_charge(&mut conn, &actor_from(&user), payload)
+    let charge = {
+        let mut conn = conn(&state);
+        service::add_charge(&mut conn, &actor_from(&user), payload)?
+    };
+    wake_push(&state);
+    Ok(charge)
 }
 
 #[tauri::command]
 pub fn add_product_charge(state: State<AppState>, session_token: Option<String>, payload: AddProductChargePayload) -> AppResult<Charge> {
     crate::auth::require(&state, session_token.as_deref(), false)?;
-    let mut conn = conn(&state);
-    service::add_product_charge(&mut conn, payload)
+    let charge = {
+        let mut conn = conn(&state);
+        service::add_product_charge(&mut conn, payload)?
+    };
+    wake_push(&state);
+    Ok(charge)
 }
 
 #[tauri::command]
 pub fn delete_charge(state: State<AppState>, session_token: Option<String>, charge_id: i64) -> AppResult<()> {
     let user = crate::auth::require(&state, session_token.as_deref(), true)?;
-    let mut conn = conn(&state);
-    service::delete_charge(&mut conn, &actor_from(&user), charge_id)
+    {
+        let mut conn = conn(&state);
+        service::delete_charge(&mut conn, &actor_from(&user), charge_id)?;
+    }
+    wake_push(&state);
+    Ok(())
 }
 
 #[tauri::command]
@@ -173,9 +221,13 @@ pub fn check_out(
     payload: CheckOutPayload,
 ) -> AppResult<CheckOutResult> {
     crate::auth::require(&state, session_token.as_deref(), false)?;
-    let mut conn = conn(&state);
-    let (stay, bill) = service::check_out(&mut conn, &payload)?;
+    let (stay, bill) = {
+        let mut conn = conn(&state);
+        service::check_out(&mut conn, &payload)?
+    };
+    wake_push(&state);
     let mut print_error = None;
+    let conn = conn(&state);
     if payload.print {
         let attempt = (|| -> AppResult<Option<String>> {
             let settings = db::load_settings(&conn)?;
@@ -202,22 +254,34 @@ pub fn list_reservations(state: State<AppState>, session_token: Option<String>) 
 #[tauri::command]
 pub fn create_reservation(state: State<AppState>, session_token: Option<String>, payload: CreateReservationPayload) -> AppResult<Reservation> {
     crate::auth::require(&state, session_token.as_deref(), false)?;
-    let mut conn = conn(&state);
-    service::create_reservation_on(&mut conn, payload)
+    let reservation = {
+        let mut conn = conn(&state);
+        service::create_reservation_on(&mut conn, payload)?
+    };
+    wake_push(&state);
+    Ok(reservation)
 }
 
 #[tauri::command]
 pub fn set_reservation_status(state: State<AppState>, session_token: Option<String>, reservation_id: i64, status: String) -> AppResult<Reservation> {
     crate::auth::require(&state, session_token.as_deref(), false)?;
-    let mut conn = conn(&state);
-    service::set_reservation_status(&mut conn, reservation_id, status)
+    let reservation = {
+        let mut conn = conn(&state);
+        service::set_reservation_status(&mut conn, reservation_id, status)?
+    };
+    wake_push(&state);
+    Ok(reservation)
 }
 
 #[tauri::command]
 pub fn check_in_reservation(state: State<AppState>, session_token: Option<String>, reservation_id: i64) -> AppResult<Stay> {
     crate::auth::require(&state, session_token.as_deref(), false)?;
-    let mut conn = conn(&state);
-    service::check_in_reservation(&mut conn, reservation_id)
+    let stay = {
+        let mut conn = conn(&state);
+        service::check_in_reservation(&mut conn, reservation_id)?
+    };
+    wake_push(&state);
+    Ok(stay)
 }
 
 #[tauri::command]
@@ -356,19 +420,33 @@ pub fn hash_password(payload: HashPasswordPayload, operation_id: Option<String>)
 }
 
 #[tauri::command]
-pub fn sync_status(app: AppHandle) -> AppResult<SyncStatus> {
-    let data_dir = app_data_dir(&app)?;
-    Ok(service::sync_status_stub(&data_dir))
+pub fn sync_status(state: State<AppState>, app: AppHandle) -> AppResult<SyncStatus> {
+    let configured = crate::credentials::device_configured(&app_data_dir(&app)?);
+    let pending = crate::sync::push::pending_count(&conn(&state)).unwrap_or(0);
+    let snapshot = state
+        .sync
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().map(|handle| handle.snapshot()))
+        .unwrap_or_default();
+    Ok(crate::sync::worker::status_from(&snapshot, pending, configured))
 }
 
 #[tauri::command]
-pub fn sync_pull_now() -> AppResult<()> {
-    // Stub until I07 worker exists.
-    Ok(())
+pub fn sync_pull_now(state: State<AppState>) -> AppResult<()> {
+    let handle = state
+        .sync
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().cloned());
+    match handle {
+        Some(handle) => handle.pull_now(),
+        None => Err(AppError::storage("Sincronización no configurada")),
+    }
 }
 
 #[tauri::command]
-pub fn sync_configure_device(app: AppHandle, payload: SyncConfigureDevicePayload) -> AppResult<()> {
+pub fn sync_configure_device(state: State<AppState>, app: AppHandle, payload: SyncConfigureDevicePayload) -> AppResult<()> {
     let data_dir = app_data_dir(&app)?;
     crate::credentials::save_device(
         &data_dir,
@@ -376,7 +454,8 @@ pub fn sync_configure_device(app: AppHandle, payload: SyncConfigureDevicePayload
         &payload.anon_key,
         &payload.device_email,
         &payload.device_password,
-    )
+    )?;
+    maybe_start_worker(&state, &app, &data_dir)
 }
 
 #[tauri::command]

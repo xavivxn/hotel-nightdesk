@@ -130,3 +130,25 @@ pub fn enqueue(conn: &Connection, root_operation_id: &str, ops: &[OutboxOp]) -> 
     }
     Ok(())
 }
+
+pub fn bootstrap_operation_id(entity: &str, entity_uid: &str) -> String {
+    let name = format!("bootstrap:{entity}:{entity_uid}");
+    Uuid::new_v5(&OUTBOX_NS, name.as_bytes()).to_string()
+}
+
+/// Like [`enqueue`], but a repeated bootstrap root is a no-op instead of `conflict`.
+pub fn enqueue_if_absent(conn: &Connection, root_operation_id: &str, ops: &[OutboxOp]) -> AppResult<bool> {
+    let root = resolve_operation_id(&Some(root_operation_id.to_string()));
+    let already: Option<i64> = conn
+        .query_row(
+            "SELECT 1 FROM sync_outbox WHERE root_operation_id = ?1 LIMIT 1",
+            [&root],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if already.is_some() {
+        return Ok(false);
+    }
+    enqueue(conn, &root, ops)?;
+    Ok(true)
+}

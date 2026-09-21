@@ -72,15 +72,47 @@ fn sql_value(value: &Value) -> AppResult<SqlValue> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApplyStatus {
+    Applied(i64),
+    Unchanged(i64),
+}
+
+impl ApplyStatus {
+    pub fn id(self) -> i64 {
+        match self {
+            Self::Applied(id) | Self::Unchanged(id) => id,
+        }
+    }
+
+    pub fn changed(self) -> bool {
+        matches!(self, Self::Applied(_))
+    }
+}
+
 /// Shared pull applicator: immutable operational fields never enter the whitelist.
 pub fn apply(conn: &Connection, entity: &str, row: &Value) -> AppResult<i64> {
+    Ok(apply_row(conn, entity, row, false)?.id())
+}
+
+/// Bootstrap overwrite: apply even if the local version is newer. Still never writes `rooms.status`.
+#[allow(dead_code)]
+pub fn apply_forced(conn: &Connection, entity: &str, row: &Value) -> AppResult<i64> {
+    Ok(apply_row(conn, entity, row, true)?.id())
+}
+
+pub fn apply_status(conn: &Connection, entity: &str, row: &Value, force: bool) -> AppResult<ApplyStatus> {
+    apply_row(conn, entity, row, force)
+}
+
+fn apply_row(conn: &Connection, entity: &str, row: &Value, force: bool) -> AppResult<ApplyStatus> {
     let fields = columns(entity)?;
     let uid = row["uid"].as_str().ok_or_else(|| AppError::msg("Respuesta sin uid"))?;
     uuid::Uuid::parse_str(uid).map_err(|_| AppError::msg("Respuesta con uid inválido"))?;
     let version = row["version"].as_i64().filter(|v| *v>0).ok_or_else(|| AppError::msg("Respuesta sin versión"))?;
     let table = table(entity);
     let current: Option<(i64,i64)> = conn.query_row(&format!("SELECT id,version FROM {table} WHERE uid=?1"), [uid], |r| Ok((r.get(0)?,r.get(1)?))).optional()?;
-    if let Some((id,old)) = current { if old >= version { return Ok(id); } }
+    if let Some((id,old)) = current { if !force && old >= version { return Ok(ApplyStatus::Unchanged(id)); } }
     let mut names = fields.to_vec();
     names.extend(["uid","version","updated_at"]);
     let mut vals = Vec::new();
@@ -91,7 +123,7 @@ pub fn apply(conn: &Connection, entity: &str, row: &Value) -> AppResult<i64> {
         vals.push(SqlValue::Integer(id));
         let assignments = names.iter().map(|f| format!("{f}=?")).collect::<Vec<_>>().join(",");
         conn.execute(&format!("UPDATE {table} SET {assignments} WHERE id=?"), rusqlite::params_from_iter(vals))?;
-        Ok(id)
+        Ok(ApplyStatus::Applied(id))
     } else {
         if table == "rooms" {
             names.extend(["status","created_at"]);
@@ -100,8 +132,56 @@ pub fn apply(conn: &Connection, entity: &str, row: &Value) -> AppResult<i64> {
         }
         let placeholders=vec!["?";names.len()].join(",");
         conn.execute(&format!("INSERT INTO {table} ({}) VALUES ({placeholders})",names.join(",")),rusqlite::params_from_iter(vals))?;
-        Ok(conn.last_insert_rowid())
+        Ok(ApplyStatus::Applied(conn.last_insert_rowid()))
     }
+}
+
+/// If the remote user uid is new but the username already exists, reuse the local row.
+pub fn adopt_user_uid(conn: &Connection, row: &Value) -> AppResult<()> {
+    let uid = row["uid"].as_str().ok_or_else(|| AppError::msg("Respuesta sin uid"))?;
+    let username = row["username"].as_str().ok_or_else(|| AppError::msg("Respuesta sin usuario"))?;
+    let by_uid: Option<i64> = conn
+        .query_row("SELECT id FROM users WHERE uid=?1", [uid], |r| r.get(0))
+        .optional()?;
+    if by_uid.is_some() {
+        return Ok(());
+    }
+    let by_name: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM users WHERE username=?1 COLLATE NOCASE",
+            [username],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if let Some(id) = by_name {
+        conn.execute("UPDATE users SET uid=?1 WHERE id=?2", params![uid, id])?;
+    }
+    Ok(())
+}
+
+pub fn apply_setting_row(conn: &Connection, row: &Value, force: bool) -> AppResult<bool> {
+    let key = row["key"].as_str().unwrap_or("");
+    if !super::settings::is_business_key(key) {
+        return Err(AppError::forbidden("Clave de equipo rechazada"));
+    }
+    let version = row["version"].as_i64().filter(|v| *v > 0).ok_or_else(|| AppError::msg("Versión inválida"))?;
+    let current: i64 = conn
+        .query_row("SELECT version FROM catalog_setting_versions WHERE key=?1", [key], |r| r.get(0))
+        .optional()?
+        .unwrap_or(0);
+    if !force && version <= current {
+        return Ok(false);
+    }
+    db::upsert_setting(
+        conn,
+        key,
+        row["value"].as_str().ok_or_else(|| AppError::msg("Ajuste inválido"))?,
+    )?;
+    conn.execute(
+        "INSERT INTO catalog_setting_versions VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET version=excluded.version",
+        params![key, version],
+    )?;
+    Ok(true)
 }
 
 pub fn apply_result(conn: &mut Connection, request: &Value, result: &Value) -> AppResult<i64> {
@@ -109,14 +189,7 @@ pub fn apply_result(conn: &mut Connection, request: &Value, result: &Value) -> A
     let tx = conn.transaction()?;
     let id = if entity == "settings" {
         for row in result["row"].as_array().ok_or_else(|| AppError::msg("Ajustes incompletos"))? {
-            let key = row["key"].as_str().unwrap_or("");
-            if !super::settings::is_business_key(key) { return Err(AppError::forbidden("Clave de equipo rechazada")); }
-            let version=row["version"].as_i64().filter(|v| *v>0).ok_or_else(|| AppError::msg("Versión inválida"))?;
-            let current:i64=tx.query_row("SELECT version FROM catalog_setting_versions WHERE key=?1",[key],|r|r.get(0)).optional()?.unwrap_or(0);
-            if version>current {
-                db::upsert_setting(&tx,key,row["value"].as_str().ok_or_else(||AppError::msg("Ajuste inválido"))?)?;
-                tx.execute("INSERT INTO catalog_setting_versions VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET version=excluded.version",params![key,version])?;
-            }
+            apply_setting_row(&tx, row, false)?;
         }
         0
     } else {

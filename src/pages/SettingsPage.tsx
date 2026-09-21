@@ -224,7 +224,7 @@ export function SettingsPage({
                     await api.syncPullNow();
                     window.dispatchEvent(new Event("sync:catalog-updated"));
                     setSync(await api.syncStatus());
-                    setNotice("Pull solicitado (stub I07).");
+                    setNotice("Sincronización ejecutada");
                   } catch (e) {
                     setError(String(e));
                   } finally {

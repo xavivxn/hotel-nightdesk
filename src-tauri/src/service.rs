@@ -1188,17 +1188,6 @@ pub fn hash_password_with_operation(password: &str, operation_id: Option<&str>) 
     Ok(crate::models::HashPasswordResult { hash })
 }
 
-pub fn sync_status_stub(app_data: &std::path::Path) -> crate::models::SyncStatus {
-    let pending = 0_i64;
-    crate::models::SyncStatus {
-        connected: false,
-        pending_outbox: pending,
-        last_push_at: None,
-        last_pull_at: None,
-        last_error: Some("Sincronización pendiente de I07".into()),
-        configured: crate::credentials::device_configured(app_data),
-    }
-}
 
 #[cfg(test)]
 mod tests {

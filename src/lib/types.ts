@@ -265,6 +265,7 @@ export type SyncStatus = {
   last_pull_at: string | null;
   last_error: string | null;
   configured: boolean;
+  realtime_connected: boolean;
 };
 
 export type BackupStatus = {

@@ -152,7 +152,7 @@ mod tests {
         let conn = db::open(Path::new(":memory:")).unwrap();
         insert_user(&conn, &CreateUserPayload { username: "admin".into(), password: "Prueba-segura-123".into(), role: "admin".into() }).unwrap();
         insert_user(&conn, &CreateUserPayload { username: "recepcion".into(), password: "Prueba-segura-456".into(), role: "recepcion".into() }).unwrap();
-        AppState { db: Mutex::new(conn), auth: Mutex::new(AuthState::default()) }
+        AppState { db: Mutex::new(conn), auth: Mutex::new(AuthState::default()), sync: Mutex::new(None) }
     }
     fn credentials(user: &str, password: &str) -> LoginPayload { LoginPayload { username: user.into(), password: password.into() } }
 

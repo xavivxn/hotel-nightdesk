@@ -17,6 +17,7 @@ use tauri::Manager;
 pub struct AppState {
     pub db: Mutex<Connection>,
     pub auth: Mutex<auth::AuthState>,
+    pub sync: Mutex<Option<sync::worker::SyncHandle>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -27,9 +28,17 @@ pub fn run() {
             std::fs::create_dir_all(&dir)?;
             let db_path = dir.join("nightdesk.db");
             let conn = db::open(&db_path).map_err(|e| e.to_string())?;
+            let mode = service::device_mode_get(&conn).ok().flatten();
+            let configured = credentials::device_configured(&dir);
+            let sync = if sync::worker::should_start(mode.as_deref(), configured) {
+                Some(sync::worker::start(app.handle().clone(), db_path.clone(), dir.clone()).map_err(|e| e.to_string())?)
+            } else {
+                None
+            };
             app.manage(AppState {
                 db: Mutex::new(conn),
                 auth: Mutex::new(auth::AuthState::default()),
+                sync: Mutex::new(sync),
             });
             // Force window/taskbar icon (bundle icons alone often stay cached in `tauri dev` on Windows).
             if let Some(window) = app.get_webview_window("main") {

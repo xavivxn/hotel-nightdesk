@@ -668,8 +668,9 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
         pending_outbox: 0,
         last_push_at: null,
         last_pull_at: null,
-        last_error: "Sincronización pendiente de I07",
+        last_error: null,
         configured: Boolean(localStorage.getItem("nightdesk.device_config")),
+        realtime_connected: false,
       };
     case "sync_pull_now":
       window.dispatchEvent(new Event("sync:catalog-updated"));

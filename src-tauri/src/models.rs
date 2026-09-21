@@ -454,6 +454,8 @@ pub struct SyncStatus {
     pub last_pull_at: Option<String>,
     pub last_error: Option<String>,
     pub configured: bool,
+    #[serde(default)]
+    pub realtime_connected: bool,
 }
 
 #[derive(Debug, Serialize)]

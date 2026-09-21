@@ -24,7 +24,7 @@ src-tauri/src/service.rs      reglas de negocio + SQL + TX (sin Tauri)
 src-tauri/src/commands.rs     adaptadores IPC
 src-tauri/src/billing.rs      cobro (fuente de verdad + tests)
 src-tauri/src/db.rs           SQLite, seed, queries
-src-tauri/src/sync/           outbox, push, pull, realtime, worker (I06/I07)
+src-tauri/src/sync/           outbox, client, push, pull, bootstrap, realtime, worker (I06/I07)
 src-tauri/src/backup.rs       snapshot cifrado a Storage (I05/I08)
 src-tauri/migrations/         schema SQLite (001_init … 014_sync)
 supabase/                     esquema Postgres, RLS, RPC (N12)
