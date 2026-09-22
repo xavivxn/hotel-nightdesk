@@ -28,6 +28,8 @@ import type {
   SyncConfigureDevicePayload,
   SyncStatus,
   BackupStatus,
+  BackupRunResult,
+  BackupListItem,
 } from "./types";
 import { toApiError } from "./errors";
 
@@ -70,7 +72,6 @@ const LOCAL_ALWAYS = new Set([
   "sync_status",
   "sync_pull_now",
   "sync_configure_device",
-  "backup_status",
 ]);
 
 let sessionToken: string | null = null;
@@ -211,6 +212,9 @@ export const api = {
   syncConfigureDevice: (payload: SyncConfigureDevicePayload) =>
     cmd<void>("sync_configure_device", { payload }),
   backupStatus: () => cmd<BackupStatus>("backup_status"),
+  backupRunNow: () => cmd<BackupRunResult>("backup_run_now"),
+  backupList: () => cmd<BackupListItem[]>("backup_list"),
+  backupRestore: (backup_id: string) => cmd<void>("backup_restore", { payload: { backup_id } }),
   subscribeOperational: async (onChange: () => void) => {
     const mode = await getDeviceMode();
     if (mode !== "remote") return () => {};

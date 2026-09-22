@@ -152,7 +152,7 @@ mod tests {
         let conn = db::open(Path::new(":memory:")).unwrap();
         insert_user(&conn, &CreateUserPayload { username: "admin".into(), password: "Prueba-segura-123".into(), role: "admin".into() }).unwrap();
         insert_user(&conn, &CreateUserPayload { username: "recepcion".into(), password: "Prueba-segura-456".into(), role: "recepcion".into() }).unwrap();
-        AppState { db: Mutex::new(conn), auth: Mutex::new(AuthState::default()), sync: Mutex::new(None) }
+        AppState { db: Mutex::new(conn), auth: Mutex::new(AuthState::default()), sync: Mutex::new(None), backup: Mutex::new(None) }
     }
     fn credentials(user: &str, password: &str) -> LoginPayload { LoginPayload { username: user.into(), password: password.into() } }
 
@@ -196,7 +196,7 @@ mod tests {
     #[test]
     fn every_business_command_checks_session_and_admin_mutations_check_role() {
         let source = include_str!("commands.rs");
-        let admins = ["save_room", "save_rate_plan", "save_product", "set_product_active", "add_charge", "delete_charge", "save_settings", "print_test"];
+        let admins = ["save_room", "save_rate_plan", "save_product", "set_product_active", "add_charge", "delete_charge", "save_settings", "print_test", "backup_run_now", "backup_list", "backup_restore"];
         let public = [
             "device_mode_get",
             "device_mode_set",
@@ -207,7 +207,6 @@ mod tests {
             "sync_status",
             "sync_pull_now",
             "sync_configure_device",
-            "backup_status",
         ];
         for section in source.split("#[tauri::command]").skip(1) {
             let name = section.split("pub ").nth(1).unwrap().trim_start_matches("async ").trim_start_matches("fn ").split('(').next().unwrap();

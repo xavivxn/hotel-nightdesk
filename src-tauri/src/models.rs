@@ -464,4 +464,27 @@ pub struct BackupStatus {
     pub last_remote_at: Option<String>,
     pub pending: i64,
     pub last_error: Option<String>,
+    pub ready: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BackupRunResult {
+    pub backup_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BackupRestorePayload {
+    pub backup_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupListItem {
+    pub backup_id: String,
+    pub created_at: String,
+    pub status: String,
+    pub size_bytes: i64,
+    pub checksum: String,
+    pub schema_version: String,
+    pub uploaded_at: Option<String>,
+    pub remote_path: Option<String>,
 }

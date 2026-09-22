@@ -3,6 +3,7 @@ import { previewBill as previewBillLocal } from "./billing";
 import { fail } from "./errors";
 import type {
   AppSettings,
+  BackupStatus,
   BillPreview,
   BoardRoom,
   Charge,
@@ -44,6 +45,9 @@ const FORBIDDEN_OPS = new Set([
   "auth_setup",
   "auth_setup_required",
   "daily_report",
+  "backup_run_now",
+  "backup_list",
+  "backup_restore",
 ]);
 
 export function clearSupabaseClient() {
@@ -178,6 +182,20 @@ export async function supabaseInvoke<T>(name: string, args: Record<string, unkno
         app_version: "0.1.0",
         schema_migrations: ["supabase"],
       } satisfies ContractInfo as T;
+    case "backup_status": {
+      if (!authSession || authSession.user.role !== "admin") fail("session_expired", "Iniciá sesión para consultar los respaldos");
+      // I08 inserts the manifest only after Storage confirms the encrypted object.
+      const { data, error } = await sb().from("backups").select("backuped_at").order("backuped_at", { ascending: false }).limit(1);
+      if (error) fail("storage", "No se pudo consultar el estado de respaldos en Supabase");
+      return {
+        last_local_at: null,
+        last_remote_at: data?.[0]?.backuped_at ?? null,
+        pending: 0,
+        last_error: null,
+        // Remote admin consults confirmed copies; «Respaldar ahora» is reception-only.
+        ready: false,
+      } satisfies BackupStatus as T;
+    }
     case "list_rooms": {
       const { data, error } = await sb().from("rooms").select("*").order("number");
       if (error) fail("storage", error.message);

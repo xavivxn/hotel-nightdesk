@@ -273,6 +273,21 @@ export type BackupStatus = {
   last_remote_at: string | null;
   pending: number;
   last_error: string | null;
+  /** False until the local backup engine can actually create a snapshot. */
+  ready?: boolean;
+};
+
+export type BackupRunResult = { backup_id: string };
+
+export type BackupListItem = {
+  backup_id: string;
+  created_at: string;
+  status: string;
+  size_bytes: number;
+  checksum: string;
+  schema_version: string;
+  uploaded_at: string | null;
+  remote_path: string | null;
 };
 
 export type HashPasswordResult = { hash: string };

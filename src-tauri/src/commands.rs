@@ -459,11 +459,67 @@ pub fn sync_configure_device(state: State<AppState>, app: AppHandle, payload: Sy
 }
 
 #[tauri::command]
-pub fn backup_status() -> AppResult<BackupStatus> {
-    Ok(BackupStatus {
-        last_local_at: None,
-        last_remote_at: None,
-        pending: 0,
-        last_error: Some("Respaldos pendientes de I08".into()),
-    })
+pub fn backup_status(state: State<AppState>, session_token: Option<String>, app: AppHandle) -> AppResult<BackupStatus> {
+    crate::auth::require(&state, session_token.as_deref(), false)?;
+    let data_dir = app_data_dir(&app)?;
+    let conn = conn(&state);
+    crate::backup::status(&conn, &data_dir)
+}
+
+#[tauri::command]
+pub fn backup_run_now(state: State<AppState>, session_token: Option<String>, app: AppHandle) -> AppResult<BackupRunResult> {
+    crate::auth::require(&state, session_token.as_deref(), true)?;
+    let mode = service::device_mode_get(&conn(&state))?;
+    if mode.as_deref() != Some("reception") {
+        return Err(AppError::forbidden("Los respaldos solo se generan en el equipo de recepción"));
+    }
+    maybe_start_backup(&state, &app)?;
+    let guard = state.backup.lock().expect("backup lock");
+    let handle = guard
+        .as_ref()
+        .ok_or_else(|| AppError::storage("Motor de respaldos no disponible"))?;
+    handle.run_now()
+}
+
+#[tauri::command]
+pub fn backup_list(state: State<AppState>, session_token: Option<String>) -> AppResult<Vec<BackupListItem>> {
+    crate::auth::require(&state, session_token.as_deref(), true)?;
+    crate::backup::list_local(&conn(&state))
+}
+
+#[tauri::command]
+pub fn backup_restore(state: State<AppState>, session_token: Option<String>, app: AppHandle, payload: BackupRestorePayload) -> AppResult<()> {
+    crate::auth::require(&state, session_token.as_deref(), true)?;
+    let mode = service::device_mode_get(&conn(&state))?;
+    if mode.as_deref() != Some("reception") {
+        return Err(AppError::forbidden("La restauración solo se hace en el equipo de recepción"));
+    }
+    let data_dir = app_data_dir(&app)?;
+    let db_path = data_dir.join("nightdesk.db");
+    // Release DB lock before restore swaps the file.
+    drop(conn(&state));
+    let mut auth = state.auth.lock().expect("auth lock");
+    crate::backup::restore_backup(&db_path, &data_dir, &payload.backup_id, &mut auth)?;
+    drop(auth);
+    // Re-open connection after restore.
+    let mut slot = state.db.lock().expect("db lock");
+    *slot = crate::db::open(&db_path)?;
+    Ok(())
+}
+
+fn maybe_start_backup(state: &AppState, app: &AppHandle) -> AppResult<()> {
+    let data_dir = app_data_dir(app)?;
+    let mode = service::device_mode_get(&conn(state))?;
+    if !crate::backup::should_start(mode.as_deref()) {
+        return Ok(());
+    }
+    let mut slot = state.backup.lock().expect("backup lock");
+    if slot.is_none() {
+        *slot = Some(crate::backup::start(
+            app.clone(),
+            data_dir.join("nightdesk.db"),
+            data_dir,
+        )?);
+    }
+    Ok(())
 }

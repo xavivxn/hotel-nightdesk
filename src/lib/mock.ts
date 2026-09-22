@@ -19,6 +19,9 @@ import type {
   Reservation,
   Room,
   Stay,
+  BackupListItem,
+  BackupRunResult,
+  BackupStatus,
 } from "./types";
 
 type Db = {
@@ -688,14 +691,60 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
       localStorage.setItem("nightdesk.device_config", "1");
       return;
     }
-    case "backup_status":
+    case "backup_status": {
+      const queue = mockBackupQueue();
+      const lastLocal = queue[0]?.created_at ?? null;
+      const lastRemote = queue.find((b) => b.uploaded_at)?.uploaded_at ?? null;
+      const pending = queue.filter((b) => b.status === "pending_upload" || b.status === "failed").length;
       return {
-        last_local_at: null,
-        last_remote_at: null,
-        pending: 0,
-        last_error: "Respaldos pendientes de I08",
+        last_local_at: lastLocal,
+        last_remote_at: lastRemote,
+        pending,
+        last_error: null,
+        ready: true,
+      } satisfies BackupStatus;
+    }
+    case "backup_run_now": {
+      const id = crypto.randomUUID();
+      const at = nowIso();
+      const item: BackupListItem = {
+        backup_id: id,
+        created_at: at,
+        status: "pending_upload",
+        size_bytes: 12_345,
+        checksum: "mock",
+        schema_version: "016",
+        uploaded_at: null,
+        remote_path: null,
       };
+      const queue = mockBackupQueue();
+      queue.unshift(item);
+      localStorage.setItem(BACKUP_KEY, JSON.stringify(queue.slice(0, 7)));
+      return { backup_id: id } satisfies BackupRunResult;
+    }
+    case "backup_list":
+      return mockBackupQueue();
+    case "backup_restore": {
+      const payload = args.payload as { backup_id?: string } | undefined;
+      const backupId = String(payload?.backup_id ?? args.backup_id ?? "");
+      const found = mockBackupQueue().find((b) => b.backup_id === backupId);
+      if (!found) fail("not_found", "No se encontró ese respaldo local");
+      return;
+    }
     default:
       fail(`Comando no implementado: ${name}`);
+  }
+}
+
+const BACKUP_KEY = "nightdesk.mock.backups";
+
+function mockBackupQueue(): BackupListItem[] {
+  try {
+    const raw = localStorage.getItem(BACKUP_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as BackupListItem[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
   }
 }

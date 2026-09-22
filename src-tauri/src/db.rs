@@ -80,6 +80,10 @@ const MIGRATIONS: &[Migration] = &[
         id: "015_catalog_audit",
         sql: include_str!("../migrations/015_catalog_audit.sql"),
     },
+    Migration {
+        id: "016_backup",
+        sql: include_str!("../migrations/016_backup.sql"),
+    },
 ];
 
 pub fn open(db_path: &Path) -> AppResult<Connection> {

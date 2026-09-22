@@ -74,6 +74,46 @@ pub fn device_configured(app_data: &Path) -> bool {
     device_path(app_data).is_file()
 }
 
+fn backup_key_path(app_data: &Path) -> PathBuf {
+    app_data.join("backup_aes_key.json")
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BackupKeyFile {
+    /// Hex-encoded 32-byte AES-256 key. Never shown in UI.
+    key_hex: String,
+}
+
+/// Ensures a 32-byte AES key exists under app data. Generates one on first use.
+pub fn ensure_backup_key(app_data: &Path) -> AppResult<[u8; 32]> {
+    let path = backup_key_path(app_data);
+    if path.is_file() {
+        let raw = std::fs::read_to_string(&path).map_err(|e| AppError::storage(e.to_string()))?;
+        let file: BackupKeyFile = serde_json::from_str(&raw).map_err(|_| AppError::storage("Clave de respaldo inválida"))?;
+        let bytes = hex::decode(file.key_hex.trim()).map_err(|_| AppError::storage("Clave de respaldo inválida"))?;
+        if bytes.len() != 32 {
+            return Err(AppError::storage("Clave de respaldo inválida"));
+        }
+        let mut out = [0u8; 32];
+        out.copy_from_slice(&bytes);
+        return Ok(out);
+    }
+    use rand_core::{OsRng, RngCore};
+    let mut key = [0u8; 32];
+    OsRng.fill_bytes(&mut key);
+    std::fs::create_dir_all(app_data).map_err(|e| AppError::storage(e.to_string()))?;
+    let body = serde_json::to_string_pretty(&BackupKeyFile {
+        key_hex: hex::encode(key),
+    })
+    .map_err(|e| AppError::msg(e.to_string()))?;
+    std::fs::write(&path, body).map_err(|e| AppError::storage(e.to_string()))?;
+    Ok(key)
+}
+
+pub fn backup_key_configured(app_data: &Path) -> bool {
+    backup_key_path(app_data).is_file()
+}
+
 pub fn save_device(
     app_data: &Path,
     project_url: &str,

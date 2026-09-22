@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/Button";
+import { BackupPanel } from "@/components/backup/BackupPanel";
 import { Field, Input, Select, Textarea } from "@/components/ui/Field";
 import { api } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
@@ -285,6 +286,7 @@ export function SettingsPage({
             </Button>
           </section>
         )}
+        <BackupPanel deviceMode={deviceMode} />
       </div>
       {error ? <p className="mt-4 text-[var(--danger)]">{error}</p> : null}
       {notice ? <p className="mt-4 text-sm text-[var(--muted)]">{notice}</p> : null}

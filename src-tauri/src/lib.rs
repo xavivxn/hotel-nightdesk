@@ -1,5 +1,6 @@
 mod billing;
 mod auth;
+mod backup;
 mod commands;
 mod credentials;
 mod db;
@@ -18,6 +19,7 @@ pub struct AppState {
     pub db: Mutex<Connection>,
     pub auth: Mutex<auth::AuthState>,
     pub sync: Mutex<Option<sync::worker::SyncHandle>>,
+    pub backup: Mutex<Option<backup::BackupHandle>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -35,10 +37,16 @@ pub fn run() {
             } else {
                 None
             };
+            let backup = if backup::should_start(mode.as_deref()) {
+                Some(backup::start(app.handle().clone(), db_path.clone(), dir.clone()).map_err(|e| e.to_string())?)
+            } else {
+                None
+            };
             app.manage(AppState {
                 db: Mutex::new(conn),
                 auth: Mutex::new(auth::AuthState::default()),
                 sync: Mutex::new(sync),
+                backup: Mutex::new(backup),
             });
             // Force window/taskbar icon (bundle icons alone often stay cached in `tauri dev` on Windows).
             if let Some(window) = app.get_webview_window("main") {
@@ -104,6 +112,9 @@ pub fn run() {
             commands::sync_pull_now,
             commands::sync_configure_device,
             commands::backup_status,
+            commands::backup_run_now,
+            commands::backup_list,
+            commands::backup_restore,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Nightdesk");

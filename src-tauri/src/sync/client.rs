@@ -142,6 +142,66 @@ impl SupabaseClient {
             .cloned()
             .ok_or_else(|| AppError::storage(OFFLINE))
     }
+
+    /// Upload bytes to the private `backups` Storage bucket. Returns after HTTP success.
+    pub fn upload_backup_object(&self, storage_path: &str, bytes: &[u8]) -> AppResult<()> {
+        let token = self.access_token()?;
+        let client = http()?;
+        let url = format!("{}/storage/v1/object/backups/{}", self.base, storage_path.trim_start_matches('/'));
+        let reply = client
+            .post(url)
+            .header("apikey", &self.anon_key)
+            .bearer_auth(&token)
+            .header("Content-Type", "application/octet-stream")
+            .header("x-upsert", "false")
+            .body(bytes.to_vec())
+            .send()
+            .map_err(|_| offline())?;
+        let status = reply.status();
+        if status.is_success() {
+            return Ok(());
+        }
+        let body: Value = reply.json().unwrap_or(Value::Null);
+        Err(map_http(status.as_u16(), &body))
+    }
+
+    pub fn insert_backup_manifest(&self, row: &Value) -> AppResult<()> {
+        let token = self.access_token()?;
+        let client = http()?;
+        let reply = client
+            .post(format!("{}/rest/v1/backups", self.base))
+            .header("apikey", &self.anon_key)
+            .bearer_auth(&token)
+            .header("Prefer", "return=minimal")
+            .header("Content-Type", "application/json")
+            .json(row)
+            .send()
+            .map_err(|_| offline())?;
+        let status = reply.status();
+        if status.is_success() || status.as_u16() == 201 {
+            return Ok(());
+        }
+        let body: Value = reply.json().unwrap_or(Value::Null);
+        Err(map_http(status.as_u16(), &body))
+    }
+
+    pub fn download_backup_object(&self, storage_path: &str) -> AppResult<Vec<u8>> {
+        let token = self.access_token()?;
+        let client = http()?;
+        let url = format!("{}/storage/v1/object/backups/{}", self.base, storage_path.trim_start_matches('/'));
+        let reply = client
+            .get(url)
+            .header("apikey", &self.anon_key)
+            .bearer_auth(&token)
+            .send()
+            .map_err(|_| offline())?;
+        if !reply.status().is_success() {
+            let status = reply.status().as_u16();
+            let body: Value = reply.json().unwrap_or(Value::Null);
+            return Err(map_http(status, &body));
+        }
+        Ok(reply.bytes().map_err(|_| offline())?.to_vec())
+    }
 }
 
 const PULL_TABLES: &[&str] = &[
