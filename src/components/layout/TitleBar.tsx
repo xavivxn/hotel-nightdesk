@@ -5,11 +5,15 @@ function isTauri() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
+function isWindows() {
+  return typeof navigator !== "undefined" && navigator.userAgent.includes("Windows");
+}
+
 export function TitleBar() {
-  const [active, setActive] = useState(false);
+  const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    setActive(isTauri());
+    setVisible(isTauri() && isWindows());
   }, []);
 
   async function win() {
@@ -17,14 +21,14 @@ export function TitleBar() {
     return getCurrentWindow();
   }
 
+  if (!visible) return null;
+
   return (
     <div
       data-tauri-drag-region
       className="app-chrome relative z-50 flex h-11 shrink-0 items-center justify-end border-b border-[var(--line)] bg-[var(--surface)]"
     >
       <div data-tauri-drag-region className="h-full min-w-0 flex-1" />
-      {active && (
-      <>
       <button
         type="button"
         aria-label="Minimizar"
@@ -60,8 +64,6 @@ export function TitleBar() {
       >
         <X size={14} />
       </button>
-      </>
-      )}
     </div>
   );
 }
