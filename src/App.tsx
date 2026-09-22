@@ -189,19 +189,21 @@ export default function App() {
     );
   } else if (!loaded) {
     body = (
-      <div className="login-stage login-stage--handoff grid h-full min-h-0 place-items-center p-6">
-        <div className="login-logo-slot">
-          <div className="login-logo-glow login-logo-glow--hold" />
-          <LoveNestLogo className="login-logo" />
+      <div className="login-stage login-stage--handoff h-full min-h-0 p-6">
+        <div className="login-stack">
+          <div className="login-logo-slot">
+            <div className="login-logo-glow login-logo-glow--hold" />
+            <LoveNestLogo className="login-logo" />
+          </div>
+          <p className="mt-4 text-sm text-[var(--muted)]" role="status">
+            {error || "Cargando tu espacio…"}
+          </p>
+          {error ? (
+            <Button className="mt-4" onClick={logout}>
+              Volver al acceso
+            </Button>
+          ) : null}
         </div>
-        <p className="mt-4 text-sm text-[var(--muted)]" role="status">
-          {error || "Cargando tu espacio…"}
-        </p>
-        {error ? (
-          <Button className="mt-4" onClick={logout}>
-            Volver al acceso
-          </Button>
-        ) : null}
       </div>
     );
   } else {

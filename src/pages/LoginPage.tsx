@@ -100,7 +100,7 @@ export function LoginPage({
   return (
     <div
       className={cn(
-        "login-stage grid h-full min-h-0 place-items-center overflow-auto p-6",
+        "login-stage h-full min-h-0 p-6",
         phase === "transitioning" && "login-stage--handoff",
         visual === "form-exit" && "login-stage--form-exit",
         visual === "logo-pulse" && "login-stage--logo-pulse",
@@ -114,7 +114,7 @@ export function LoginPage({
 
         <form
           className={cn(
-            "card login-card w-full space-y-4 rounded-lg p-8",
+            "card login-card w-full space-y-4 rounded-lg",
             phase === "error" && "login-card--shake",
           )}
           onSubmit={handleSubmit}

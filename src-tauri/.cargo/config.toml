@@ -1,0 +1,3 @@
+# macOS `cargo run` / `tauri dev` only. Makes Dock and Cmd+Tab use productName.
+[target.'cfg(target_os = "macos")']
+runner = "./scripts/macos-dev-app.sh"

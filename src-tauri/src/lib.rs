@@ -12,7 +12,7 @@ mod sync;
 
 use rusqlite::Connection;
 use std::sync::Mutex;
-use tauri::Manager;
+use tauri::{LogicalSize, Manager};
 
 pub struct AppState {
     pub db: Mutex<Connection>,
@@ -45,6 +45,13 @@ pub fn run() {
                 let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))
                     .map_err(|e| e.to_string())?;
                 let _ = window.set_icon(icon);
+                if let Some(name) = app.config().product_name.as_deref() {
+                    let _ = window.set_title(name);
+                }
+                let _ = window.set_fullscreen(false);
+                let _ = window.unmaximize();
+                let _ = window.set_size(LogicalSize::new(1680.0, 1050.0));
+                let _ = window.center();
             }
             Ok(())
         })

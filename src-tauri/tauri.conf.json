@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Nightdesk",
+  "productName": "Love Nestt Motel App",
   "version": "0.1.0",
   "identifier": "com.nightdesk.hotel",
   "build": {
@@ -13,13 +13,15 @@
     "windows": [
       {
         "label": "main",
-        "title": "",
-        "width": 1440,
-        "height": 900,
+        "title": "Love Nestt Motel App",
+        "width": 1680,
+        "height": 1050,
         "minWidth": 1100,
-        "minHeight": 720,
+        "minHeight": 820,
+        "center": true,
+        "maximized": false,
         "decorations": false,
-        "fullscreen": true
+        "fullscreen": false
       }
     ],
     "security": {
