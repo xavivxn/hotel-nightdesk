@@ -114,6 +114,22 @@ pub fn backup_key_configured(app_data: &Path) -> bool {
     backup_key_path(app_data).is_file()
 }
 
+/// Writes the custodian AES-256 key (64 hex chars). Overwrites the local file. Never returns the key.
+pub fn import_backup_key(app_data: &Path, key_hex: &str) -> AppResult<()> {
+    let cleaned: String = key_hex.chars().filter(|c| !c.is_whitespace()).collect();
+    let bytes = hex::decode(cleaned.trim()).map_err(|_| AppError::msg("La clave debe ser 64 caracteres hexadecimales"))?;
+    if bytes.len() != 32 {
+        return Err(AppError::msg("La clave debe ser 64 caracteres hexadecimales"));
+    }
+    std::fs::create_dir_all(app_data).map_err(|e| AppError::storage(e.to_string()))?;
+    let body = serde_json::to_string_pretty(&BackupKeyFile {
+        key_hex: hex::encode(bytes),
+    })
+    .map_err(|e| AppError::msg(e.to_string()))?;
+    std::fs::write(backup_key_path(app_data), body).map_err(|e| AppError::storage(e.to_string()))?;
+    Ok(())
+}
+
 pub fn save_device(
     app_data: &Path,
     project_url: &str,
@@ -140,4 +156,31 @@ pub fn save_device(
     .map_err(|e| AppError::msg(e.to_string()))?;
     std::fs::write(device_path(app_data), body).map_err(|e| AppError::msg(e.to_string()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir() -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("nightdesk-creds-{nanos}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn import_backup_key_accepts_64_hex_and_rejects_short() {
+        let dir = temp_dir();
+        assert!(import_backup_key(&dir, "abcd").is_err());
+        let hex = "aa".repeat(32);
+        import_backup_key(&dir, &hex).unwrap();
+        let loaded = ensure_backup_key(&dir).unwrap();
+        assert_eq!(loaded, [0xaa; 32]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

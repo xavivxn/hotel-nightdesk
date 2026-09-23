@@ -119,6 +119,10 @@ impl SupabaseClient {
         if !PULL_TABLES.contains(&table) {
             return Err(AppError::msg("Tabla de pull inválida"));
         }
+        self.rest_select(table, query)
+    }
+
+    fn rest_select(&self, table: &str, query: &[(&str, String)]) -> AppResult<Vec<Value>> {
         let token = self.access_token()?;
         let client = http()?;
         let mut url = reqwest::Url::parse(&format!("{}/rest/v1/{table}", self.base))
@@ -183,6 +187,37 @@ impl SupabaseClient {
         }
         let body: Value = reply.json().unwrap_or(Value::Null);
         Err(map_http(status.as_u16(), &body))
+    }
+
+    pub fn list_backup_manifests(&self) -> AppResult<Vec<Value>> {
+        self.rest_select(
+            "backups",
+            &[
+                (
+                    "select",
+                    "backup_id,backuped_at,schema_version,size_bytes,checksum,storage_path,nonce_hex".into(),
+                ),
+                ("order", "backuped_at.desc".into()),
+                ("limit", "30".into()),
+            ],
+        )
+    }
+
+    pub fn fetch_backup_manifest(&self, backup_id: &str) -> AppResult<Value> {
+        let rows = self.rest_select(
+            "backups",
+            &[
+                (
+                    "select",
+                    "backup_id,backuped_at,schema_version,size_bytes,checksum,storage_path,nonce_hex".into(),
+                ),
+                ("backup_id", format!("eq.{backup_id}")),
+                ("limit", "1".into()),
+            ],
+        )?;
+        rows.into_iter()
+            .next()
+            .ok_or_else(|| AppError::not_found("No se encontró el manifiesto remoto"))
     }
 
     pub fn download_backup_object(&self, storage_path: &str) -> AppResult<Vec<u8>> {

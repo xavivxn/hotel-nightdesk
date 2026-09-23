@@ -475,6 +475,13 @@ pub struct BackupRunResult {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BackupRestorePayload {
     pub backup_id: String,
+    #[serde(default)]
+    pub source: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BackupImportKeyPayload {
+    pub key_hex: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -487,4 +494,10 @@ pub struct BackupListItem {
     pub schema_version: String,
     pub uploaded_at: Option<String>,
     pub remote_path: Option<String>,
+    #[serde(default = "default_backup_source")]
+    pub source: String,
+}
+
+fn default_backup_source() -> String {
+    "local".into()
 }

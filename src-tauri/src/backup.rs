@@ -189,10 +189,69 @@ pub fn list_local(conn: &Connection) -> AppResult<Vec<BackupListItem>> {
                 schema_version: r.get(5)?,
                 uploaded_at: r.get(6)?,
                 remote_path: r.get(7)?,
+                source: "local".into(),
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
+}
+
+pub fn list_backups(conn: &Connection, data_dir: &Path) -> AppResult<Vec<BackupListItem>> {
+    let mut items = list_local(conn)?;
+    if !credentials::device_configured(data_dir) {
+        return Ok(items);
+    }
+    let client = match SupabaseClient::from_device(credentials::load_device(data_dir)?) {
+        Ok(client) => client,
+        Err(_) => return Ok(items),
+    };
+    let remotes = match client.list_backup_manifests() {
+        Ok(rows) => rows,
+        Err(_) => return Ok(items),
+    };
+    let local_ids: std::collections::HashSet<String> =
+        items.iter().map(|item| item.backup_id.clone()).collect();
+    for row in remotes {
+        let backup_id = row
+            .get("backup_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if backup_id.is_empty() || local_ids.contains(&backup_id) {
+            continue;
+        }
+        items.push(BackupListItem {
+            backup_id,
+            created_at: row
+                .get("backuped_at")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            status: "uploaded".into(),
+            size_bytes: row.get("size_bytes").and_then(|v| v.as_i64()).unwrap_or(0),
+            checksum: row
+                .get("checksum")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            schema_version: row
+                .get("schema_version")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            uploaded_at: row
+                .get("backuped_at")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            remote_path: row
+                .get("storage_path")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            source: "remote".into(),
+        });
+    }
+    items.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    Ok(items)
 }
 
 pub fn run_backup_now(db_path: &Path, data_dir: &Path) -> AppResult<BackupRunResult> {
@@ -374,6 +433,19 @@ fn drain_once(db_path: &Path, data_dir: &Path) -> AppResult<()> {
             dt.month(),
             backup_id
         );
+        let mut manifest_path = enc.clone();
+        manifest_path.set_file_name(format!("{backup_id}.manifest.json"));
+        let nonce_hex = fs::read_to_string(&manifest_path)
+            .ok()
+            .and_then(|raw| serde_json::from_str::<Manifest>(&raw).ok())
+            .and_then(|m| m.nonce_hex);
+        let Some(nonce_hex) = nonce_hex else {
+            conn.execute(
+                "UPDATE backup_queue SET status='failed', last_error=?2 WHERE backup_id=?1",
+                params![backup_id, "Manifiesto local sin nonce de cifrado"],
+            )?;
+            continue;
+        };
         match client.upload_backup_object(&storage_path, &bytes) {
             Ok(()) => {
                 let row = serde_json::json!({
@@ -385,6 +457,7 @@ fn drain_once(db_path: &Path, data_dir: &Path) -> AppResult<()> {
                     "size_bytes": size_bytes,
                     "checksum": checksum,
                     "storage_path": storage_path,
+                    "nonce_hex": nonce_hex,
                 });
                 match client.insert_backup_manifest(&row) {
                     Ok(()) => {
@@ -392,8 +465,6 @@ fn drain_once(db_path: &Path, data_dir: &Path) -> AppResult<()> {
                             "UPDATE backup_queue SET status='uploaded', uploaded_at=?2, remote_path=?3, last_error=NULL WHERE backup_id=?1",
                             params![backup_id, db::now_rfc3339(), storage_path],
                         )?;
-                        let mut manifest_path = enc.clone();
-                        manifest_path.set_file_name(format!("{backup_id}.manifest.json"));
                         if let Ok(raw) = fs::read_to_string(&manifest_path) {
                             if let Ok(mut m) = serde_json::from_str::<Manifest>(&raw) {
                                 m.storage_path = Some(storage_path);
@@ -456,8 +527,22 @@ fn backups_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("backups")
 }
 
-/// Restore from a local queue entry (plaintext snapshot or encrypted artifact).
+/// Restore from a local queue entry or a remote Storage object.
 pub fn restore_backup(
+    live_db_path: &Path,
+    data_dir: &Path,
+    backup_id: &str,
+    source: &str,
+    auth: &mut crate::auth::AuthState,
+) -> AppResult<()> {
+    match source {
+        "" | "local" => restore_local(live_db_path, data_dir, backup_id, auth),
+        "remote" => restore_remote(live_db_path, data_dir, backup_id, auth),
+        _ => Err(AppError::msg("Origen de respaldo inválido")),
+    }
+}
+
+fn restore_local(
     live_db_path: &Path,
     data_dir: &Path,
     backup_id: &str,
@@ -489,18 +574,83 @@ pub fn restore_backup(
     } else {
         return Err(AppError::not_found("No se encontró el archivo del respaldo"));
     }
-    verify_integrity(&staging)?;
-    let got = sha256_file(&staging)?;
+    apply_verified_snapshot(live_db_path, &staging, &checksum, auth)
+}
+
+fn restore_remote(
+    live_db_path: &Path,
+    data_dir: &Path,
+    backup_id: &str,
+    auth: &mut crate::auth::AuthState,
+) -> AppResult<()> {
+    if !credentials::device_configured(data_dir) {
+        return Err(AppError::storage("Configurá el dispositivo de recepción para descargar copias remotas"));
+    }
+    if !credentials::backup_key_configured(data_dir) {
+        return Err(AppError::storage("Importá la clave de cifrado del custodio antes de restaurar"));
+    }
+    let client = SupabaseClient::from_device(credentials::load_device(data_dir)?)?;
+    let row = client.fetch_backup_manifest(backup_id)?;
+    let storage_path = row
+        .get("storage_path")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AppError::storage("El manifiesto remoto no incluye la ruta del objeto"))?;
+    let nonce = row
+        .get("nonce_hex")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| AppError::storage("El manifiesto remoto no incluye nonce de cifrado"))?;
+    let checksum = row
+        .get("checksum")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AppError::storage("El manifiesto remoto no incluye checksum"))?;
+    let bytes = client.download_backup_object(storage_path)?;
+    restore_from_encrypted(live_db_path, data_dir, backup_id, &bytes, nonce, checksum, auth)
+}
+
+/// Decrypt an encrypted artifact and swap it into the live DB. Used by remote restore and tests.
+pub fn restore_from_encrypted(
+    live_db_path: &Path,
+    data_dir: &Path,
+    backup_id: &str,
+    enc_bytes: &[u8],
+    nonce_hex: &str,
+    checksum: &str,
+    auth: &mut crate::auth::AuthState,
+) -> AppResult<()> {
+    if !credentials::backup_key_configured(data_dir) {
+        return Err(AppError::storage("Importá la clave de cifrado del custodio antes de restaurar"));
+    }
+    let key = credentials::ensure_backup_key(data_dir)?;
+    let dir = backups_dir(data_dir);
+    fs::create_dir_all(&dir)?;
+    let enc_staging = dir.join(format!("restore-{backup_id}.db.gz.enc"));
+    let staging = dir.join(format!("restore-{backup_id}.db"));
+    fs::write(&enc_staging, enc_bytes)?;
+    let decrypt = decrypt_file(&enc_staging, &staging, &key, nonce_hex);
+    let _ = fs::remove_file(&enc_staging);
+    decrypt?;
+    apply_verified_snapshot(live_db_path, &staging, checksum, auth)
+}
+
+fn apply_verified_snapshot(
+    live_db_path: &Path,
+    staging: &Path,
+    checksum: &str,
+    auth: &mut crate::auth::AuthState,
+) -> AppResult<()> {
+    verify_integrity(staging)?;
+    let got = sha256_file(staging)?;
     if got != checksum {
+        let _ = fs::remove_file(staging);
         return Err(AppError::storage("El checksum del respaldo no coincide"));
     }
     {
-        let check = Connection::open(&staging)?;
+        let check = Connection::open(staging)?;
         let tip = latest_schema(&check)?;
         motel_compatible_schema(&check, &tip)?;
     }
 
-    // Preserve current DB before swap.
     let pre = live_db_path.with_extension("pre-restore.bak");
     {
         let live = Connection::open(live_db_path)?;
@@ -510,10 +660,9 @@ pub fn restore_backup(
         live.backup(DatabaseName::Main, &pre, None)?;
     }
 
-    // Replace live file via restore API into a fresh connection, then reopen.
     {
         let mut live = Connection::open(live_db_path)?;
-        live.restore(DatabaseName::Main, &staging, None::<fn(_)>)?;
+        live.restore(DatabaseName::Main, staging, None::<fn(_)>)?;
         live.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
         clear_sync_state(&live)?;
     }
@@ -608,7 +757,7 @@ mod tests {
             assert_eq!(notes.as_deref(), Some("mutated"));
         }
         let mut auth = crate::auth::AuthState::default();
-        restore_backup(&db_path, &dir, &result.backup_id, &mut auth).unwrap();
+        restore_backup(&db_path, &dir, &result.backup_id, "local", &mut auth).unwrap();
         let conn = Connection::open(&db_path).unwrap();
         let notes: Option<String> = conn
             .query_row("SELECT notes FROM rooms WHERE id=1", [], |r| r.get(0))
@@ -629,5 +778,105 @@ mod tests {
         let st = status(&conn, &dir).unwrap();
         assert!(st.ready);
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn restore_encrypted_artifact_on_fresh_db() {
+        let source = temp_dir();
+        let source_db = source.join("nightdesk.db");
+        {
+            let conn = db::open(&source_db).unwrap();
+            conn.execute("UPDATE rooms SET notes='from-source' WHERE id=1", [])
+                .unwrap();
+        }
+        let result = run_backup_now(&source_db, &source).unwrap();
+        let key = credentials::ensure_backup_key(&source).unwrap();
+        let enc = fs::read(source.join("backups").join(format!("{}.db.gz.enc", result.backup_id))).unwrap();
+        let man: Manifest = serde_json::from_str(
+            &fs::read_to_string(source.join("backups").join(format!("{}.manifest.json", result.backup_id))).unwrap(),
+        )
+        .unwrap();
+
+        let dest = temp_dir();
+        let dest_db = dest.join("nightdesk.db");
+        {
+            let conn = db::open(&dest_db).unwrap();
+            conn.execute("UPDATE rooms SET notes='other-machine' WHERE id=1", [])
+                .unwrap();
+            conn.execute(
+                "INSERT INTO sync_state(key, value) VALUES('bootstrap_done','1')",
+                [],
+            )
+            .ok();
+        }
+        credentials::import_backup_key(&dest, &hex::encode(key)).unwrap();
+        let mut auth = crate::auth::AuthState::default();
+        restore_from_encrypted(
+            &dest_db,
+            &dest,
+            &result.backup_id,
+            &enc,
+            man.nonce_hex.as_deref().unwrap(),
+            &man.checksum,
+            &mut auth,
+        )
+        .unwrap();
+        let conn = Connection::open(&dest_db).unwrap();
+        let notes: Option<String> = conn
+            .query_row("SELECT notes FROM rooms WHERE id=1", [], |r| r.get(0))
+            .ok();
+        assert_eq!(notes.as_deref(), Some("from-source"));
+        let outbox: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sync_outbox", [], |r| r.get(0))
+            .unwrap_or(-1);
+        let state: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sync_state", [], |r| r.get(0))
+            .unwrap_or(-1);
+        assert_eq!(outbox, 0);
+        assert_eq!(state, 0);
+        let _ = fs::remove_dir_all(source);
+        let _ = fs::remove_dir_all(dest);
+    }
+
+    #[test]
+    fn restore_encrypted_wrong_key_keeps_live_db() {
+        let source = temp_dir();
+        let source_db = source.join("nightdesk.db");
+        let conn = db::open(&source_db).unwrap();
+        drop(conn);
+        let result = run_backup_now(&source_db, &source).unwrap();
+        let enc = fs::read(source.join("backups").join(format!("{}.db.gz.enc", result.backup_id))).unwrap();
+        let man: Manifest = serde_json::from_str(
+            &fs::read_to_string(source.join("backups").join(format!("{}.manifest.json", result.backup_id))).unwrap(),
+        )
+        .unwrap();
+
+        let dest = temp_dir();
+        let dest_db = dest.join("nightdesk.db");
+        {
+            let conn = db::open(&dest_db).unwrap();
+            conn.execute("UPDATE rooms SET notes='keep-me' WHERE id=1", [])
+                .unwrap();
+        }
+        credentials::import_backup_key(&dest, &hex::encode([9u8; 32])).unwrap();
+        let mut auth = crate::auth::AuthState::default();
+        let err = restore_from_encrypted(
+            &dest_db,
+            &dest,
+            &result.backup_id,
+            &enc,
+            man.nonce_hex.as_deref().unwrap(),
+            &man.checksum,
+            &mut auth,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("descifrar") || err.to_string().contains("checksum"));
+        let conn = Connection::open(&dest_db).unwrap();
+        let notes: Option<String> = conn
+            .query_row("SELECT notes FROM rooms WHERE id=1", [], |r| r.get(0))
+            .ok();
+        assert_eq!(notes.as_deref(), Some("keep-me"));
+        let _ = fs::remove_dir_all(source);
+        let _ = fs::remove_dir_all(dest);
     }
 }

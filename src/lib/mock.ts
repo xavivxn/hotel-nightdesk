@@ -716,6 +716,7 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
         schema_version: "016",
         uploaded_at: null,
         remote_path: null,
+        source: "local",
       };
       const queue = mockBackupQueue();
       queue.unshift(item);
@@ -723,12 +724,20 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
       return { backup_id: id } satisfies BackupRunResult;
     }
     case "backup_list":
-      return mockBackupQueue();
+      return mockBackupQueue().map((item) => ({ ...item, source: item.source ?? "local" }));
+    case "backup_import_key": {
+      const payload = args.payload as { key_hex?: string } | undefined;
+      const hex = String(payload?.key_hex ?? "").replace(/\s/g, "");
+      if (!/^[0-9a-fA-F]{64}$/.test(hex)) fail("validation", "La clave debe ser 64 caracteres hexadecimales");
+      return;
+    }
     case "backup_restore": {
-      const payload = args.payload as { backup_id?: string } | undefined;
+      const payload = args.payload as { backup_id?: string; source?: string } | undefined;
       const backupId = String(payload?.backup_id ?? args.backup_id ?? "");
+      const source = payload?.source ?? "local";
+      if (source !== "local" && source !== "remote") fail("validation", "Origen de respaldo inválido");
       const found = mockBackupQueue().find((b) => b.backup_id === backupId);
-      if (!found) fail("not_found", "No se encontró ese respaldo local");
+      if (!found) fail("not_found", source === "remote" ? "No se encontró ese respaldo remoto" : "No se encontró ese respaldo local");
       return;
     }
     default:

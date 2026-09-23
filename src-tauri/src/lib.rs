@@ -114,6 +114,7 @@ pub fn run() {
             commands::backup_status,
             commands::backup_run_now,
             commands::backup_list,
+            commands::backup_import_key,
             commands::backup_restore,
         ])
         .run(tauri::generate_context!())

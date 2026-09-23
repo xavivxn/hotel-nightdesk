@@ -1,9 +1,10 @@
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
+import { Field, PasswordInput } from "@/components/ui/Field";
 import { api } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
-import type { BackupListItem, BackupStatus, DeviceMode } from "@/lib/types";
-import { BookOpen, Cloud, HardDrive, RefreshCw, RotateCcw, ShieldAlert } from "lucide-react";
+import type { BackupListItem, BackupSource, BackupStatus, DeviceMode } from "@/lib/types";
+import { BookOpen, Cloud, HardDrive, KeyRound, RefreshCw, RotateCcw, ShieldAlert } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 const MAX_REMOTE_AGE_MS = 24 * 60 * 60 * 1000;
@@ -33,6 +34,10 @@ function statusLabel(status: string) {
   }
 }
 
+function itemSource(item: BackupListItem): BackupSource {
+  return item.source === "remote" ? "remote" : "local";
+}
+
 export function BackupPanel({ deviceMode }: { deviceMode: DeviceMode }) {
   const [status, setStatus] = useState<BackupStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -41,6 +46,10 @@ export function BackupPanel({ deviceMode }: { deviceMode: DeviceMode }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [guideOpen, setGuideOpen] = useState(false);
   const [restoreOpen, setRestoreOpen] = useState(false);
+  const [keyOpen, setKeyOpen] = useState(false);
+  const [keyHex, setKeyHex] = useState("");
+  const [showKey, setShowKey] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [items, setItems] = useState<BackupListItem[]>([]);
   const [listLoading, setListLoading] = useState(false);
   const [restoringId, setRestoringId] = useState<string | null>(null);
@@ -89,7 +98,7 @@ export function BackupPanel({ deviceMode }: { deviceMode: DeviceMode }) {
   }
 
   async function openRestore() {
-    if (!local || !status?.ready) return;
+    if (!local) return;
     setRestoreOpen(true);
     setConfirmId(null);
     setListLoading(true);
@@ -104,13 +113,13 @@ export function BackupPanel({ deviceMode }: { deviceMode: DeviceMode }) {
     }
   }
 
-  async function restoreBackup(backupId: string) {
+  async function restoreBackup(item: BackupListItem) {
     if (!local || restoringId) return;
-    setRestoringId(backupId);
+    setRestoringId(item.backup_id);
     setError(null);
     setNotice(null);
     try {
-      await api.backupRestore(backupId);
+      await api.backupRestore(item.backup_id, itemSource(item));
       setNotice("Restauración aplicada. Volvé a iniciar sesión y verificá habitaciones, cuentas e historial.");
       setRestoreOpen(false);
       setConfirmId(null);
@@ -119,6 +128,25 @@ export function BackupPanel({ deviceMode }: { deviceMode: DeviceMode }) {
       setError(String(cause));
     } finally {
       setRestoringId(null);
+    }
+  }
+
+  async function importKey() {
+    if (!local || importing) return;
+    setImporting(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await api.backupImportKey(keyHex);
+      setNotice("Clave de cifrado importada. No se vuelve a mostrar.");
+      setKeyHex("");
+      setShowKey(false);
+      setKeyOpen(false);
+      await refresh();
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -179,9 +207,14 @@ export function BackupPanel({ deviceMode }: { deviceMode: DeviceMode }) {
             <HardDrive size={16} aria-hidden="true" /> {running ? "Solicitando…" : "Respaldar ahora"}
           </Button>
         )}
-        {local && status?.ready && (
+        {local && (
           <Button variant="danger" onClick={() => void openRestore()} disabled={running || Boolean(restoringId)}>
             <RotateCcw size={16} aria-hidden="true" /> Restaurar copia
+          </Button>
+        )}
+        {local && (
+          <Button variant="secondary" onClick={() => setKeyOpen(true)} disabled={importing}>
+            <KeyRound size={16} aria-hidden="true" /> Importar clave
           </Button>
         )}
         <Button variant="secondary" onClick={() => setGuideOpen(true)}>
@@ -195,8 +228,8 @@ export function BackupPanel({ deviceMode }: { deviceMode: DeviceMode }) {
       <Dialog open={guideOpen} title="Recuperar una copia" subtitle="Solo administración, en el equipo de recepción" onClose={() => setGuideOpen(false)}>
         <ol className="list-decimal space-y-3 pl-5 text-sm leading-relaxed">
           <li>Detené la operación y avisá al personal. No hagas ingresos, cierres ni cambios mientras se restaura.</li>
-          <li>Elegí una copia cuya fecha y origen reconozcas. Conservá la clave de cifrado fuera de esta PC.</li>
-          <li>Usá «Restaurar copia» en esta pantalla: el sistema valida integridad y checksum antes de reemplazar la base.</li>
+          <li>Pedí al custodio la clave AES (64 caracteres hex). Importala en esta PC; no la guardes en el repositorio ni en la base.</li>
+          <li>Elegí una copia local o una confirmada en Storage. El sistema valida integridad y checksum antes de reemplazar la base.</li>
           <li>Volvé a iniciar sesión. Comprobá habitaciones, cuentas, historial y tickets.</li>
           <li>La sincronización se reinicia sin reenviar la outbox antigua.</li>
         </ol>
@@ -209,9 +242,46 @@ export function BackupPanel({ deviceMode }: { deviceMode: DeviceMode }) {
       </Dialog>
 
       <Dialog
+        open={keyOpen}
+        title="Importar clave de cifrado"
+        subtitle="La entrega el custodio (D10). Se guarda en este equipo y no se vuelve a mostrar."
+        onClose={() => {
+          if (importing) return;
+          setKeyOpen(false);
+          setKeyHex("");
+          setShowKey(false);
+        }}
+      >
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void importKey();
+          }}
+        >
+          <Field label="Clave AES (hex)">
+            <PasswordInput
+              required
+              autoComplete="off"
+              spellCheck={false}
+              value={keyHex}
+              show={showKey}
+              onToggle={() => setShowKey((value) => !value)}
+              onChange={(event) => setKeyHex(event.target.value)}
+              placeholder="64 caracteres hexadecimales"
+            />
+          </Field>
+          <p className="text-xs text-[var(--muted)]">En otra PC, esta clave sustituye la generada en el primer respaldo local.</p>
+          <Button type="submit" disabled={importing || keyHex.trim().length === 0} className="w-full">
+            {importing ? "Importando…" : "Guardar clave"}
+          </Button>
+        </form>
+      </Dialog>
+
+      <Dialog
         open={restoreOpen}
-        title="Restaurar una copia local"
-        subtitle="Reemplaza la base operativa de esta PC. Acción irreversible sin otra copia previa."
+        title="Restaurar una copia"
+        subtitle="Reemplaza la base operativa de esta PC. Detené ingresos y cierres antes de confirmar."
         onClose={() => {
           if (restoringId) return;
           setRestoreOpen(false);
@@ -224,16 +294,16 @@ export function BackupPanel({ deviceMode }: { deviceMode: DeviceMode }) {
           <div className="overflow-y-auto p-6 scrollbar-thin">
             {listLoading && <p className="text-sm text-[var(--muted)]">Cargando copias…</p>}
             {!listLoading && items.length === 0 && (
-              <p className="text-sm text-[var(--muted)]">Todavía no hay copias locales en la cola.</p>
+              <p className="text-sm text-[var(--muted)]">No hay copias locales ni manifiestos remotos para listar.</p>
             )}
             <ul className="space-y-3">
               {items.map((item) => (
-                <li key={item.backup_id} className="rounded-lg border border-[var(--line)] bg-[var(--surface-2)] p-4">
+                <li key={`${itemSource(item)}-${item.backup_id}`} className="rounded-lg border border-[var(--line)] bg-[var(--surface-2)] p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <p className="font-mono text-sm tabular-nums">{formatDateTime(item.created_at)}</p>
                       <p className="mt-1 text-xs text-[var(--muted)]">
-                        {statusLabel(item.status)} · esquema {item.schema_version} · {item.size_bytes.toLocaleString("es-PY")} bytes
+                        {itemSource(item) === "remote" ? "Storage" : "Esta PC"} · {statusLabel(item.status)} · esquema {item.schema_version} · {item.size_bytes.toLocaleString("es-PY")} bytes
                       </p>
                       <p className="mt-1 font-mono text-[11px] text-[var(--muted)]">{item.backup_id}</p>
                     </div>
@@ -243,7 +313,7 @@ export function BackupPanel({ deviceMode }: { deviceMode: DeviceMode }) {
                           variant="danger"
                           size="sm"
                           disabled={Boolean(restoringId)}
-                          onClick={() => void restoreBackup(item.backup_id)}
+                          onClick={() => void restoreBackup(item)}
                         >
                           {restoringId === item.backup_id ? "Restaurando…" : "Confirmar restauración"}
                         </Button>
@@ -253,7 +323,7 @@ export function BackupPanel({ deviceMode }: { deviceMode: DeviceMode }) {
                       </div>
                     ) : (
                       <Button variant="danger" size="sm" disabled={Boolean(restoringId)} onClick={() => setConfirmId(item.backup_id)}>
-                        Restaurar
+                        {itemSource(item) === "remote" ? "Restaurar desde Storage" : "Restaurar"}
                       </Button>
                     )}
                   </div>

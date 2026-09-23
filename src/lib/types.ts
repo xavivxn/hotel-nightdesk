@@ -279,6 +279,10 @@ export type BackupStatus = {
 
 export type BackupRunResult = { backup_id: string };
 
+export type BackupSource = "local" | "remote";
+
+export type BackupImportKeyPayload = { key_hex: string };
+
 export type BackupListItem = {
   backup_id: string;
   created_at: string;
@@ -288,6 +292,7 @@ export type BackupListItem = {
   schema_version: string;
   uploaded_at: string | null;
   remote_path: string | null;
+  source?: BackupSource;
 };
 
 export type HashPasswordResult = { hash: string };

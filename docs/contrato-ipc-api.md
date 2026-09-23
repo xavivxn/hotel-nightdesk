@@ -135,10 +135,11 @@ Solo tienen sentido en recepción salvo donde se indica. Seguir `nightdesk-add-c
 | `sync_status` | `{}` → `{ connected, pending_outbox, last_push_at, last_pull_at, last_error, configured, realtime_connected }` | Indicador de `AppShell`. `pending_outbox` se cuenta en SQLite; el resto sale del snapshot del worker. |
 | `sync_pull_now` | `{}` → `void` | Drena la outbox y hace pull. Espera hasta 20 s; sin worker o sin red → `storage`. Si el catálogo cambió, el worker emite `sync:catalog-updated` (Tauri → `window`). |
 | `hash_password` | `{ password }` + `operation_id?` → `{ hash }` | Argon2id, mismo formato que `auth.rs`. Siempre IPC local (también en modo remoto). Con `operation_id` UUID el salt es determinístico (reintento idempotente de alta de usuario). |
-| `backup_run_now` | `{}` → `{ backup_id }` | Admin, solo recepción. Snapshot Online Backup + cifrado; encola upload. Responde tras snapshot local verificado (no tras upload). |
+| `backup_run_now` | `{}` → `{ backup_id }` | Admin, solo recepción. Snapshot Online Backup + cifrado; encola upload. Responde tras snapshot local verificado (no tras upload). El manifiesto remoto incluye `nonce_hex`. |
 | `backup_status` | `{}` → `{ last_local_at, last_remote_at, pending, last_error, ready }` | Recepción: cola local + último remoto confirmado; `ready: true` cuando el motor tiene clave. Admin remoto: lee la última fila de `public.backups`; `last_local_at`/`pending` no observables; `ready: false`. |
-| `backup_list` | `{}` → `BackupListItem[]` | Admin, solo recepción. Cola local (hasta 30). Remoto → `forbidden`. |
-| `backup_restore` | `{ backup_id }` → `void` | Admin, solo recepción. Valida manifiesto + integrity; swap DB; limpia sync; revoca sesiones. Remoto → `forbidden`. |
+| `backup_list` | `{}` → `BackupListItem[]` | Admin, solo recepción. Cola local + manifiestos remotos (`source: local \| remote`). Remoto → `forbidden`. |
+| `backup_import_key` | `{ key_hex }` → `void` | Admin, solo recepción. Importa la clave AES-256 del custodio (64 hex). No se devuelve. Remoto → `forbidden`. |
+| `backup_restore` | `{ backup_id, source? }` → `void` | Admin, solo recepción. `source` default `local`. `remote`: descarga Storage, descifra, integrity/checksum, swap, limpia sync, revoca sesiones y despierta bootstrap. Remoto → `forbidden`. |
 
 ## Payloads de mutación (v2)
 
@@ -189,5 +190,5 @@ Consultas (`list_board`, `list_rooms`, `preview_bill`, `get_stay_detail`, `list_
 - **N07:** hecho (modo remoto, `supabaseInvoke`, Auth, catálogo remoto).
 - **I11:** hecho (write-through recepción, `catalog_write` + auditoría, `hash_password` con salt por `operation_id`, contrato v2).
 - **I07:** hecho (worker push/pull/Realtime, bootstrap, `sync_status` / `sync_pull_now` / `sync_configure_device`).
-- **I08 / I05:** hecho en código (`backup_run_now` / `backup_status` / `backup_list` / `backup_restore`, cola, cifrado, upload Storage, retención local 7). Pendiente ops: deploy/cron Edge `backup-retention`; E2E restauración desde Storage en otro equipo.
+- **I08 / I05:** hecho (`backup_run_now` / `backup_status` / `backup_list` / `backup_import_key` / `backup_restore` local y `source=remote`, cola, cifrado, upload Storage con `nonce_hex`, retención local 7). Pendiente ops: deploy/cron Edge `backup-retention`.
 - No duplicar reglas fuera de `service.rs`. No reintroducir `/api/v1` ni WireGuard.

@@ -47,6 +47,7 @@ const FORBIDDEN_OPS = new Set([
   "daily_report",
   "backup_run_now",
   "backup_list",
+  "backup_import_key",
   "backup_restore",
 ]);
 

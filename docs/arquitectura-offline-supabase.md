@@ -1,7 +1,7 @@
 # Operación local, administración remota y respaldos (Supabase)
 
 Fecha: 17 de septiembre de 2026.
-Estado: requisitos y arquitectura acordados. I12 y N12 documentados/aplicados; I06 (`014_sync`, outbox local), I07 (worker push/pull/Realtime) e I11 (write-through / `catalog_write` / auditoría) implementados. N07 modo remoto hecho. Pendiente I08 (backups).
+Estado: requisitos y arquitectura acordados. I12 y N12 documentados/aplicados; I06 (`014_sync`, outbox local), I07 (worker push/pull/Realtime) e I11 (write-through / `catalog_write` / auditoría) implementados. N07 modo remoto hecho. I05/I08/I08.3 hechos en código (snapshot, upload, restore local y desde Storage). Pendiente ops: cron de retención remota.
 
 Este documento sustituye el 17/09/2026 a [arquitectura-offline-vpn-backups.md](arquitectura-offline-vpn-backups.md). La operación del motel sigue sin depender de internet. Supabase se usa para que el admin consulte y edite catálogo a distancia, para replicar la operación en lectura y para el respaldo diario cifrado. No describe funciones ya terminadas ni modifica el presupuesto comercial.
 

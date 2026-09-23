@@ -482,9 +482,21 @@ pub fn backup_run_now(state: State<AppState>, session_token: Option<String>, app
 }
 
 #[tauri::command]
-pub fn backup_list(state: State<AppState>, session_token: Option<String>) -> AppResult<Vec<BackupListItem>> {
+pub fn backup_list(state: State<AppState>, session_token: Option<String>, app: AppHandle) -> AppResult<Vec<BackupListItem>> {
     crate::auth::require(&state, session_token.as_deref(), true)?;
-    crate::backup::list_local(&conn(&state))
+    let data_dir = app_data_dir(&app)?;
+    crate::backup::list_backups(&conn(&state), &data_dir)
+}
+
+#[tauri::command]
+pub fn backup_import_key(state: State<AppState>, session_token: Option<String>, app: AppHandle, payload: BackupImportKeyPayload) -> AppResult<()> {
+    crate::auth::require(&state, session_token.as_deref(), true)?;
+    let mode = service::device_mode_get(&conn(&state))?;
+    if mode.as_deref() != Some("reception") {
+        return Err(AppError::forbidden("La clave de respaldo solo se importa en el equipo de recepción"));
+    }
+    let data_dir = app_data_dir(&app)?;
+    crate::credentials::import_backup_key(&data_dir, &payload.key_hex)
 }
 
 #[tauri::command]
@@ -496,14 +508,17 @@ pub fn backup_restore(state: State<AppState>, session_token: Option<String>, app
     }
     let data_dir = app_data_dir(&app)?;
     let db_path = data_dir.join("nightdesk.db");
+    let source = payload.source.as_deref().unwrap_or("local");
     // Release DB lock before restore swaps the file.
     drop(conn(&state));
     let mut auth = state.auth.lock().expect("auth lock");
-    crate::backup::restore_backup(&db_path, &data_dir, &payload.backup_id, &mut auth)?;
+    crate::backup::restore_backup(&db_path, &data_dir, &payload.backup_id, source, &mut auth)?;
     drop(auth);
     // Re-open connection after restore.
     let mut slot = state.db.lock().expect("db lock");
     *slot = crate::db::open(&db_path)?;
+    drop(slot);
+    wake_push(&state);
     Ok(())
 }
 

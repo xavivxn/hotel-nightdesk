@@ -30,6 +30,7 @@ import type {
   BackupStatus,
   BackupRunResult,
   BackupListItem,
+  BackupSource,
 } from "./types";
 import { toApiError } from "./errors";
 
@@ -214,7 +215,9 @@ export const api = {
   backupStatus: () => cmd<BackupStatus>("backup_status"),
   backupRunNow: () => cmd<BackupRunResult>("backup_run_now"),
   backupList: () => cmd<BackupListItem[]>("backup_list"),
-  backupRestore: (backup_id: string) => cmd<void>("backup_restore", { payload: { backup_id } }),
+  backupImportKey: (key_hex: string) => cmd<void>("backup_import_key", { payload: { key_hex } }),
+  backupRestore: (backup_id: string, source?: BackupSource) =>
+    cmd<void>("backup_restore", { payload: { backup_id, source } }),
   subscribeOperational: async (onChange: () => void) => {
     const mode = await getDeviceMode();
     if (mode !== "remote") return () => {};
