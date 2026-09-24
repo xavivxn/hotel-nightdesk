@@ -30,13 +30,13 @@ fn maybe_start_worker(state: &AppState, app: &AppHandle, data_dir: &std::path::P
         return Ok(());
     }
     let mut slot = state.sync.lock().expect("sync lock");
-    if slot.is_none() {
-        *slot = Some(crate::sync::worker::start(
-            app.clone(),
-            data_dir.join("nightdesk.db"),
-            data_dir.to_path_buf(),
-        )?);
-    }
+    // Replacing the handle drops the previous channel so a dead worker can start again
+    // after Supabase comes up or the credentials change.
+    *slot = Some(crate::sync::worker::start(
+        app.clone(),
+        data_dir.join("nightdesk.db"),
+        data_dir.to_path_buf(),
+    )?);
     Ok(())
 }
 

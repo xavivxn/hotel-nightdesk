@@ -538,7 +538,7 @@ export async function supabaseInvoke<T>(name: string, args: Record<string, unkno
       if (e1) fail("storage", e1.message);
       const { data: stays, error: e2 } = await sb()
         .from("stays")
-        .select("*, room:rooms(local_id, number, status), guest:guests(name), rate_plan:rate_plans(local_id, name, kind)")
+        .select("*, room:rooms(local_id, number, status), guest:guests(name), rate_plan:rate_plans!rate_plan_uid(local_id, name, kind)")
         .eq("status", "open");
       if (e2) fail("storage", e2.message);
       const byRoomUid = new Map((stays ?? []).map((s) => [String((s as { room_uid: string }).room_uid), s]));
@@ -622,7 +622,7 @@ export async function supabaseInvoke<T>(name: string, args: Record<string, unkno
     case "list_history": {
       let q = sb()
         .from("stays")
-        .select("*, room:rooms(local_id, number), guest:guests(name), rate_plan:rate_plans(local_id, name, kind)")
+        .select("*, room:rooms(local_id, number), guest:guests(name), rate_plan:rate_plans!rate_plan_uid(local_id, name, kind)")
         .eq("status", "closed")
         .order("check_out_at", { ascending: false })
         .limit(200);
@@ -666,7 +666,7 @@ export async function supabaseInvoke<T>(name: string, args: Record<string, unkno
       const stayId = Number(args.stay_id);
       const { data: stayRow, error } = await sb()
         .from("stays")
-        .select("*, room:rooms(local_id, number), guest:guests(name), rate_plan:rate_plans(*)")
+        .select("*, room:rooms(local_id, number), guest:guests(name), rate_plan:rate_plans!rate_plan_uid(*)")
         .eq("local_id", stayId)
         .maybeSingle();
       if (error) fail("storage", error.message);

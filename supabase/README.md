@@ -99,7 +99,7 @@ npx supabase db push
 
 Si el hosted ya tiene las migraciones N12, `db push` no debe reaplicarlas. URL y anon key van a I07 / `sync_configure_device` por canal seguro. Rotar la anon key desde el dashboard si se filtra; no commitearla.
 
-Usuarios Auth hosted: `admin@nightdesk.app` (`role=admin`) y `device@nightdesk.app` (`role=device`). Contraseñas y `device_id` solo por canal seguro; rotarlas al entregar.
+Usuarios Auth hosted: `lovenestt@gmail.com` (`role=admin`) y `device@nightdesk.app` (`role=device`). Contraseñas y `device_id` solo por canal seguro; rotarlas al entregar.
 
 Advisors: `npx supabase db advisors --linked --type security` o MCP `get_advisors`.
 

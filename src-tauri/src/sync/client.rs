@@ -87,7 +87,7 @@ impl SupabaseClient {
             .header("apikey", &self.anon_key)
             .json(&json!({"email": self.email, "password": self.password}))
             .send()
-            .map_err(|_| offline())?;
+            .map_err(|_| connect_failed())?;
         parse_auth_reply(reply, "No se pudo autenticar el dispositivo de recepción")
     }
 
@@ -98,7 +98,7 @@ impl SupabaseClient {
             .header("apikey", &self.anon_key)
             .json(&json!({"refresh_token": refresh_token}))
             .send()
-            .map_err(|_| offline())?;
+            .map_err(|_| connect_failed())?;
         parse_auth_reply(reply, "No se pudo renovar la sesión del dispositivo")
     }
 
@@ -303,6 +303,10 @@ fn offline() -> AppError {
     AppError::storage(OFFLINE)
 }
 
+fn connect_failed() -> AppError {
+    AppError::storage("No se pudo conectar con administración. Revisá la URL y que Supabase esté en marcha.")
+}
+
 pub fn validate_base(url: &str) -> AppResult<String> {
     let parsed = reqwest::Url::parse(url.trim()).map_err(|_| AppError::msg("URL de administración inválida"))?;
     let local = matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
@@ -314,12 +318,19 @@ pub fn validate_base(url: &str) -> AppResult<String> {
 
 fn parse_auth_reply(reply: reqwest::blocking::Response, forbidden: &str) -> AppResult<Session> {
     let status = reply.status();
-    let body: Value = reply.json().map_err(|_| offline())?;
+    let body: Value = reply.json().map_err(|_| {
+        AppError::storage("Administración no respondió con una sesión válida. Revisá la URL y la clave anónima.")
+    })?;
     if !status.is_success() {
         if status.as_u16() == 401 || status.as_u16() == 403 {
             return Err(AppError::forbidden(forbidden));
         }
-        return Err(offline());
+        let detail = body["error_description"]
+            .as_str()
+            .or_else(|| body["msg"].as_str())
+            .or_else(|| body["message"].as_str())
+            .unwrap_or("Administración rechazó el acceso del dispositivo");
+        return Err(AppError::storage(detail));
     }
     let access = body["access_token"]
         .as_str()

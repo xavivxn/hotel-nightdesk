@@ -102,11 +102,14 @@ fn run_worker(
     snapshot: Arc<Mutex<SyncSnapshot>>,
 ) -> AppResult<()> {
     let mut conn = open_worker_conn(&db_path)?;
-    let device_id = match client.device_id() {
-        Ok(id) => id,
-        Err(error) => {
-            remember_error(&snapshot, &error);
-            return Err(error);
+    let device_id = loop {
+        match client.device_id() {
+            Ok(id) => break id,
+            Err(error) => {
+                remember_error(&snapshot, &error);
+                eprintln!("sync worker: {error}");
+                std::thread::sleep(Duration::from_secs(5));
+            }
         }
     };
     let _ = run_cycle(&mut conn, client.as_ref(), &device_id, true, true, &app, &snapshot);
