@@ -137,6 +137,25 @@ fn apply_row(conn: &Connection, entity: &str, row: &Value, force: bool) -> AppRe
     }
 }
 
+/// If the remote room uid is new but the number already exists, reuse the local row.
+pub fn adopt_room_uid(conn: &Connection, row: &Value) -> AppResult<()> {
+    let uid = row["uid"].as_str().ok_or_else(|| AppError::msg("Respuesta sin uid"))?;
+    let number = row["number"].as_str().ok_or_else(|| AppError::msg("Respuesta sin número"))?;
+    let by_uid: Option<i64> = conn
+        .query_row("SELECT id FROM rooms WHERE uid=?1", [uid], |r| r.get(0))
+        .optional()?;
+    if by_uid.is_some() {
+        return Ok(());
+    }
+    let by_number: Option<i64> = conn
+        .query_row("SELECT id FROM rooms WHERE number=?1", [number], |r| r.get(0))
+        .optional()?;
+    if let Some(id) = by_number {
+        conn.execute("UPDATE rooms SET uid=?1 WHERE id=?2", params![uid, id])?;
+    }
+    Ok(())
+}
+
 /// If the remote user uid is new but the username already exists, reuse the local row.
 pub fn adopt_user_uid(conn: &Connection, row: &Value) -> AppResult<()> {
     let uid = row["uid"].as_str().ok_or_else(|| AppError::msg("Respuesta sin uid"))?;
@@ -364,6 +383,29 @@ mod tests {
   result["row"]["number"]=json!("WRONG");
   apply_result(&mut conn,&r,&result).unwrap();
   assert_eq!(crate::db::get_room(&conn,1).unwrap().number,"01");
+ }
+ #[test] fn adopt_room_uid_reuses_local_number() {
+  let conn=db();
+  let old: String = conn.query_row("SELECT uid FROM rooms WHERE number='01'",[],|r|r.get(0)).unwrap();
+  adopt_room_uid(&conn, &json!({
+    "uid":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    "number":"01"
+  })).unwrap();
+  let new: String = conn.query_row("SELECT uid FROM rooms WHERE number='01'",[],|r|r.get(0)).unwrap();
+  assert_ne!(old, new);
+  assert_eq!(new, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+  apply_status(&conn, "rooms", &json!({
+    "uid":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    "number":"01",
+    "room_type":"Jacuzzi",
+    "floor":1,
+    "notes":null,
+    "active":true,
+    "version":3,
+    "updated_at":"2026-09-24T12:00:00Z"
+  }), true).unwrap();
+  let count: i64 = conn.query_row("SELECT count(*) FROM rooms WHERE number='01'",[],|r|r.get(0)).unwrap();
+  assert_eq!(count, 1);
  }
  #[test] fn settings_exclude_device_and_secret_fields() {
   let conn=db();

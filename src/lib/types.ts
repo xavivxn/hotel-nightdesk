@@ -293,6 +293,7 @@ export type SyncStatus = {
   last_error: string | null;
   configured: boolean;
   realtime_connected: boolean;
+  embedded?: boolean;
 };
 
 export type BackupStatus = {

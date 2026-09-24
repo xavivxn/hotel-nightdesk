@@ -264,7 +264,7 @@ pub fn open_worker_conn(db_path: &Path) -> AppResult<Connection> {
     Ok(conn)
 }
 
-pub fn status_from(snapshot: &SyncSnapshot, pending_outbox: i64, configured: bool) -> SyncStatus {
+pub fn status_from(snapshot: &SyncSnapshot, pending_outbox: i64, configured: bool, embedded: bool) -> SyncStatus {
     SyncStatus {
         connected: snapshot.connected,
         pending_outbox,
@@ -273,6 +273,7 @@ pub fn status_from(snapshot: &SyncSnapshot, pending_outbox: i64, configured: boo
         last_error: snapshot.last_error.clone(),
         configured,
         realtime_connected: snapshot.realtime_connected,
+        embedded,
     }
 }
 

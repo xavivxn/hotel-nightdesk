@@ -29,6 +29,7 @@ pub fn run() {
         .setup(|app| {
             let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
             std::fs::create_dir_all(&dir)?;
+            let _ = credentials::apply_embedded_defaults(&dir);
             let db_path = dir.join("nightdesk.db");
             let conn = db::open(&db_path).map_err(|e| e.to_string())?;
             let mode = service::device_mode_get(&conn).ok().flatten();

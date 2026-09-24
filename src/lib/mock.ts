@@ -811,6 +811,7 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
         last_error: null,
         configured: Boolean(localStorage.getItem("nightdesk.device_config")),
         realtime_connected: false,
+        embedded: false,
       };
     case "sync_pull_now":
       window.dispatchEvent(new Event("sync:catalog-updated"));

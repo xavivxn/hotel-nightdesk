@@ -534,6 +534,8 @@ pub struct SyncStatus {
     pub configured: bool,
     #[serde(default)]
     pub realtime_connected: bool,
+    #[serde(default)]
+    pub embedded: bool,
 }
 
 #[derive(Debug, Serialize)]

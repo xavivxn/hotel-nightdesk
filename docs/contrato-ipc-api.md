@@ -149,7 +149,7 @@ Solo tienen sentido en recepción salvo donde se indica. Seguir `nightdesk-add-c
 | `remote_configure` | `{ project_url, anon_key }` → `void` | Solo PC admin. Credenciales en app data; nunca en `settings`. |
 | `remote_configured` / `remote_get_config` | `{}` → `bool` / payload | Lectura local de URL/anon. |
 | `sync_configure_device` | `{ project_url, anon_key, device_email, device_password }` → `void` | Credenciales a app data (nunca en `settings` ni en la respuesta). Habilita write-through I11 y, en modo recepción, arranca el worker I07. |
-| `sync_status` | `{}` → `{ connected, pending_outbox, last_push_at, last_pull_at, last_error, configured, realtime_connected }` | Indicador de `AppShell`. `pending_outbox` se cuenta en SQLite; el resto sale del snapshot del worker. |
+| `sync_status` | `{}` → `{ connected, pending_outbox, last_push_at, last_pull_at, last_error, configured, realtime_connected, embedded }` | Indicador de `AppShell`. `pending_outbox` se cuenta en SQLite; el resto sale del snapshot del worker. `embedded` es true si el exe trae URL/clave/dispositivo de fábrica. |
 | `sync_pull_now` | `{}` → `void` | Drena la outbox y hace pull. Espera hasta 20 s; sin worker o sin red → `storage`. Si el catálogo cambió, el worker emite `sync:catalog-updated` (Tauri → `window`). |
 | `hash_password` | `{ password }` + `operation_id?` → `{ hash }` | Argon2id, mismo formato que `auth.rs`. Siempre IPC local (también en modo remoto). Con `operation_id` UUID el salt es determinístico (reintento idempotente de alta de usuario). |
 | `backup_run_now` | `{}` → `{ backup_id }` | Admin, solo recepción. Snapshot Online Backup + cifrado; encola upload. Responde tras snapshot local verificado (no tras upload). El manifiesto remoto incluye `nonce_hex`. |

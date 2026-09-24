@@ -543,9 +543,14 @@ pub fn device_mode_get(state: State<AppState>) -> AppResult<Option<String>> {
 }
 
 #[tauri::command]
-pub fn device_mode_set(state: State<AppState>, payload: DeviceModeSetPayload) -> AppResult<()> {
-    let conn = conn(&state);
-    service::device_mode_set(&conn, &payload.mode)
+pub fn device_mode_set(state: State<AppState>, app: AppHandle, payload: DeviceModeSetPayload) -> AppResult<()> {
+    service::device_mode_set(&conn(&state), &payload.mode)?;
+    let data_dir = app_data_dir(&app)?;
+    let _ = crate::credentials::apply_embedded_defaults(&data_dir);
+    if crate::credentials::device_configured(&data_dir).unwrap_or(false) {
+        maybe_start_worker(&state, &app, &data_dir)?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -578,7 +583,9 @@ pub fn hash_password(payload: HashPasswordPayload, operation_id: Option<String>)
 
 #[tauri::command]
 pub fn sync_status(state: State<AppState>, app: AppHandle) -> AppResult<SyncStatus> {
-    let configured = crate::credentials::device_configured(&app_data_dir(&app)?)?;
+    let data_dir = app_data_dir(&app)?;
+    let _ = crate::credentials::apply_embedded_defaults(&data_dir);
+    let configured = crate::credentials::device_configured(&data_dir)?;
     let pending = crate::sync::push::pending_count(&conn(&state)).unwrap_or(0);
     let snapshot = state
         .sync
@@ -586,7 +593,12 @@ pub fn sync_status(state: State<AppState>, app: AppHandle) -> AppResult<SyncStat
         .ok()
         .and_then(|guard| guard.as_ref().map(|handle| handle.snapshot()))
         .unwrap_or_default();
-    Ok(crate::sync::worker::status_from(&snapshot, pending, configured))
+    Ok(crate::sync::worker::status_from(
+        &snapshot,
+        pending,
+        configured,
+        crate::credentials::has_embedded_defaults(),
+    ))
 }
 
 #[tauri::command]

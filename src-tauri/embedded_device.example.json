@@ -1,0 +1,6 @@
+{
+  "project_url": "https://your-project.supabase.co",
+  "anon_key": "sb_publishable_or_anon_key",
+  "device_email": "device@example.test",
+  "device_password": "replace-me"
+}

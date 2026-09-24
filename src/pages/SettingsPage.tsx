@@ -407,7 +407,7 @@ export function SettingsPage({
               <RefreshCw size={15} /> Sincronizar ahora
             </Button>
           </div>
-          {sync === null ? null : sync.configured && !replacingDevice ? (
+          {sync === null || sync.embedded ? null : sync.configured && !replacingDevice ? (
             <Button variant="secondary" disabled={busy} onClick={() => setReplacingDevice(true)}>
               Reemplazar credenciales
             </Button>

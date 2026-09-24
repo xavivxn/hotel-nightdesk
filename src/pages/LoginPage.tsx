@@ -77,6 +77,34 @@ export function LoginPage({
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  useEffect(() => {
+    if (!setup || remote) setNeedsSetup(false);
+  }, [setup, remote]);
+
+  useEffect(() => {
+    if (remote || !needsSetup) return;
+    let cancelled = false;
+    async function refreshSetup() {
+      try {
+        const required = await api.setupRequired();
+        if (!cancelled && !required) {
+          setNeedsSetup(false);
+          setError("Ya hay usuarios en este equipo. Iniciá sesión con una cuenta existente.");
+        }
+      } catch {
+        /* keep the setup form until the user can create or log in */
+      }
+    }
+    void refreshSetup();
+    window.addEventListener("sync:catalog-updated", refreshSetup);
+    const timer = window.setInterval(() => void refreshSetup(), 2000);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("sync:catalog-updated", refreshSetup);
+      window.clearInterval(timer);
+    };
+  }, [remote, needsSetup]);
+
   const revealing = handoff?.phase === "reveal";
 
   // E4: FLIP logo to sidebar. Overlay chrome is gone; the shell is already painted underneath.
@@ -160,8 +188,16 @@ export function LoginPage({
 
       if (needsSetup) {
         if (password !== confirm) throw "Las contraseñas no coinciden";
-        await api.setupAdmin({ username: user, password }, requireTrimmed(legacyPin) ?? "");
-        setNeedsSetup(false);
+        try {
+          await api.setupAdmin({ username: user, password }, requireTrimmed(legacyPin) ?? "");
+          setNeedsSetup(false);
+        } catch (cause) {
+          if (String(cause).includes("ya está configurada")) {
+            setNeedsSetup(false);
+            throw "Ya hay usuarios en este equipo. Iniciá sesión con una cuenta existente.";
+          }
+          throw cause;
+        }
       }
       const session = await api.login({ username: user, password });
 

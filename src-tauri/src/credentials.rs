@@ -140,6 +140,38 @@ pub fn device_configured(app_data: &Path) -> AppResult<bool> {
     Ok(true)
 }
 
+pub fn has_embedded_defaults() -> bool {
+    embedded_device_defaults().is_some()
+}
+
+/// Compile-time reception defaults from `embedded_device.local.json`. Empty when the file is absent.
+pub fn apply_embedded_defaults(app_data: &Path) -> AppResult<bool> {
+    let Some((project_url, anon_key, device_email, device_password)) = embedded_device_defaults() else {
+        return Ok(false);
+    };
+    let mut wrote = false;
+    if !device_configured(app_data).unwrap_or(false) {
+        save_device(app_data, project_url, anon_key, device_email, device_password)?;
+        wrote = true;
+    }
+    if !remote_configured(app_data) {
+        save_remote(app_data, project_url, anon_key)?;
+        wrote = true;
+    }
+    Ok(wrote)
+}
+
+fn embedded_device_defaults() -> Option<(&'static str, &'static str, &'static str, &'static str)> {
+    let project_url = env!("NIGHTDESK_DEVICE_URL").trim();
+    let anon_key = env!("NIGHTDESK_DEVICE_ANON").trim();
+    let device_email = env!("NIGHTDESK_DEVICE_EMAIL").trim();
+    let device_password = env!("NIGHTDESK_DEVICE_PASSWORD");
+    if project_url.is_empty() || anon_key.is_empty() || device_email.is_empty() || device_password.is_empty() {
+        return None;
+    }
+    Some((project_url, anon_key, device_email, device_password))
+}
+
 fn backup_key_path(app_data: &Path) -> PathBuf {
     app_data.join("backup_aes_key.json")
 }
@@ -434,6 +466,17 @@ mod tests {
         }
         std::fs::remove_dir_all(&dir).unwrap();
         assert!(!device_configured(&dir).unwrap_or(true));
+        Ok(())
+    }
+
+    #[test]
+    fn apply_embedded_defaults_skips_when_compile_time_values_absent() -> AppResult<()> {
+        if embedded_device_defaults().is_some() {
+            return Ok(());
+        }
+        let dir = temp_dir();
+        assert!(!apply_embedded_defaults(&dir)?);
+        std::fs::remove_dir_all(&dir)?;
         Ok(())
     }
 

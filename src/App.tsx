@@ -103,6 +103,14 @@ export default function App() {
     void initialize();
   }, []);
   useEffect(() => {
+    if (deviceMode !== "reception") return;
+    function refreshSetup() {
+      void api.setupRequired().then(setSetup).catch(() => undefined);
+    }
+    window.addEventListener("sync:catalog-updated", refreshSetup);
+    return () => window.removeEventListener("sync:catalog-updated", refreshSetup);
+  }, [deviceMode]);
+  useEffect(() => {
     setTheme("light");
   }, [session, setTheme]);
   useEffect(() => {

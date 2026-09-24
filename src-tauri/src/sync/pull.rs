@@ -76,6 +76,9 @@ pub fn apply_remote_row(conn: &rusqlite::Connection, table: &str, row: &serde_js
     if table == "business_settings" {
         return catalog::apply_setting_row(conn, row, force);
     }
+    if table == "rooms" {
+        catalog::adopt_room_uid(conn, row)?;
+    }
     if table == "app_users" {
         catalog::adopt_user_uid(conn, row)?;
     }
