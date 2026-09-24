@@ -263,13 +263,24 @@ pub fn close_account(
     persist_computed_charges(&tx, bill)?;
     tx.execute(
         "UPDATE stays SET status = 'closed', check_out_at = ?1,
-                closed_applied_kind = ?2, closed_tax_percent = ?3, closed_duration_label = ?4
-         WHERE id = ?5 AND status = 'open'",
+                closed_applied_kind = ?2, closed_tax_percent = ?3, closed_duration_label = ?4,
+                closed_total_cents = ?5, closed_line_count = ?6
+         WHERE id = ?7 AND status = 'open'",
         params![
             checkout_at,
             bill.applied_kind.as_str(),
             bill.tax_percent,
             bill.duration_label,
+            tx.query_row(
+                "SELECT COALESCE(SUM(amount_cents), 0) FROM charges WHERE stay_id = ?1 AND deleted_at IS NULL",
+                [stay.id],
+                |row| row.get::<_, i64>(0),
+            )?,
+            tx.query_row(
+                "SELECT COUNT(*) FROM charges WHERE stay_id = ?1 AND deleted_at IS NULL",
+                [stay.id],
+                |row| row.get::<_, i64>(0),
+            )?,
             stay.id
         ],
     )?;
@@ -1278,6 +1289,26 @@ mod tests {
         let closed = db::get_stay(&conn, stay.id)?;
         let historical = bill_for_stay(&conn, &closed)?;
         assert_eq!(historical.total_cents, bill.total_cents);
+        assert_eq!(
+            conn.query_row::<i64, _, _>(
+                "SELECT closed_total_cents FROM stays WHERE id = ?1",
+                [stay.id],
+                |row| row.get(0),
+            )?,
+            bill.total_cents
+        );
+        assert_eq!(
+            conn.query_row::<i64, _, _>(
+                "SELECT closed_line_count FROM stays WHERE id = ?1",
+                [stay.id],
+                |row| row.get(0),
+            )?,
+            conn.query_row::<i64, _, _>(
+                "SELECT COUNT(*) FROM charges WHERE stay_id = ?1 AND deleted_at IS NULL",
+                [stay.id],
+                |row| row.get(0),
+            )?
+        );
         assert_eq!(
             conn.query_row::<i64, _, _>(
                 "SELECT COUNT(*) FROM payments WHERE stay_id = ?1",

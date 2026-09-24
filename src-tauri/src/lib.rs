@@ -9,6 +9,7 @@ mod models;
 mod printer;
 mod service;
 mod reports;
+mod analytics;
 mod sync;
 
 use rusqlite::Connection;
@@ -96,6 +97,8 @@ pub fn run() {
             commands::check_in_reservation,
             commands::list_history,
             commands::daily_report,
+            commands::analytics_summary,
+            commands::save_analytics_pdf,
             commands::save_daily_pdf,
             commands::get_settings,
             commands::save_settings,

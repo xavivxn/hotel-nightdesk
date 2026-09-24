@@ -196,7 +196,7 @@ mod tests {
     #[test]
     fn every_business_command_checks_session_and_admin_mutations_check_role() {
         let source = include_str!("commands.rs");
-        let admins = ["save_room", "save_rate_plan", "save_product", "set_product_active", "add_charge", "delete_charge", "save_settings", "print_test", "backup_run_now", "backup_list", "backup_import_key", "backup_restore"];
+        let admins = ["save_room", "save_rate_plan", "save_product", "set_product_active", "add_charge", "delete_charge", "save_settings", "print_test", "backup_run_now", "backup_list", "backup_import_key", "backup_restore", "analytics_summary", "save_analytics_pdf"];
         let public = [
             "device_mode_get",
             "device_mode_set",
@@ -218,7 +218,7 @@ mod tests {
                 assert!(guard < lock, "{name} accesses data before authorization");
             } else {
                 let effect = match name {
-                    "save_daily_pdf" => "std::fs::",
+                    "save_daily_pdf" | "save_analytics_pdf" => "std::fs::",
                     "list_printers" => "printer::list_printers",
                     _ => panic!("Unexpected command without a database access check: {name}"),
                 };

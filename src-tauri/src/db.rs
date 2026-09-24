@@ -84,6 +84,10 @@ const MIGRATIONS: &[Migration] = &[
         id: "016_backup",
         sql: include_str!("../migrations/016_backup.sql"),
     },
+    Migration {
+        id: "017_closed_detail_marker",
+        sql: include_str!("../migrations/017_closed_detail_marker.sql"),
+    },
 ];
 
 pub fn open(db_path: &Path) -> AppResult<Connection> {
@@ -790,7 +794,8 @@ pub fn payload_for_stay(conn: &Connection, id: i64) -> AppResult<serde_json::Val
     conn.query_row(
         "SELECT s.id, s.uid, r.uid, g.uid, rp.uid, res.uid, s.check_in_at, s.expected_checkout_at,
                 s.check_out_at, s.status, s.converted_to_overnight, orp.uid, s.notes,
-                s.closed_applied_kind, s.closed_tax_percent, s.closed_duration_label
+                s.closed_applied_kind, s.closed_tax_percent, s.closed_duration_label,
+                s.closed_total_cents, s.closed_line_count
          FROM stays s
          JOIN rooms r ON r.id = s.room_id
          JOIN guests g ON g.id = s.guest_id
@@ -817,6 +822,8 @@ pub fn payload_for_stay(conn: &Connection, id: i64) -> AppResult<serde_json::Val
                 "closed_applied_kind": row.get::<_, Option<String>>(13)?,
                 "closed_tax_percent": row.get::<_, Option<f64>>(14)?,
                 "closed_duration_label": row.get::<_, Option<String>>(15)?,
+                "closed_total_cents": row.get::<_, Option<i64>>(16)?,
+                "closed_line_count": row.get::<_, Option<i64>>(17)?,
             }))
         },
     )

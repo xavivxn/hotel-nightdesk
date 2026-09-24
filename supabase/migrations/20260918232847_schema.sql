@@ -173,6 +173,8 @@ CREATE TABLE public.stays (
   closed_applied_kind text,
   closed_tax_percent numeric,
   closed_duration_label text,
+  closed_total_cents bigint,
+  closed_line_count bigint,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );

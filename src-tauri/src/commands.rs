@@ -298,6 +298,45 @@ pub fn daily_report(state: State<AppState>, session_token: Option<String>, date:
 }
 
 #[tauri::command]
+pub fn analytics_summary(
+    state: State<AppState>,
+    session_token: Option<String>,
+    from: String,
+    to: String,
+    room_type: Option<String>,
+) -> AppResult<AnalyticsSummary> {
+    crate::auth::require(&state, session_token.as_deref(), true)?;
+    crate::analytics::summary(&conn(&state), &from, &to, room_type.as_deref())
+}
+
+#[tauri::command]
+pub fn save_analytics_pdf(
+    state: State<AppState>,
+    session_token: Option<String>,
+    app: AppHandle,
+    from: String,
+    to: String,
+    bytes: Vec<u8>,
+) -> AppResult<String> {
+    crate::auth::require(&state, session_token.as_deref(), true)?;
+    crate::analytics::validate_range(&from, &to)?;
+    if bytes.len() > 20_000_000 || !bytes.starts_with(b"%PDF-") || !bytes.ends_with(b"%%EOF\n") {
+        return Err(AppError::msg("El archivo PDF no es válido o supera 20 MB"));
+    }
+    let dir = app_data_dir(&app)?.join("informes");
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("analisis-{from}-a-{to}-{}.pdf", chrono::Local::now().format("%H%M%S-%f")));
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&path)?;
+    if let Err(e) = file.write_all(&bytes).and_then(|_| file.sync_all()) {
+        drop(file);
+        let _ = std::fs::remove_file(&path);
+        return Err(e.into());
+    }
+    Ok(path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
 pub fn save_daily_pdf(state: State<AppState>, session_token: Option<String>, app: AppHandle, date: String, bytes: Vec<u8>) -> AppResult<String> {
     crate::auth::require(&state, session_token.as_deref(), false)?;
     crate::reports::validate_date(&date)?;

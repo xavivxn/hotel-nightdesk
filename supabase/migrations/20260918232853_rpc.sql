@@ -201,7 +201,8 @@ BEGIN
         uid, local_id, room_uid, guest_uid, rate_plan_uid, reservation_uid,
         check_in_at, expected_checkout_at, check_out_at, status,
         converted_to_overnight, overnight_rate_plan_uid, notes,
-        closed_applied_kind, closed_tax_percent, closed_duration_label
+        closed_applied_kind, closed_tax_percent, closed_duration_label,
+        closed_total_cents, closed_line_count
       )
       VALUES (
         v_uid,
@@ -219,7 +220,9 @@ BEGIN
         payload ->> 'notes',
         payload ->> 'closed_applied_kind',
         NULLIF(payload ->> 'closed_tax_percent', '')::numeric,
-        payload ->> 'closed_duration_label'
+        payload ->> 'closed_duration_label',
+        NULLIF(payload ->> 'closed_total_cents', '')::bigint,
+        NULLIF(payload ->> 'closed_line_count', '')::bigint
       )
       ON CONFLICT (uid) DO UPDATE SET
         local_id = COALESCE(EXCLUDED.local_id, public.stays.local_id),
@@ -236,7 +239,9 @@ BEGIN
         notes = EXCLUDED.notes,
         closed_applied_kind = EXCLUDED.closed_applied_kind,
         closed_tax_percent = EXCLUDED.closed_tax_percent,
-        closed_duration_label = EXCLUDED.closed_duration_label;
+        closed_duration_label = EXCLUDED.closed_duration_label,
+        closed_total_cents = EXCLUDED.closed_total_cents,
+        closed_line_count = EXCLUDED.closed_line_count;
 
     ELSIF v_entity = 'charge' THEN
       IF v_kind = 'delete' THEN

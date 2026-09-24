@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   BedDouble,
+  ChartNoAxesCombined,
   CalendarClock,
   History,
   LayoutGrid,
@@ -27,6 +28,7 @@ const links = [
   { to: "/reservas", label: "Reservas", icon: CalendarClock },
   { to: "/habitaciones", label: "Habitaciones", icon: BedDouble },
   { to: "/historial", label: "Historial", icon: History },
+  { to: "/analisis", label: "Análisis", icon: ChartNoAxesCombined },
   { to: "/catalogo", label: "Catálogo admin", icon: Package },
   { to: "/ajustes", label: "Ajustes", icon: Settings2 },
   { to: "/usuarios", label: "Usuarios", icon: Settings2 },

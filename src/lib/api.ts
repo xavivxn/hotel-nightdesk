@@ -1,5 +1,6 @@
 import type {
   DailyReport,
+  AnalyticsSummary,
   SessionInfo, SessionUser, LoginPayload, CreateUserPayload,
   AddChargePayload,
   AddProductChargePayload,
@@ -173,6 +174,23 @@ export const api = {
   checkInReservation: (reservation_id: number) => cmd<Stay>("check_in_reservation", { reservation_id }),
   listHistory: (date?: string) => cmd<HistoryStay[]>("list_history", { date }),
   dailyReport: (date: string) => cmd<DailyReport>("daily_report", { date }),
+  analyticsSummary: (from: string, to: string, roomType?: string) =>
+    cmd<AnalyticsSummary>("analytics_summary", { from, to, room_type: roomType ?? null }),
+  exportAnalyticsPdf: async (from: string, to: string, roomType?: string) => {
+    const report = await cmd<AnalyticsSummary>("analytics_summary", { from, to, room_type: roomType ?? null });
+    const { buildAnalyticsPdf } = await import("./analytics-pdf");
+    const bytes = buildAnalyticsPdf(report, roomType);
+    if (isTauri() && await getDeviceMode() === "reception") {
+      return cmd<string>("save_analytics_pdf", { from, to, bytes: Array.from(bytes) });
+    }
+    const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: "application/pdf" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `analisis-${from}-a-${to}.pdf`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    return "Carpeta de descargas";
+  },
   exportDailyPdf: async (date: string) => {
     const report = await cmd<DailyReport>("daily_report", { date });
     const { buildDailyPdf } = await import("./daily-pdf");

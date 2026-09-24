@@ -3,6 +3,7 @@ import { previewBill as previewBillLocal } from "./billing";
 import { fail } from "./errors";
 import type {
   AppSettings,
+  AnalyticsSummary,
   BackupStatus,
   BillPreview,
   BoardRoom,
@@ -143,6 +144,322 @@ async function settingsFromKv(): Promise<AppSettings> {
     require_guest_name: map.get("require_guest_name") === "true",
     pin_hash: "",
     has_pin: false,
+  };
+}
+
+const BUSINESS_TIME_ZONE = "America/Asuncion";
+const ANALYTICS_PAGE_SIZE = 500;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function businessDate(timestamp: string): string {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) fail("storage", "La réplica contiene una fecha inválida");
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: BUSINESS_TIME_ZONE,
+    year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(date);
+  const part = (type: string) => parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+function businessHour(timestamp: string): number {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) fail("storage", "La réplica contiene una fecha inválida");
+  const hourPart = new Intl.DateTimeFormat("en-US", {
+    timeZone: BUSINESS_TIME_ZONE, hour: "2-digit", hourCycle: "h23",
+  }).formatToParts(date).find((part) => part.type === "hour")?.value;
+  const hour = Number(hourPart);
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) {
+    fail("storage", "La réplica contiene una hora inválida");
+  }
+  return hour;
+}
+
+function parseAnalyticsDate(value: unknown): number {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    fail("validation", "Elegí un rango de fechas válido");
+  }
+  const timestamp = Date.parse(`${value}T00:00:00.000Z`);
+  if (!Number.isFinite(timestamp) || new Date(timestamp).toISOString().slice(0, 10) !== value) {
+    fail("validation", "Elegí un rango de fechas válido");
+  }
+  return timestamp;
+}
+
+function checkedMoney(value: unknown): number {
+  const amount = Number(value);
+  if (!Number.isSafeInteger(amount)) fail("storage", "La réplica contiene un importe fuera de rango");
+  return amount;
+}
+
+function addMoney(total: number, amount: number): number {
+  const result = total + amount;
+  if (!Number.isSafeInteger(result)) fail("storage", "El total del informe está fuera de rango");
+  return result;
+}
+
+async function pagedRows(
+  readPage: (from: number, to: number) => Promise<{ data: unknown[] | null; error: { message: string } | null }>,
+): Promise<Record<string, unknown>[]> {
+  const rows: Record<string, unknown>[] = [];
+  for (let offset = 0; ; offset += ANALYTICS_PAGE_SIZE) {
+    const { data, error } = await readPage(offset, offset + ANALYTICS_PAGE_SIZE - 1);
+    if (error) fail("storage", `No se pudieron consultar los datos sincronizados: ${error.message}`);
+    const page = (data ?? []) as Record<string, unknown>[];
+    rows.push(...page);
+    if (page.length < ANALYTICS_PAGE_SIZE) return rows;
+  }
+}
+
+async function remoteAnalyticsSummary(args: Record<string, unknown>): Promise<AnalyticsSummary> {
+  if (!authSession || authSession.user.role !== "admin") {
+    fail("forbidden", "Esta operación requiere administración");
+  }
+  const { data: sessionData } = await sb().auth.getSession();
+  if (!sessionData.session) fail("session_expired", "La sesión terminó. Volvé a ingresar");
+
+  const from = String(args.from ?? "");
+  const to = String(args.to ?? "");
+  const fromMs = parseAnalyticsDate(from);
+  const toMs = parseAnalyticsDate(to);
+  if (toMs < fromMs || (toMs - fromMs) / DAY_MS >= 366) {
+    fail("validation", "Elegí un rango de hasta 366 días");
+  }
+  if (to > businessDate(new Date().toISOString())) {
+    fail("validation", "El análisis no admite fechas futuras");
+  }
+  if (args.room_type != null && typeof args.room_type !== "string") {
+    fail("validation", "El tipo de habitación debe ser Normal o Jacuzzi");
+  }
+  const requestedType = String(args.room_type ?? "").trim().toLowerCase();
+  if (requestedType && !["all", "normal", "jacuzzi"].includes(requestedType)) {
+    fail("validation", "El tipo de habitación debe ser Normal o Jacuzzi");
+  }
+  const roomType = requestedType === "all" || !requestedType ? null : requestedType;
+
+  // A one-day UTC margin on both sides covers local midnight and offset changes.
+  // The business-date check below applies the exact requested range.
+  const broadStart = new Date(fromMs - DAY_MS).toISOString();
+  const broadEnd = new Date(toMs + 2 * DAY_MS).toISOString();
+  const rooms = await pagedRows(async (start, end) => await sb().from("rooms")
+    .select("uid,number,room_type,status,active")
+    .order("uid")
+    .range(start, end));
+  const roomByUid = new Map(rooms.map((room) => [String(room.uid), room]));
+  const includeRoom = (room: Record<string, unknown> | undefined) =>
+    room !== undefined && (roomType === null || String(room.room_type).toLowerCase() === roomType);
+
+  const currentCounts = new Map<string, number>([
+    ["available", 0], ["occupied", 0], ["dirty", 0], ["reserved", 0], ["blocked", 0],
+  ]);
+  const openStays = await pagedRows(async (start, end) => await sb().from("stays")
+    .select("uid,room_uid")
+    .eq("status", "open")
+    .order("uid")
+    .range(start, end));
+  const occupiedRoomUids = new Set(openStays.map((stay) => String(stay.room_uid)));
+  const today = businessDate(new Date().toISOString());
+  const todayMs = parseAnalyticsDate(today);
+  const todayHolds = await pagedRows(async (start, end) => await sb().from("reservations")
+    .select("uid,room_uid,expected_arrival_at")
+    .eq("status", "hold")
+    .gte("expected_arrival_at", new Date(todayMs - DAY_MS).toISOString())
+    .lt("expected_arrival_at", new Date(todayMs + 2 * DAY_MS).toISOString())
+    .order("uid")
+    .range(start, end));
+  const reservedRoomUids = new Set(todayHolds
+    .filter((hold) => businessDate(String(hold.expected_arrival_at)) === today)
+    .map((hold) => String(hold.room_uid)));
+  for (const room of rooms) {
+    if (!includeRoom(room) || room.active === false) continue;
+    const uid = String(room.uid);
+    const status = occupiedRoomUids.has(uid) ? "occupied"
+      : room.status === "blocked" ? "blocked"
+        : room.status === "dirty" ? "dirty"
+          : reservedRoomUids.has(uid) ? "reserved" : "available";
+    currentCounts.set(status, (currentCounts.get(status) ?? 0) + 1);
+  }
+
+  const daily = [] as AnalyticsSummary["daily"];
+  const dailyByDate = new Map<string, AnalyticsSummary["daily"][number]>();
+  for (let day = fromMs; day <= toMs; day += DAY_MS) {
+    const date = new Date(day).toISOString().slice(0, 10);
+    const item = {
+      date, revenue_cents: 0, closed_accounts: 0, check_ins: 0,
+      reservation_arrivals: 0, reservation_cancellations: 0, no_shows: 0,
+    };
+    daily.push(item);
+    dailyByDate.set(date, item);
+  }
+
+  const closedRows = await pagedRows(async (start, end) => await sb().from("stays")
+    .select("uid,room_uid,check_in_at,check_out_at,closed_total_cents,closed_line_count")
+    .eq("status", "closed")
+    .gte("check_out_at", broadStart)
+    .lt("check_out_at", broadEnd)
+    .order("uid")
+    .range(start, end));
+  const closed = closedRows.filter((stay) =>
+    includeRoom(roomByUid.get(String(stay.room_uid))) &&
+    dailyByDate.has(businessDate(String(stay.check_out_at))));
+  const closedUids = closed.map((stay) => String(stay.uid));
+  const chargesByStay = new Map<string, Record<string, unknown>[]>();
+  // Restrict every request to the selected closed stays; keep URLs short and
+  // paginate within each batch so PostgREST's row cap never truncates totals.
+  for (let index = 0; index < closedUids.length; index += 80) {
+    const batch = closedUids.slice(index, index + 80);
+    const charges = await pagedRows(async (start, end) => await sb().from("charges")
+      .select("uid,stay_uid,kind,description,amount_cents")
+      .in("stay_uid", batch)
+      .is("deleted_at", null)
+      .order("uid")
+      .range(start, end));
+    for (const charge of charges) {
+      const uid = String(charge.stay_uid);
+      const lines = chargesByStay.get(uid) ?? [];
+      lines.push(charge);
+      chargesByStay.set(uid, lines);
+    }
+  }
+
+  const byType = new Map<string, AnalyticsSummary["by_room_type"][number]>();
+  const byRoom = new Map<string, AnalyticsSummary["by_room"][number]>();
+  const topExtras = new Map<string, AnalyticsSummary["top_extras"][number]>();
+  let total = 0;
+  let lodging = 0;
+  let extras = 0;
+  let discount = 0;
+  let tax = 0;
+  let durationMinutes = 0;
+  for (const stay of closed) {
+    const uid = String(stay.uid);
+    const lines = chargesByStay.get(uid) ?? [];
+    if (stay.closed_total_cents == null || stay.closed_line_count == null) {
+      fail("storage", "Hay cuentas cerradas sin confirmación de detalle. Esperá la sincronización de recepción y volvé a cargar Análisis");
+    }
+    const expectedTotal = checkedMoney(stay.closed_total_cents);
+    const expectedLines = Number(stay.closed_line_count);
+    if (!Number.isSafeInteger(expectedLines) || expectedLines < 0 || lines.length !== expectedLines) {
+      fail("storage", "El detalle de cierre todavía no está completo en la réplica. Esperá la sincronización y volvé a cargar Análisis");
+    }
+    if (!lines.some((line) => line.kind === "stay" || line.kind === "extra_hour" || line.kind === "tax")) {
+      fail("storage", "Hay cuentas cerradas sin detalle de cierre sincronizado. Esperá la sincronización y volvé a cargar Análisis");
+    }
+    const room = roomByUid.get(String(stay.room_uid))!;
+    const date = businessDate(String(stay.check_out_at));
+    const day = dailyByDate.get(date)!;
+    const typeName = String(room.room_type ?? "Sin tipo");
+    const roomNumber = String(room.number ?? "");
+    const type = byType.get(typeName) ?? { room_type: typeName, revenue_cents: 0, closed_accounts: 0 };
+    const roomItem = byRoom.get(roomNumber) ?? {
+      room_number: roomNumber, room_type: typeName, revenue_cents: 0, closed_accounts: 0,
+    };
+    let stayTotal = 0;
+    for (const line of lines) {
+      const amount = checkedMoney(line.amount_cents);
+      stayTotal = addMoney(stayTotal, amount);
+      switch (String(line.kind)) {
+        case "stay":
+        case "extra_hour": lodging = addMoney(lodging, amount); break;
+        case "surcharge": {
+          extras = addMoney(extras, amount);
+          const description = String(line.description ?? "").trim() || "Cargo sin descripción";
+          const item = topExtras.get(description) ?? { description, count: 0, revenue_cents: 0 };
+          item.count += 1;
+          item.revenue_cents = addMoney(item.revenue_cents, amount);
+          topExtras.set(description, item);
+          break;
+        }
+        case "discount": discount = addMoney(discount, amount); break;
+        case "tax": tax = addMoney(tax, amount); break;
+        default: fail("storage", "Una cuenta cerrada tiene un tipo de cargo inválido");
+      }
+    }
+    if (stayTotal !== expectedTotal) {
+      fail("storage", "El total del cierre todavía no coincide con la réplica. Esperá la sincronización y volvé a cargar Análisis");
+    }
+    total = addMoney(total, stayTotal);
+    day.revenue_cents = addMoney(day.revenue_cents, stayTotal);
+    day.closed_accounts += 1;
+    type.revenue_cents = addMoney(type.revenue_cents, stayTotal);
+    type.closed_accounts += 1;
+    roomItem.revenue_cents = addMoney(roomItem.revenue_cents, stayTotal);
+    roomItem.closed_accounts += 1;
+    byType.set(typeName, type);
+    byRoom.set(roomNumber, roomItem);
+    const checkIn = Date.parse(String(stay.check_in_at));
+    const checkOut = Date.parse(String(stay.check_out_at));
+    if (!Number.isFinite(checkIn) || !Number.isFinite(checkOut) || checkOut < checkIn) {
+      fail("storage", "Hay cuentas cerradas con fechas de estadía inconsistentes");
+    }
+    durationMinutes += Math.floor((checkOut - checkIn) / 60000);
+  }
+  if (addMoney(addMoney(addMoney(lodging, extras), discount), tax) !== total) {
+    fail("storage", "El detalle de ingresos sincronizado no coincide con el total");
+  }
+
+  const checkIns = await pagedRows(async (start, end) => await sb().from("stays")
+    .select("uid,room_uid,check_in_at")
+    .gte("check_in_at", broadStart)
+    .lt("check_in_at", broadEnd)
+    .order("uid")
+    .range(start, end));
+  const checkInHours = Array.from({ length: 24 }, (_, hour) => ({ hour, count: 0 }));
+  for (const stay of checkIns) {
+    if (!includeRoom(roomByUid.get(String(stay.room_uid)))) continue;
+    const checkInAt = String(stay.check_in_at);
+    const day = dailyByDate.get(businessDate(checkInAt));
+    if (day) {
+      day.check_ins += 1;
+      checkInHours[businessHour(checkInAt)].count += 1;
+    }
+  }
+
+  // Reservation outcomes are attributed to the scheduled arrival date. The
+  // schema has no cancellation timestamp, so this is not a cancellation-date trend.
+  const reservationRows = await pagedRows(async (start, end) => await sb().from("reservations")
+    .select("uid,room_uid,expected_arrival_at,status")
+    .gte("expected_arrival_at", broadStart)
+    .lt("expected_arrival_at", broadEnd)
+    .order("uid")
+    .range(start, end));
+  let reservationArrivals = 0;
+  let reservationCancellations = 0;
+  let noShows = 0;
+  for (const reservation of reservationRows) {
+    if (!includeRoom(roomByUid.get(String(reservation.room_uid)))) continue;
+    const day = dailyByDate.get(businessDate(String(reservation.expected_arrival_at)));
+    if (!day) continue;
+    reservationArrivals += 1;
+    day.reservation_arrivals += 1;
+    if (reservation.status === "cancelled") {
+      reservationCancellations += 1;
+      day.reservation_cancellations += 1;
+    } else if (reservation.status === "no_show") {
+      noShows += 1;
+      day.no_shows += 1;
+    }
+  }
+
+  return {
+    from, to, generated_at: new Date().toISOString(),
+    total_revenue_cents: total,
+    closed_accounts: closed.length,
+    average_ticket_cents: closed.length ? Math.trunc(total / closed.length) : 0,
+    lodging_cents: lodging,
+    extras_cents: extras,
+    discount_cents: discount,
+    tax_cents: tax,
+    average_stay_minutes: closed.length ? Math.trunc(durationMinutes / closed.length) : null,
+    reservation_arrivals: reservationArrivals,
+    reservation_cancellations: reservationCancellations,
+    no_shows: noShows,
+    check_in_hours: checkInHours,
+    current_rooms: [...currentCounts].map(([status, count]) => ({ status, count })),
+    daily,
+    by_room_type: [...byType.values()].sort((a, b) => b.revenue_cents - a.revenue_cents),
+    by_room: [...byRoom.values()].sort((a, b) => b.revenue_cents - a.revenue_cents || a.room_number.localeCompare(b.room_number)),
+    top_extras: [...topExtras.values()].sort((a, b) => b.revenue_cents - a.revenue_cents || a.description.localeCompare(b.description)).slice(0, 10),
   };
 }
 
@@ -343,6 +660,8 @@ export async function supabaseInvoke<T>(name: string, args: Record<string, unkno
         return { stay, total_cents: 0, payment_method: null } satisfies HistoryStay;
       }) as T;
     }
+    case "analytics_summary":
+      return await remoteAnalyticsSummary(args) as T;
     case "get_stay_detail": {
       const stayId = Number(args.stay_id);
       const { data: stayRow, error } = await sb()

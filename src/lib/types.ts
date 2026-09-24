@@ -246,6 +246,32 @@ export type DailyReport = {
   accounts: DailyAccount[]; adjustments: Charge[];
 };
 
+/** Historical amounts come from the closed account, never from today's catalog prices. */
+export type AnalyticsSummary = {
+  from: string;
+  to: string;
+  generated_at: string;
+  total_revenue_cents: number;
+  closed_accounts: number;
+  average_ticket_cents: number;
+  lodging_cents: number;
+  extras_cents: number;
+  discount_cents: number;
+  tax_cents: number;
+  average_stay_minutes: number | null;
+  reservation_arrivals: number;
+  reservation_cancellations: number;
+  no_shows: number;
+  check_in_hours: { hour: number; count: number }[];
+  /** Current snapshot, independent of the selected date range. */
+  current_rooms: { status: string; count: number }[];
+  daily: { date: string; revenue_cents: number; closed_accounts: number; check_ins: number; reservation_arrivals: number; reservation_cancellations: number; no_shows: number }[];
+  by_room_type: { room_type: string; revenue_cents: number; closed_accounts: number }[];
+  by_room: { room_number: string; room_type: string; revenue_cents: number; closed_accounts: number }[];
+  /** Additional-charge descriptions; a charge is not necessarily a catalog product. */
+  top_extras: { description: string; count: number; revenue_cents: number }[];
+};
+
 export type DeviceMode = "reception" | "remote";
 
 export type RemoteConfigurePayload = {

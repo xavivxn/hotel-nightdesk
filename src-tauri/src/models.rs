@@ -410,6 +410,75 @@ pub struct DailyReport {
     pub adjustments: Vec<Charge>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct AnalyticsStatusCount {
+    pub status: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AnalyticsDay {
+    pub date: String,
+    pub revenue_cents: i64,
+    pub closed_accounts: i64,
+    pub check_ins: i64,
+    pub reservation_arrivals: i64,
+    pub reservation_cancellations: i64,
+    pub no_shows: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AnalyticsHour {
+    pub hour: i64,
+    pub count: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AnalyticsTypeTotal {
+    pub room_type: String,
+    pub revenue_cents: i64,
+    pub closed_accounts: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AnalyticsRoomTotal {
+    pub room_number: String,
+    pub room_type: String,
+    pub revenue_cents: i64,
+    pub closed_accounts: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AnalyticsExtra {
+    pub description: String,
+    pub count: i64,
+    pub revenue_cents: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AnalyticsSummary {
+    pub from: String,
+    pub to: String,
+    pub generated_at: String,
+    pub total_revenue_cents: i64,
+    pub closed_accounts: i64,
+    pub average_ticket_cents: i64,
+    pub lodging_cents: i64,
+    pub extras_cents: i64,
+    pub discount_cents: i64,
+    pub tax_cents: i64,
+    pub average_stay_minutes: Option<i64>,
+    pub reservation_arrivals: i64,
+    pub reservation_cancellations: i64,
+    pub no_shows: i64,
+    pub current_rooms: Vec<AnalyticsStatusCount>,
+    pub daily: Vec<AnalyticsDay>,
+    pub check_in_hours: Vec<AnalyticsHour>,
+    pub by_room_type: Vec<AnalyticsTypeTotal>,
+    pub by_room: Vec<AnalyticsRoomTotal>,
+    pub top_extras: Vec<AnalyticsExtra>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContractInfo {
     pub contract_version: u32,

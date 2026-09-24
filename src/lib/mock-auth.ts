@@ -7,6 +7,9 @@ type User = SessionUser & { salt: string; hash: string; active: boolean };
 type AuthDb = { users: User[]; attempts: Record<string, { failures: number; blocked: number }> };
 const KEY = "nightdesk.mock.auth.v1";
 const sessions = new Map<string, SessionInfo>();
+const PUBLIC_DEVICE_COMMANDS = new Set([
+  "device_mode_get", "device_mode_set", "remote_configure", "remote_configured", "remote_get_config",
+]);
 function load(): AuthDb { return JSON.parse(localStorage.getItem(KEY) ?? '{"users":[],"attempts":{}}'); }
 function save(db: AuthDb) { localStorage.setItem(KEY, JSON.stringify(db)); }
 async function hash(password: string, salt: string) {
@@ -25,6 +28,7 @@ export function requireMockSession(args: Record<string, unknown>, admin = false)
   return { ...session, user: { id: user.id, username: user.username, role: user.role } };
 }
 export async function mockAuth(name: string, args: Record<string, unknown>): Promise<unknown> {
+  if (PUBLIC_DEVICE_COMMANDS.has(name)) return;
   if (!name.startsWith("auth_")) { requireMockSession(args, ADMIN_COMMANDS.has(name)); return; }
   const db = load();
   if (name === "auth_setup_required") return db.users.length === 0;

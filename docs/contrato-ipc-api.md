@@ -114,12 +114,26 @@ Leyenda de `supabaseInvoke`: `lectura` = PostgREST/vista; `catálogo` = RPC `cat
 | `check_out` | sí + outbox + print | `forbidden` | autenticado |
 | `list_reservations` / `create_reservation` / … | sí (+ outbox en mutación) | lectura / `forbidden` | autenticado |
 | `list_history` / `daily_report` | sí | lectura | autenticado |
+| `analytics_summary` | consulta agregada de cuentas cerradas SQLite | lectura agregada de réplica operativa | admin |
+| `save_analytics_pdf` | guarda informe PDF en `informes/` | no aplica (descarga desde la UI remota) | admin |
 | `save_daily_pdf` / `print_test` / `list_printers` / `reprint_receipt` | sí | `forbidden` | admin / autenticado |
 | `get_settings` | sí | lectura `business_settings` + `catalog_versions` | autenticado |
 | `save_settings` | admin; write-through de claves de negocio | catálogo lista blanca | admin |
 | `verify_pin` / `pin_required` | sí | no aplica / stub | autenticado |
 | `device_mode_*` / `remote_*` / `hash_password` | siempre IPC local | — | ver tabla abajo |
 | `sync_*` / `backup_*` | I07 worker / I08 motor local | lectura parcial (`backup_status`) | autenticado / admin |
+
+### Análisis de administración
+
+`analytics_summary` acepta `{ from, to, room_type? }`, con fechas `YYYY-MM-DD` inclusivas, hasta 366 días y sin días futuros. `room_type` admite `Normal`, `Jacuzzi` o vacío/todas. Devuelve importes enteros en Gs., serie diaria de cuentas cerradas e ingresos por fecha de salida, entradas por fecha y hora de check-in, reservas por fecha de llegada prevista, agregados por habitación/tipo, cargos adicionales por descripción y el estado **actual** de las habitaciones activas. El estado actual es una foto del momento de consulta y no se interpreta como ocupación histórica. `reservation_arrivals` incluye todas las reservas cuya llegada estaba prevista en el período; `reservation_cancellations` y `no_shows` son subconjuntos clasificados por el estado actual de esas reservas. No se guarda la fecha de cancelación, por lo que no se presenta como cancelaciones ocurridas en el período.
+
+Los ingresos se toman de los cargos persistidos al cerrar la cuenta, sin recalcular con tarifas ni precios actuales. `lodging_cents` suma estadía y horas extra; `extras_cents` incluye cargos positivos de tipo `surcharge` (consumos y recargos manuales); `discount_cents` es negativo y `tax_cents` corresponde al impuesto aplicado. La suma de estos componentes coincide con `total_revenue_cents`. Las descripciones de cargos adicionales no prueban que sean productos del catálogo: el dato histórico no guarda `product_id` ni categoría. Tampoco se presenta una gráfica de medios de pago hasta contar con registros confiables de cobro.
+
+Cada cierre nuevo publica en `stays.closed_total_cents` y `stays.closed_line_count` el total y la cantidad de cargos no borrados de ese cierre. Administración remota exige que ambos marcadores coincidan con las filas sincronizadas antes de incluir la cuenta; si la réplica está a mitad de una sincronización, muestra un error de revisión en vez de un ingreso parcial. Las cuentas antiguas sin marcador quedan sujetas a revisión remota. La migración local 017 conserva sus importes, normaliza el histórico `product` a `surcharge` y solo backfillea el marcador cuando existe el snapshot de cierre.
+
+La agrupación por tipo y número de habitación utiliza la ficha actual de `rooms`: `stays` conserva la habitación vinculada, pero no una copia histórica de esos dos atributos. Si se renumera o cambia de tipo una habitación, los grupos históricos se reclasifican; los importes de cada cuenta no cambian.
+
+En recepción la consulta usa SQLite sin internet. En administración remota usa la réplica operativa de Supabase y refleja lo último sincronizado; requiere conectividad. `save_analytics_pdf` guarda un PDF local del mismo informe y de los filtros seleccionados en recepción. En remoto, la UI descarga el PDF generado en el equipo de administración.
 
 ## Comandos de dispositivo / sync / hash
 

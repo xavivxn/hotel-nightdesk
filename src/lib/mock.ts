@@ -4,6 +4,7 @@ import { buildSeedProducts } from "./products";
 import { fail as throwApi } from "./errors";
 import type {
   DailyReport,
+  AnalyticsSummary,
   AppSettings,
   BoardRoom,
   Charge,
@@ -228,6 +229,108 @@ function stayBill(db: Db, stay: Stay) {
   });
 }
 
+function mockAnalytics(db: Db, args: Record<string, unknown>): AnalyticsSummary {
+  const from = String(args.from ?? "");
+  const to = String(args.to ?? "");
+  const roomType = String(args.room_type ?? "all").toLowerCase();
+  const start = new Date(`${from}T00:00:00`);
+  const end = new Date(`${to}T00:00:00`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) ||
+      Number.isNaN(+start) || Number.isNaN(+end) || localDay(start.toISOString()) !== from ||
+      localDay(end.toISOString()) !== to || start > end || to > localDay() ||
+      (Date.UTC(end.getFullYear(), end.getMonth(), end.getDate()) - Date.UTC(start.getFullYear(), start.getMonth(), start.getDate())) / 86400000 >= 366) {
+    fail("validation", "Elegí un rango válido de hasta 366 días, sin fechas futuras");
+  }
+  if (!["all", "normal", "jacuzzi"].includes(roomType)) fail("validation", "Tipo de habitación inválido");
+
+  const rooms = db.rooms.filter(r => roomType === "all" || r.room_type.toLowerCase() === roomType);
+  const roomById = new Map(rooms.map(r => [r.id, r]));
+  const daily = [] as AnalyticsSummary["daily"];
+  for (const day = new Date(start); day <= end; day.setDate(day.getDate() + 1)) {
+    daily.push({ date: localDay(day.toISOString()), revenue_cents: 0, closed_accounts: 0, check_ins: 0, reservation_arrivals: 0, reservation_cancellations: 0, no_shows: 0 });
+  }
+  const dayByDate = new Map(daily.map(d => [d.date, d]));
+  const byRoom = new Map<string, AnalyticsSummary["by_room"][number]>();
+  const byType = new Map<string, AnalyticsSummary["by_room_type"][number]>();
+  const extras = new Map<string, AnalyticsSummary["top_extras"][number]>();
+  const checkInHours = Array.from({ length: 24 }, (_, hour) => ({ hour, count: 0 }));
+  let reservationArrivals = 0, reservationCancellations = 0, noShows = 0;
+  let total = 0, closed = 0, lodging = 0, extraTotal = 0, discount = 0, tax = 0, stayMinutes = 0;
+  for (const stay of db.stays) {
+    const room = roomById.get(stay.room_id);
+    if (!room) continue;
+    const checkInDay = dayByDate.get(localDay(stay.check_in_at));
+    if (checkInDay) {
+      checkInDay.check_ins += 1;
+      checkInHours[new Date(stay.check_in_at).getHours()].count += 1;
+    }
+    if (stay.status !== "closed" || !stay.check_out_at) continue;
+    const day = dayByDate.get(localDay(stay.check_out_at));
+    if (!day) continue;
+    const bill = db.closed_bills[String(stay.id)];
+    if (!bill) fail("storage", "Cuenta cerrada sin detalle histórico; requiere revisión");
+    if (bill.stay_id !== stay.id ||
+        bill.lines.reduce((sum, line) => sum + line.amount_cents, 0) !== bill.subtotal_cents ||
+        bill.subtotal_cents + bill.tax_cents !== bill.total_cents ||
+        bill.lines.some(line => !["stay", "extra_hour", "surcharge", "product", "discount"].includes(line.kind))) {
+      fail("storage", "Detalle histórico de la cuenta inconsistente; requiere revisión");
+    }
+    total += bill.total_cents;
+    closed += 1;
+    day.revenue_cents += bill.total_cents;
+    day.closed_accounts += 1;
+    stayMinutes += Math.max(0, Math.trunc((+new Date(stay.check_out_at) - +new Date(stay.check_in_at)) / 60000));
+    tax += bill.tax_cents;
+    for (const line of bill.lines) {
+      if (line.kind === "stay" || line.kind === "extra_hour") lodging += line.amount_cents;
+      else if (line.kind === "surcharge" || line.kind === "product") {
+        extraTotal += line.amount_cents;
+        const key = line.description.trim() || "Cargo sin descripción";
+        const item = extras.get(key) ?? { description: key, count: 0, revenue_cents: 0 };
+        item.count += 1;
+        item.revenue_cents += line.amount_cents;
+        extras.set(key, item);
+      } else if (line.kind === "discount") discount += line.amount_cents;
+    }
+    const roomItem = byRoom.get(room.number) ?? { room_number: room.number, room_type: room.room_type, revenue_cents: 0, closed_accounts: 0 };
+    roomItem.revenue_cents += bill.total_cents;
+    roomItem.closed_accounts += 1;
+    byRoom.set(room.number, roomItem);
+    const typeItem = byType.get(room.room_type) ?? { room_type: room.room_type, revenue_cents: 0, closed_accounts: 0 };
+    typeItem.revenue_cents += bill.total_cents;
+    typeItem.closed_accounts += 1;
+    byType.set(room.room_type, typeItem);
+  }
+  for (const reservation of db.reservations) {
+    if (!roomById.has(reservation.room_id)) continue;
+    const day = dayByDate.get(localDay(reservation.expected_arrival_at));
+    if (!day) continue;
+    day.reservation_arrivals += 1;
+    reservationArrivals += 1;
+    if (reservation.status === "cancelled") { day.reservation_cancellations += 1; reservationCancellations += 1; }
+    if (reservation.status === "no_show") { day.no_shows += 1; noShows += 1; }
+  }
+  const current = new Map(["available", "occupied", "dirty", "reserved", "blocked"].map(status => [status, 0]));
+  for (const room of rooms.filter(r => r.active)) {
+    const status = openStay(db, room.id) ? "occupied" : room.status === "blocked" ? "blocked" :
+      room.status === "dirty" ? "dirty" : todayHold(db, room.id) ? "reserved" : "available";
+    current.set(status, (current.get(status) ?? 0) + 1);
+  }
+  return {
+    from, to, generated_at: nowIso(), total_revenue_cents: total, closed_accounts: closed,
+    average_ticket_cents: closed ? Math.trunc(total / closed) : 0,
+    lodging_cents: lodging, extras_cents: extraTotal, discount_cents: discount, tax_cents: tax,
+    average_stay_minutes: closed ? Math.trunc(stayMinutes / closed) : null,
+    reservation_arrivals: reservationArrivals, reservation_cancellations: reservationCancellations,
+    no_shows: noShows, check_in_hours: checkInHours,
+    current_rooms: [...current].map(([status, count]) => ({ status, count })),
+    daily,
+    by_room_type: [...byType.values()].sort((a, b) => b.revenue_cents - a.revenue_cents),
+    by_room: [...byRoom.values()].sort((a, b) => b.revenue_cents - a.revenue_cents),
+    top_extras: [...extras.values()].sort((a, b) => b.revenue_cents - a.revenue_cents).slice(0, 10),
+  };
+}
+
 function hashPin(pin: string) {
   return `mock:${pin}`;
 }
@@ -243,6 +346,8 @@ export async function mockInvoke<T>(name: string, args: Record<string, unknown> 
 
 function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
   switch (name) {
+    case "analytics_summary":
+      return mockAnalytics(db, args);
     case "daily_report": {
       const date = String(args.date ?? "");
       const start = new Date(`${date}T00:00:00`);
