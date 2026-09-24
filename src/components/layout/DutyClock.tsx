@@ -88,7 +88,7 @@ export function DutyClock() {
       <p className="mb-1 hidden font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--muted)] lg:block">
         {formatDateLabel(now)}
       </p>
-      <div className="hidden font-mono text-2xl font-semibold tabular-nums leading-none text-[var(--ink)] lg:flex lg:items-center">
+      <div className="duty-clock-digits hidden font-mono text-2xl font-semibold tabular-nums leading-none text-[var(--ink)] lg:flex lg:items-center">
         <FlipPair value={hours} />
         <span className={cn("duty-colon mx-0.5", night && "text-[var(--warn)]", colonDim && "is-dim")}>:</span>
         <FlipPair value={minutes} />

@@ -110,6 +110,63 @@ body {
   transition: background-color 300ms ease, color 300ms ease;
 }
 
+/* Chromium ignores ::-webkit-scrollbar once scrollbar-color/width are set, so the standard props are fallback only. */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--ink) 22%, transparent);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--ink) 40%, transparent);
+}
+
+*::-webkit-scrollbar-thumb:active {
+  background-color: var(--accent);
+}
+
+*::-webkit-scrollbar-button,
+*::-webkit-scrollbar-corner {
+  display: none;
+  background: transparent;
+}
+
+/* Tailwind's scrollbar-thin utility sets scrollbar-width: thin, which makes
+   Chromium replace the shared custom scrollbar with its white native track. */
+.scrollbar-thin {
+  scrollbar-width: auto;
+  scrollbar-color: auto;
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--ink) 22%, transparent) transparent;
+  }
+
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--ink) 22%, transparent) transparent;
+  }
+}
+
+@supports selector(::-webkit-scrollbar) {
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+}
+
 button,
 input,
 select,
@@ -651,11 +708,6 @@ textarea {
 .room-suite .room-head-number,
 .room-suite-label { color: var(--ink); }
 
-.scrollbar-thin {
-  scrollbar-width: thin;
-  scrollbar-color: var(--line) transparent;
-}
-
 .flip-digit {
   position: relative;
   display: inline-block;
@@ -916,6 +968,19 @@ textarea {
 /* Reception workspace: semantic status colors, compact controls and clear hierarchy. */
 button { touch-action: manipulation; cursor: pointer; }
 button:disabled { cursor: not-allowed; }
+.app-sidebar {
+  scrollbar-gutter: stable;
+}
+.app-sidebar > .sidebar-brand,
+.app-sidebar > .nav-section,
+.app-sidebar > nav,
+.app-sidebar > .sidebar-foot {
+  flex-shrink: 0;
+}
+.app-sidebar > nav {
+  min-height: 0;
+  scrollbar-gutter: stable;
+}
 button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .sidebar-brand { display: block; padding: 0 0 24px; }
 .sidebar-foot { display: flex; flex-direction: column; gap: 10px; padding: 0 0 4px; }
@@ -1041,7 +1106,8 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 }
 .sidebar-link[aria-current="page"] { border-left: 3px solid var(--accent); padding-left: 9px; }
 .app-sidebar,
-.app-chrome {
+.app-chrome,
+.login-brand {
   --surface: #301820;
   --surface-2: #492630;
   --ink: #f5ddd0;
@@ -1136,6 +1202,7 @@ tbody tr:hover { background: var(--surface-2); }
 
 /* —— Login → dashboard motion (transform / opacity only) —— */
 .login-stage {
+  position: relative;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -1145,13 +1212,235 @@ tbody tr:hover { background: var(--surface-2); }
   overflow-x: hidden;
   overflow-y: auto;
   background: var(--bg);
-  transition: background 480ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: background-color 480ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-.login-stage--handoff,
-.login-stage--logo-pulse {
+.login-stage--handoff {
   background:
     radial-gradient(ellipse at top right, color-mix(in srgb, var(--gold) 12%, transparent), transparent 60%),
     var(--bg);
+}
+/* Mounted above the shell (inside App's body container) while the handoff plays. */
+.login-stage--overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+}
+/* E2: backdrop darkens slightly. Sits above the form panel, below the brand panel. */
+.login-stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--ink) 18%, transparent);
+  opacity: 0;
+  transition: opacity 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.login-stage--split {
+  display: grid;
+  grid-template-columns: 5fr 7fr;
+  align-items: stretch;
+  justify-items: stretch;
+  overflow: hidden;
+  transition: background-color 480ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.login-brand {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2rem;
+  min-width: 22rem;
+  min-height: 0;
+  padding: 2.5rem 2rem 4rem;
+  overflow: hidden;
+  isolation: isolate;
+  border-right: 1px solid var(--line);
+  /* background-color comes from the shared `.app-sidebar, .app-chrome, .login-brand` theme rule. */
+  transition: border-color 380ms ease, background-color 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.login-brand-bg {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background: linear-gradient(160deg, var(--surface-2), var(--surface) 55%);
+  transition: opacity 380ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.login-brand::before,
+.login-brand::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+  will-change: transform, opacity;
+  transition: opacity 320ms ease;
+}
+.login-brand::before {
+  inset: -36px;
+  background: radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--ink) 9%, transparent) 1px, transparent 0) 0 0 / 18px 18px;
+  animation: login-brand-dots 16s linear infinite;
+}
+.login-brand::after {
+  inset: -20%;
+  background:
+    radial-gradient(ellipse 45% 32% at 50% 40%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 70%),
+    radial-gradient(ellipse 40% 30% at 30% 72%, color-mix(in srgb, var(--accent-soft) 70%, transparent), transparent 70%);
+  animation: login-brand-glow 14s ease-in-out infinite alternate;
+}
+@keyframes login-brand-dots {
+  to { transform: translate(18px, 36px); }
+}
+@keyframes login-brand-glow {
+  0% { transform: translate(-3%, -2%) scale(1); opacity: 0.75; }
+  50% { opacity: 1; }
+  100% { transform: translate(3%, 3%) scale(1.08); opacity: 0.8; }
+}
+/* Layered logo: stacked full-canvas PNGs; the box keeps the PNG aspect so FLIP can measure it. */
+.brand-logo-layered {
+  position: relative;
+  display: block;
+  aspect-ratio: var(--logo-aspect, 1.158);
+  transform-origin: center;
+  will-change: transform;
+}
+.brand-logo-layered .login-layer {
+  position: absolute;
+  inset: 0;
+  display: block;
+  will-change: transform, opacity, filter;
+}
+.brand-logo-layered .login-layer img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+  user-select: none;
+  pointer-events: none;
+}
+.brand-logo-layered .login-layer[data-layer="leaves-left"] img { transform-origin: 18% 96%; }
+.brand-logo-layered .login-layer[data-layer="leaves-right"] img { transform-origin: 82% 4%; }
+.login-brand .brand-logo-layered.login-logo {
+  width: min(100%, 24rem, calc(44vh * var(--logo-aspect, 1.158)));
+  margin: 0 auto 4px;
+  filter: drop-shadow(0 10px 22px rgba(0, 0, 0, 0.35));
+  transition: transform 600ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.login-brand .login-logo-glow {
+  width: 22rem;
+  height: 22rem;
+}
+.login-brand-clock {
+  zoom: 1.6;
+  min-width: 9.5rem;
+  transform-origin: center;
+  transition: transform 600ms cubic-bezier(0.22, 1, 0.36, 1), opacity 320ms ease;
+}
+.login-brand-clock .duty-clock-digits {
+  font-size: 1.3rem;
+}
+.login-hold-note {
+  margin-top: -0.5rem;
+  animation: login-error-in 250ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.login-brand-foot {
+  position: absolute;
+  inset: auto 0 1.5rem;
+  text-align: center;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  transition: opacity 320ms ease;
+}
+.login-form-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  justify-content: safe center;
+  align-items: center;
+  min-width: 0;
+  min-height: 0;
+  padding: 2.5rem 2rem;
+  overflow-y: auto;
+  background:
+    radial-gradient(ellipse at top right, color-mix(in srgb, var(--gold) 12%, transparent), transparent 60%),
+    var(--bg);
+  transition:
+    opacity 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    background 380ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.login-stage--split .login-card {
+  max-width: 24rem;
+  padding: 0;
+}
+.login-stage--split .login-card input {
+  border-color: color-mix(in srgb, var(--ink) 28%, var(--line));
+  background: color-mix(in srgb, var(--surface) 70%, var(--bg));
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+.login-stage--split .login-card input:hover:not(:disabled):not(:focus) {
+  border-color: color-mix(in srgb, var(--ink) 42%, var(--line));
+}
+.login-stage--split .login-card input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.login-notice {
+  display: flex;
+  gap: 0.55rem;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.45;
+  animation: login-error-in 250ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.login-notice--leaving {
+  animation: login-notice-out 300ms ease forwards;
+}
+@keyframes login-notice-out {
+  to {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+@media (max-width: 1023px) {
+  .login-stage--split {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .login-brand {
+    flex-direction: row;
+    gap: 1rem;
+    min-width: 0;
+    padding: 1rem 1.5rem;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .login-brand .login-logo-slot {
+    width: auto;
+  }
+  .login-brand .login-logo-glow {
+    width: 7rem;
+    height: 7rem;
+  }
+  .login-brand .brand-logo-layered.login-logo {
+    width: calc(4.5rem * var(--logo-aspect, 1.158));
+    margin: 0;
+  }
+  .login-brand-clock {
+    display: none;
+  }
+  .login-brand-foot {
+    position: static;
+    text-align: left;
+  }
 }
 .login-stack {
   display: flex;
@@ -1222,56 +1511,59 @@ tbody tr:hover { background: var(--surface-2); }
   animation: login-error-in 250ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
-.login-stage--form-exit .login-card {
-  animation: login-form-exit 280ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+/* ——— Reveal: only the logo stays; chrome gone so the shell (already painted) shows through ——— */
+.login-stage--reveal {
   pointer-events: none;
+  background: transparent;
+  transition: none;
 }
-.login-stage--logo-pulse .login-card {
+.login-stage--reveal::after {
+  opacity: 0;
+  transition: none;
+}
+.login-stage--reveal .login-card,
+.login-stage--reveal .login-form-panel {
   opacity: 0;
   pointer-events: none;
   visibility: hidden;
+  transition: none;
 }
-.login-stage--logo-pulse .login-logo-slot {
-  animation: login-logo-pulse 400ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+.login-stage--reveal .login-brand {
+  overflow: visible;
+  background: transparent !important;
+  border: 0 !important;
+  min-width: 0;
 }
-.login-stage--logo-pulse .login-logo-glow {
-  animation: login-glow 480ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+.login-stage--reveal .login-brand-bg,
+.login-stage--reveal .login-brand::before,
+.login-stage--reveal .login-brand::after,
+.login-stage--reveal .login-brand-clock,
+.login-stage--reveal .login-brand-foot,
+.login-stage--reveal .login-hold-note,
+.login-stage--reveal .login-logo-glow {
+  opacity: 0;
+  visibility: hidden;
+  transition: none;
+  animation: none;
 }
+.login-stage--reveal .login-logo-slot {
+  z-index: 40;
+  transform: translate(var(--flip-x, 0px), var(--flip-y, 0px)) scale(var(--flip-scale, 1));
+  transition: transform 630ms cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: transform;
+}
+.login-stage--reveal .brand-logo-layered.login-logo {
+  filter: drop-shadow(0 10px 22px rgba(0, 0, 0, 0.35));
+  transform: none;
+  transition: none;
+}
+
 .login-card--shake {
   animation: login-shake 250ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @keyframes login-spin {
   to { transform: rotate(360deg); }
-}
-@keyframes login-form-exit {
-  from {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-  to {
-    opacity: 0;
-    transform: translateY(10px) scale(0.985);
-  }
-}
-@keyframes login-logo-pulse {
-  0% { transform: scale(1); }
-  45% { transform: scale(1.04); }
-  100% { transform: scale(1); }
-}
-@keyframes login-glow {
-  0% {
-    opacity: 0;
-    transform: scale(0.92);
-  }
-  40% {
-    opacity: 0.45;
-    transform: scale(1.05);
-  }
-  100% {
-    opacity: 0;
-    transform: scale(1.12);
-  }
 }
 @keyframes login-shake {
   0% { transform: translateX(0); }
@@ -1309,6 +1601,25 @@ tbody tr:hover { background: var(--surface-2); }
 }
 .app-shell--enter .app-shell-content > * {
   animation: app-shell-settle 340ms cubic-bezier(0.22, 1, 0.36, 1) 120ms both;
+}
+
+/* Shell is fully painted under the login overlay so hiding chrome never flashes peach. */
+.app-shell--pre-reveal {
+  opacity: 1;
+  filter: none;
+}
+.app-shell--pre-reveal * {
+  animation-play-state: paused !important;
+}
+.app-shell--pre-reveal .sidebar-brand .brand-logo {
+  opacity: 0;
+}
+.app-shell--reveal .app-shell-content > * {
+  animation: app-shell-settle 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+/* Sidebar logo stays hidden until the overlay unmounts (flying clone is the visible one). */
+.app-shell--reveal .sidebar-brand .brand-logo {
+  opacity: 0;
 }
 
 /* —— Board / shell micro-interactions —— */
@@ -1500,16 +1811,32 @@ main,
 
 @media (prefers-reduced-motion: reduce) {
   .login-stage,
+  .login-stage::after,
+  .login-stage--split,
   .login-logo-slot,
+  .login-brand,
+  .login-brand-bg,
+  .login-brand-clock,
+  .login-brand-foot,
+  .login-form-panel,
+  .login-logo-glow,
+  .brand-logo-layered.login-logo,
   .login-submit {
     transition: none !important;
   }
-  .login-stage--form-exit .login-card,
-  .login-stage--logo-pulse .login-logo-slot,
-  .login-stage--logo-pulse .login-logo-glow,
+  .login-stage--reveal .login-card,
+  .login-hold-note,
+  .app-shell--reveal .app-shell-aside,
+  .app-shell--reveal .app-shell-main,
+  .app-shell--reveal .app-shell-content > *,
+  .app-shell--reveal .sidebar-brand .brand-logo,
   .login-card--shake,
   .login-error,
   .login-spinner,
+  .login-notice,
+  .login-notice--leaving,
+  .login-brand::before,
+  .login-brand::after,
   .app-shell--enter .app-shell-aside,
   .app-shell--enter .app-shell-main,
   .app-shell--enter .app-shell-content > *,
@@ -1544,9 +1871,18 @@ main,
   .room-card:hover .room-head-status {
     transform: none !important;
   }
-  .login-stage--form-exit .login-card,
-  .login-stage--logo-pulse .login-card {
+  .login-stage--reveal .login-card {
     opacity: 0;
+  }
+  .app-shell--pre-reveal {
+    opacity: 1;
+    filter: none;
+  }
+  .app-shell--pre-reveal * {
+    animation-play-state: running !important;
+  }
+  .app-shell--pre-reveal .sidebar-brand .brand-logo {
+    opacity: 1;
   }
   .login-submit--press,
   .room-card:hover,

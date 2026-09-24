@@ -104,10 +104,16 @@ function SessionCard({
 export function AppShell({
   user,
   deviceMode,
+  reveal,
   onLogout,
 }: {
   user: SessionUser;
   deviceMode: DeviceMode;
+  /**
+   * Login handoff: "pre" = mounted under the login overlay (blurred, invisible, animations
+   * paused); "go" = un-blur with stagger while the login logo lands on `sidebar-brand`.
+   */
+  reveal?: "pre" | "go";
   onLogout: () => void;
 }) {
   const { theme, toggle } = useTheme();
@@ -136,13 +142,20 @@ export function AppShell({
   }, [deviceMode]);
 
   return (
-    <div className={cn("flex h-full min-h-0 overflow-hidden", enter && "app-shell--enter")}>
-      <aside className="app-sidebar app-shell-aside flex h-full w-[88px] flex-col border-r border-[var(--line)] bg-[var(--surface)] px-2 py-5 lg:w-56 lg:px-4">
-        <div className="sidebar-brand">
+    <div
+      className={cn(
+        "flex h-full min-h-0 overflow-hidden",
+        reveal === "pre" && "app-shell--pre-reveal",
+        reveal === "go" && "app-shell--reveal",
+        !reveal && enter && "app-shell--enter",
+      )}
+    >
+      <aside className="app-sidebar app-shell-aside flex h-full min-h-0 w-[88px] shrink-0 flex-col overflow-hidden border-r border-[var(--line)] bg-[var(--surface)] px-2 py-5 lg:w-56 lg:px-4">
+        <div className="sidebar-brand" data-brand-target>
           <LoveNestLogo />
         </div>
         <p className="nav-section hidden lg:block">OPERACIÓN</p>
-        <nav aria-label="Navegación principal" className="flex flex-1 flex-col gap-1">
+        <nav aria-label="Navegación principal" className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin">
           {links
             .filter((link) => user.role === "admin" || !ADMIN_ROUTES.has(link.to))
             .map((link) => (

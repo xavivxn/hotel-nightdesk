@@ -1,6 +1,5 @@
-//! Device credentials for Supabase (remote admin URL/anon, reception device).
-//! Stored under the app data directory (not in SQLite `settings`, not in the repo).
-//! I07 can swap the backend for Windows Credential Manager without changing callers.
+//! Supabase configuration. Reception device credentials live in Windows Credential Manager.
+//! A legacy plaintext file is migrated on first load and then removed.
 
 use crate::error::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
@@ -22,8 +21,53 @@ pub(crate) struct DeviceCreds {
 }
 
 pub(crate) fn load_device(app_data: &Path) -> AppResult<DeviceCreds> {
-    let raw = std::fs::read(device_path(app_data)).map_err(|_| AppError::storage("No se pudo leer la configuración del dispositivo"))?;
-    serde_json::from_slice(&raw).map_err(|_| AppError::storage("Configuración del dispositivo inválida"))
+    if !device_marker_path(app_data).is_file() && !device_path(app_data).is_file() {
+        return Err(AppError::storage("No se configuró este dispositivo en esta instalación"));
+    }
+    if let Some(raw) = read_device_secret(app_data)? {
+        // The marker prevents an orphaned vault entry from reconnecting a clean
+        // installation after the user deletes the application's data directory.
+        if !device_marker_path(app_data).is_file() && !device_path(app_data).is_file() {
+            return Err(AppError::storage("No se configuró este dispositivo en esta instalación"));
+        }
+        let creds: DeviceCreds = serde_json::from_slice(&raw)
+            .map_err(|_| AppError::storage("Credencial del dispositivo inválida"))?;
+        validated_project_url(&creds.project_url)?;
+        if !device_marker_path(app_data).is_file() {
+            write_device_marker(app_data)?;
+        }
+        remove_legacy_device_file(app_data)?;
+        return Ok(creds);
+    }
+
+    let raw = std::fs::read(device_path(app_data))
+        .map_err(|_| AppError::storage("No se pudo leer la configuración del dispositivo"))?;
+    let creds: DeviceCreds = serde_json::from_slice(&raw)
+        .map_err(|_| AppError::storage("Configuración del dispositivo inválida"))?;
+    validated_project_url(&creds.project_url)?;
+    write_device_secret(app_data, &raw)?;
+    write_device_marker(app_data)?;
+    remove_legacy_device_file(app_data)?;
+    Ok(creds)
+}
+
+fn device_marker_path(app_data: &Path) -> PathBuf {
+    app_data.join("device_credential_store.txt")
+}
+
+fn write_device_marker(app_data: &Path) -> AppResult<()> {
+    std::fs::create_dir_all(app_data)?;
+    std::fs::write(device_marker_path(app_data), b"windows-credential-manager-v1\n")?;
+    Ok(())
+}
+
+fn remove_legacy_device_file(app_data: &Path) -> AppResult<()> {
+    let path = device_path(app_data);
+    if path.exists() {
+        std::fs::remove_file(path)
+            .map_err(|e| AppError::storage(format!("No se pudo eliminar la credencial anterior: {e}")))?;
+    }
+    Ok(())
 }
 
 fn remote_path(app_data: &Path) -> PathBuf {
@@ -32,6 +76,16 @@ fn remote_path(app_data: &Path) -> PathBuf {
 
 fn device_path(app_data: &Path) -> PathBuf {
     app_data.join("device_supabase.json")
+}
+
+fn validated_project_url(value: &str) -> AppResult<String> {
+    let parsed = reqwest::Url::parse(value.trim())
+        .map_err(|_| AppError::msg("URL del proyecto inválida"))?;
+    let local = matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+    if parsed.scheme() != "https" && !(parsed.scheme() == "http" && local) {
+        return Err(AppError::msg("La URL del proyecto debe usar HTTPS"));
+    }
+    Ok(parsed.as_str().trim_end_matches('/').to_string())
 }
 
 pub fn remote_configured(app_data: &Path) -> bool {
@@ -48,21 +102,18 @@ pub fn load_remote(app_data: &Path) -> AppResult<Option<(String, String)>> {
     if creds.project_url.trim().is_empty() || creds.anon_key.trim().is_empty() {
         return Ok(None);
     }
-    Ok(Some((creds.project_url, creds.anon_key)))
+    Ok(Some((validated_project_url(&creds.project_url)?, creds.anon_key)))
 }
 
 pub fn save_remote(app_data: &Path, project_url: &str, anon_key: &str) -> AppResult<()> {
-    let url = project_url.trim();
+    let url = validated_project_url(project_url)?;
     let key = anon_key.trim();
-    if url.is_empty() || key.is_empty() {
+    if key.is_empty() {
         return Err(AppError::msg("Ingresá la URL del proyecto y la clave anónima"));
-    }
-    if !(url.starts_with("https://") || url.starts_with("http://")) {
-        return Err(AppError::msg("La URL del proyecto debe empezar con https://"));
     }
     std::fs::create_dir_all(app_data).map_err(|e| AppError::msg(e.to_string()))?;
     let body = serde_json::to_string_pretty(&RemoteCreds {
-        project_url: url.to_string(),
+        project_url: url,
         anon_key: key.to_string(),
     })
     .map_err(|e| AppError::msg(e.to_string()))?;
@@ -70,8 +121,12 @@ pub fn save_remote(app_data: &Path, project_url: &str, anon_key: &str) -> AppRes
     Ok(())
 }
 
-pub fn device_configured(app_data: &Path) -> bool {
-    device_path(app_data).is_file()
+pub fn device_configured(app_data: &Path) -> AppResult<bool> {
+    if !device_path(app_data).is_file() && !device_marker_path(app_data).is_file() {
+        return Ok(false);
+    }
+    load_device(app_data)?;
+    Ok(true)
 }
 
 fn backup_key_path(app_data: &Path) -> PathBuf {
@@ -137,25 +192,103 @@ pub fn save_device(
     device_email: &str,
     device_password: &str,
 ) -> AppResult<()> {
-    let url = project_url.trim();
+    let url = validated_project_url(project_url)?;
     let key = anon_key.trim();
     let email = device_email.trim();
-    if url.is_empty() || key.is_empty() || email.is_empty() || device_password.is_empty() {
+    if key.is_empty() || email.is_empty() || device_password.is_empty() {
         return Err(AppError::msg("Completá URL, clave anónima y credenciales del dispositivo"));
     }
-    if !(url.starts_with("https://") || url.starts_with("http://")) {
-        return Err(AppError::msg("La URL del proyecto debe empezar con https://"));
-    }
-    std::fs::create_dir_all(app_data).map_err(|e| AppError::msg(e.to_string()))?;
-    let body = serde_json::to_string_pretty(&DeviceCreds {
-        project_url: url.to_string(),
+    let body = serde_json::to_vec(&DeviceCreds {
+        project_url: url,
         anon_key: key.to_string(),
         device_email: email.to_string(),
         device_password: device_password.to_string(),
     })
     .map_err(|e| AppError::msg(e.to_string()))?;
-    std::fs::write(device_path(app_data), body).map_err(|e| AppError::msg(e.to_string()))?;
+    write_device_secret(app_data, &body)?;
+    write_device_marker(app_data)?;
+    remove_legacy_device_file(app_data)?;
     Ok(())
+}
+
+#[cfg(windows)]
+fn device_target(app_data: &Path) -> Vec<u16> {
+    use sha2::{Digest, Sha256};
+    let path = app_data.to_string_lossy().to_lowercase();
+    let target = format!(
+        "com.nightdesk.hotel/device/{}",
+        hex::encode(Sha256::digest(path.as_bytes()))
+    );
+    target.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+#[cfg(windows)]
+fn read_device_secret(app_data: &Path) -> AppResult<Option<Vec<u8>>> {
+    use windows_sys::Win32::Foundation::ERROR_NOT_FOUND;
+    use windows_sys::Win32::Security::Credentials::{CredFree, CredReadW, CREDENTIALW, CRED_TYPE_GENERIC};
+    let target = device_target(app_data);
+    let mut credential: *mut CREDENTIALW = std::ptr::null_mut();
+    // SAFETY: target is a NUL-terminated UTF-16 string. CredReadW initializes
+    // credential on success and CredFree releases that buffer exactly once.
+    if unsafe { CredReadW(target.as_ptr(), CRED_TYPE_GENERIC, 0, &mut credential) } == 0 {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == Some(ERROR_NOT_FOUND as i32) {
+            return Ok(None);
+        }
+        return Err(AppError::storage(format!("No se pudo leer el Administrador de credenciales de Windows: {error}")));
+    }
+    if credential.is_null() {
+        return Err(AppError::storage("Windows devolvió una credencial vacía"));
+    }
+    // SAFETY: the returned credential and blob are valid until CredFree.
+    let raw = unsafe {
+        let stored = &*credential;
+        let len = stored.CredentialBlobSize as usize;
+        let bytes = if len == 0 {
+            Vec::new()
+        } else if stored.CredentialBlob.is_null() {
+            CredFree(credential.cast());
+            return Err(AppError::storage("Windows devolvió una credencial inválida"));
+        } else {
+            std::slice::from_raw_parts(stored.CredentialBlob, len).to_vec()
+        };
+        CredFree(credential.cast());
+        bytes
+    };
+    Ok(Some(raw))
+}
+
+#[cfg(windows)]
+fn write_device_secret(app_data: &Path, raw: &[u8]) -> AppResult<()> {
+    use windows_sys::Win32::Security::Credentials::{CredWriteW, CREDENTIALW, CRED_MAX_CREDENTIAL_BLOB_SIZE, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC};
+    // Generic credentials support at most 2560 bytes. Report an actionable error
+    // rather than letting CredWriteW fail with a generic Windows code.
+    if raw.len() > CRED_MAX_CREDENTIAL_BLOB_SIZE as usize {
+        return Err(AppError::storage("Las credenciales del dispositivo son demasiado largas para Windows"));
+    }
+    let mut target = device_target(app_data);
+    let mut credential = CREDENTIALW::default();
+    credential.Type = CRED_TYPE_GENERIC;
+    credential.TargetName = target.as_mut_ptr();
+    credential.CredentialBlobSize = raw.len() as u32;
+    credential.CredentialBlob = raw.as_ptr() as *mut u8;
+    credential.Persist = CRED_PERSIST_LOCAL_MACHINE;
+    // SAFETY: target and raw remain alive during CredWriteW; Windows copies them.
+    if unsafe { CredWriteW(&credential, 0) } == 0 {
+        let error = std::io::Error::last_os_error();
+        return Err(AppError::storage(format!("No se pudo guardar la credencial del dispositivo en Windows: {error}")));
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn read_device_secret(_app_data: &Path) -> AppResult<Option<Vec<u8>>> {
+    Ok(None)
+}
+
+#[cfg(not(windows))]
+fn write_device_secret(_app_data: &Path, _raw: &[u8]) -> AppResult<()> {
+    Err(AppError::storage("Las credenciales del dispositivo requieren Windows"))
 }
 
 #[cfg(test)]
@@ -182,5 +315,90 @@ mod tests {
         let loaded = ensure_backup_key(&dir).unwrap();
         assert_eq!(loaded, [0xaa; 32]);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "requires an interactive Windows logon session with Credential Manager"]
+    fn device_credentials_roundtrip_and_legacy_migration() -> AppResult<()> {
+        use windows_sys::Win32::Security::Credentials::{CredDeleteW, CRED_TYPE_GENERIC};
+
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let target = device_target(&self.0);
+                // SAFETY: NUL-terminated UTF-16 target belongs to this test.
+                unsafe { CredDeleteW(target.as_ptr(), CRED_TYPE_GENERIC, 0) };
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+
+        let dir = temp_dir();
+        let _cleanup = Cleanup(dir.clone());
+        save_device(&dir, "https://example.supabase.co", "anon-test", "device@example.test", "password-test")?;
+        assert!(device_configured(&dir)?);
+        assert!(device_marker_path(&dir).is_file());
+        assert!(!device_path(&dir).exists(), "new credentials must not be written to plaintext JSON");
+        let loaded = load_device(&dir)?;
+        assert_eq!(loaded.device_email, "device@example.test");
+        assert_eq!(loaded.device_password, "password-test");
+
+        std::fs::remove_file(device_marker_path(&dir))?;
+        assert!(!device_configured(&dir)?, "a removed data directory must not reuse an orphaned credential");
+        assert!(load_device(&dir).is_err());
+        save_device(&dir, "https://example.supabase.co", "anon-test", "device@example.test", "password-test")?;
+
+        let target = device_target(&dir);
+        // SAFETY: the target is valid and the credential was created above.
+        assert_ne!(unsafe { CredDeleteW(target.as_ptr(), CRED_TYPE_GENERIC, 0) }, 0);
+        let legacy = DeviceCreds {
+            project_url: "https://legacy.supabase.co".into(),
+            anon_key: "legacy-anon".into(),
+            device_email: "legacy@example.test".into(),
+            device_password: "legacy-password".into(),
+        };
+        std::fs::write(device_path(&dir), serde_json::to_vec(&legacy).expect("serialize test credentials"))?;
+        let migrated = load_device(&dir)?;
+        assert_eq!(migrated.device_password, "legacy-password");
+        assert!(!device_path(&dir).exists(), "migration must remove the plaintext copy");
+        assert_eq!(load_device(&dir)?.device_email, "legacy@example.test");
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn device_credential_target_is_stable_across_path_case() {
+        assert_eq!(
+            device_target(Path::new("C:\\Users\\Naser\\AppData\\Roaming\\com.nightdesk.hotel")),
+            device_target(Path::new("c:\\users\\naser\\appdata\\roaming\\COM.NIGHTDESK.HOTEL"))
+        );
+    }
+
+    #[test]
+    fn project_url_rejects_remote_http_and_allows_local_development() {
+        assert!(validated_project_url("http://remote.example.test").is_err());
+        assert_eq!(
+            validated_project_url("http://localhost:54321/").unwrap(),
+            "http://localhost:54321"
+        );
+        assert_eq!(
+            validated_project_url("https://example.supabase.co/").unwrap(),
+            "https://example.supabase.co"
+        );
+    }
+
+    #[test]
+    fn remote_config_rejects_insecure_saved_url() -> AppResult<()> {
+        let dir = temp_dir();
+        assert!(save_remote(&dir, "http://remote.example.test", "anon-test").is_err());
+        std::fs::write(
+            remote_path(&dir),
+            r#"{"project_url":"http://remote.example.test","anon_key":"anon-test"}"#,
+        )?;
+        assert!(load_remote(&dir).is_err());
+        save_remote(&dir, "https://example.supabase.co/", "anon-test")?;
+        assert_eq!(load_remote(&dir)?.unwrap().0, "https://example.supabase.co");
+        std::fs::remove_dir_all(dir)?;
+        Ok(())
     }
 }

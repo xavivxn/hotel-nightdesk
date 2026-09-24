@@ -198,7 +198,7 @@ pub fn list_local(conn: &Connection) -> AppResult<Vec<BackupListItem>> {
 
 pub fn list_backups(conn: &Connection, data_dir: &Path) -> AppResult<Vec<BackupListItem>> {
     let mut items = list_local(conn)?;
-    if !credentials::device_configured(data_dir) {
+    if !credentials::device_configured(data_dir)? {
         return Ok(items);
     }
     let client = match SupabaseClient::from_device(credentials::load_device(data_dir)?) {
@@ -389,7 +389,7 @@ fn decrypt_file(src: &Path, dest: &Path, key: &[u8; 32], nonce_hex: &str) -> App
 }
 
 fn drain_once(db_path: &Path, data_dir: &Path) -> AppResult<()> {
-    if !credentials::device_configured(data_dir) {
+    if !credentials::device_configured(data_dir)? {
         return Ok(());
     }
     let client = SupabaseClient::from_device(credentials::load_device(data_dir)?)?;
@@ -583,7 +583,7 @@ fn restore_remote(
     backup_id: &str,
     auth: &mut crate::auth::AuthState,
 ) -> AppResult<()> {
-    if !credentials::device_configured(data_dir) {
+    if !credentials::device_configured(data_dir)? {
         return Err(AppError::storage("Configurá el dispositivo de recepción para descargar copias remotas"));
     }
     if !credentials::backup_key_configured(data_dir) {

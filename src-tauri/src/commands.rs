@@ -42,7 +42,7 @@ fn maybe_start_worker(state: &AppState, app: &AppHandle, data_dir: &std::path::P
 
 pub(crate) async fn try_catalog(state: &AppState, app: &AppHandle, actor: &Actor, entity: &str, payload: serde_json::Value, operation_id: Option<String>) -> AppResult<Option<i64>> {
     let dir = app_data_dir(app)?;
-    if !crate::sync::catalog::configured(&dir) { return Ok(None); }
+    if !crate::sync::catalog::configured(&dir)? { return Ok(None); }
     let request = crate::sync::catalog::prepare(&conn(state), actor, entity, payload, operation_id)?;
     if entity == "settings" && request["p_payload"]["values"].as_object().is_some_and(|v| v.is_empty()) { return Ok(Some(0)); }
     let remote = crate::sync::remote::SupabaseRemote::load(&dir)?;
@@ -421,7 +421,7 @@ pub fn hash_password(payload: HashPasswordPayload, operation_id: Option<String>)
 
 #[tauri::command]
 pub fn sync_status(state: State<AppState>, app: AppHandle) -> AppResult<SyncStatus> {
-    let configured = crate::credentials::device_configured(&app_data_dir(&app)?);
+    let configured = crate::credentials::device_configured(&app_data_dir(&app)?)?;
     let pending = crate::sync::push::pending_count(&conn(&state)).unwrap_or(0);
     let snapshot = state
         .sync

@@ -1,6 +1,6 @@
 [package]
 name = "nightdesk"
-version = "0.1.0"
+version = "0.1.2"
 description = "Sistema local de recepción para hotel y motel"
 authors = ["Nightdesk"]
 edition = "2021"
@@ -32,3 +32,6 @@ base64 = "0.22"
 aes-gcm = "0.10"
 flate2 = "1"
 rand = "0.8"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security_Credentials"] }

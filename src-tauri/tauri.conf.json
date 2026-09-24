@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Love Nestt Motel App",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "identifier": "com.nightdesk.hotel",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "node node_modules/typescript/bin/tsc && node node_modules/vite/bin/vite.js build --configLoader runner",
     "frontendDist": "../dist"
   },
   "app": {

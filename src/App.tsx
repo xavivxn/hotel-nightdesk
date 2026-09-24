@@ -14,10 +14,13 @@ import { DeviceModePage } from "@/pages/DeviceModePage";
 import { RemoteConfigPage } from "@/pages/RemoteConfigPage";
 import { LoveNestLogo } from "@/components/layout/BrandLogo";
 import { api, refreshDeviceMode } from "@/lib/api";
+import { LOGIN_MOTION, type HandoffPhase } from "@/lib/login-transition";
 import { useTheme } from "@/lib/theme";
 import type { AppSettings, DeviceMode, SessionInfo } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
 import { RoleContext } from "@/lib/permissions";
+
+type Handoff = "none" | HandoffPhase;
 
 const fallbackSettings: AppSettings = {
   business_name: "MotelApp",
@@ -47,6 +50,17 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  // Login → shell choreography. "hold": login overlay plays E2/E3 while settings load;
+  // "reveal": logo flies to the sidebar and the shell un-blurs; "none": shell only.
+  const [handoff, setHandoff] = useState<Handoff>("none");
+  const [sequenceDone, setSequenceDone] = useState(false);
+  const [handoffSlow, setHandoffSlow] = useState(false);
+
+  function resetHandoff() {
+    setHandoff("none");
+    setSequenceDone(false);
+    setHandoffSlow(false);
+  }
 
   async function initialize() {
     setError(null);
@@ -95,6 +109,7 @@ export default function App() {
       api.clearSession();
       setSession(null);
       setLoaded(false);
+      resetHandoff();
       setNotice("Tu sesión terminó. Volvé a ingresar.");
     }
     window.addEventListener("nightdesk-session-expired", expire);
@@ -136,6 +151,20 @@ export default function App() {
     };
   }, [session, setTheme]);
 
+  // Reveal starts once settings are loaded and the login sequence marked done.
+  useEffect(() => {
+    if (handoff === "hold" && loaded && sequenceDone) setHandoff("reveal");
+  }, [handoff, loaded, sequenceDone]);
+  // If settings fail while holding, drop the overlay so the error + "Volver al acceso" show.
+  useEffect(() => {
+    if (handoff !== "none" && error && !loaded) resetHandoff();
+  }, [handoff, error, loaded]);
+  useEffect(() => {
+    if (handoff !== "hold" || loaded) return;
+    const id = window.setTimeout(() => setHandoffSlow(true), LOGIN_MOTION.slowLoadMs);
+    return () => window.clearTimeout(id);
+  }, [handoff, loaded]);
+
   async function logout() {
     try {
       await api.logout();
@@ -144,12 +173,17 @@ export default function App() {
     }
     setSession(null);
     setLoaded(false);
+    resetHandoff();
     setError(null);
-    setNotice("Sesión cerrada.");
+    setNotice("La sesión anterior se cerró correctamente.");
     setTheme("light");
   }
 
-  let body: ReactNode;
+  // `body` is the shell (or a loading block); `login` stays mounted on top during the handoff
+  // so the logo can fly from the login stage to the sidebar without remounting.
+  let body: ReactNode = null;
+  let login: ReactNode = null;
+  const inHandoff = session !== null && handoff !== "none";
   if (deviceMode === undefined || (deviceMode === "reception" && setup === null)) {
     body = (
       <div className="p-8">
@@ -173,21 +207,31 @@ export default function App() {
     );
   } else if (deviceMode === "remote" && remoteReady === false) {
     body = <RemoteConfigPage onConfigured={() => setRemoteReady(true)} />;
-  } else if (!session) {
-    body = (
+  } else if (!session || inHandoff) {
+    login = (
       <LoginPage
         setup={Boolean(setup)}
         remote={deviceMode === "remote"}
         notice={notice}
-        onLogin={(s) => {
+        handoff={
+          inHandoff
+            ? { phase: handoff as HandoffPhase, slow: handoffSlow, onDone: resetHandoff }
+            : undefined
+        }
+        onLogin={(s, animated) => {
           setSession(s);
           setSetup(false);
           setError(null);
           setNotice(null);
+          setSequenceDone(false);
+          setHandoffSlow(false);
+          setHandoff(animated ? "hold" : "none");
         }}
+        onSequenceDone={() => setSequenceDone(true)}
       />
     );
-  } else if (!loaded) {
+  }
+  if (session && !loaded && !inHandoff) {
     body = (
       <div className="login-stage login-stage--handoff h-full min-h-0 p-6">
         <div className="login-stack">
@@ -206,8 +250,9 @@ export default function App() {
         </div>
       </div>
     );
-  } else {
+  } else if (session && loaded && deviceMode) {
     const admin = session.user.role === "admin";
+    const reveal = handoff === "hold" ? "pre" : handoff === "reveal" ? "go" : undefined;
     body = (
       <RoleContext.Provider value={session.user.role}>
         <BrowserRouter>
@@ -217,7 +262,11 @@ export default function App() {
             </div>
           )}
           <Routes>
-            <Route element={<AppShell user={session.user} deviceMode={deviceMode} onLogout={logout} />}>
+            <Route
+              element={
+                <AppShell user={session.user} deviceMode={deviceMode} reveal={reveal} onLogout={logout} />
+              }
+            >
               <Route path="/" element={<BoardPage settings={settings} deviceMode={deviceMode} />} />
               <Route path="/reservas" element={<ReservationsPage />} />
               <Route path="/historial" element={<HistoryPage settings={settings} />} />
@@ -239,7 +288,10 @@ export default function App() {
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       <TitleBar />
-      <div className="min-h-0 flex-1 overflow-hidden">{body}</div>
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        {body}
+        {login}
+      </div>
     </div>
   );
 }

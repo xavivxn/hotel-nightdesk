@@ -1143,6 +1143,59 @@ mod migration_runner_tests {
     }
 
     #[test]
+    fn upgrade_preserves_local_mode_printer_and_closed_account() -> AppResult<()> {
+        let dir = temp_db_dir();
+        let db_path = dir.join("nightdesk.db");
+        let mut conn = Connection::open(&db_path)?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        migrate_up_to(&mut conn, "015_catalog_audit")?;
+        seed_if_empty(&conn)?;
+        upsert_setting(&conn, "device_mode", "reception")?;
+        upsert_setting(&conn, "printer_name", "Epson test 80 mm")?;
+        upsert_setting(&conn, "paper_width", "80")?;
+        let now = now_rfc3339();
+        conn.execute("INSERT INTO guests (name, created_at) VALUES ('Prueba instalación', ?1)", [&now])?;
+        conn.execute(
+            "INSERT INTO stays (room_id, guest_id, rate_plan_id, check_in_at, check_out_at, status)
+             VALUES (1, 1, 1, ?1, ?1, 'closed')",
+            [&now],
+        )?;
+        conn.execute(
+            "INSERT INTO charges (stay_id, kind, description, amount_cents, created_at)
+             VALUES (1, 'product', 'Agua', 5000, ?1)",
+            [&now],
+        )?;
+        conn.execute(
+            "INSERT INTO receipt_snapshots (stay_id, bytes, created_at) VALUES (1, ?1, ?2)",
+            params![b"ticket congelado", now],
+        )?;
+
+        migrate(&mut conn, Some(&db_path))?;
+        let backup_path = pre_migrate_backup_path(&db_path, "016_backup");
+        assert!(backup_path.exists());
+        drop(conn);
+
+        let mut reopened = Connection::open(&db_path)?;
+        reopened.execute_batch("PRAGMA foreign_keys = ON;")?;
+        migrate(&mut reopened, Some(&db_path))?;
+        assert_eq!(get_setting(&reopened, "device_mode", "")?, "reception");
+        let settings = load_settings(&reopened)?;
+        assert_eq!(settings.printer_name, "Epson test 80 mm");
+        assert_eq!(settings.paper_width, 80);
+        assert_eq!(reopened.query_row("SELECT COUNT(*) FROM rooms", [], |r| r.get::<_, i64>(0))?, 23);
+        assert_eq!(reopened.query_row("SELECT amount_cents FROM charges WHERE stay_id = 1", [], |r| r.get::<_, i64>(0))?, 5000);
+        assert_eq!(reopened.query_row("SELECT status FROM stays WHERE id = 1", [], |r| r.get::<_, String>(0))?, "closed");
+        assert_eq!(reopened.query_row("SELECT bytes FROM receipt_snapshots WHERE stay_id = 1", [], |r| r.get::<_, Vec<u8>>(0))?, b"ticket congelado");
+        drop(reopened);
+        let backup = Connection::open(&backup_path)?;
+        assert_eq!(get_setting(&backup, "device_mode", "")?, "reception");
+        assert_eq!(backup.query_row("SELECT COUNT(*) FROM receipt_snapshots", [], |r| r.get::<_, i64>(0))?, 1);
+        drop(backup);
+        fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
     fn failed_migration_rolls_back_and_restores_backup() -> AppResult<()> {
         let dir = temp_db_dir();
         let db_path = dir.join("nightdesk.db");

@@ -114,21 +114,9 @@ export function formatDurationLabel(checkIn: Date, now: Date) {
 function billHourly(rate: RatePlan, checkIn: Date, now: Date): LineItem[] {
   const elapsed = elapsedMinutes(checkIn, now);
   const grace = Math.max(0, rate.grace_minutes);
-  let paidUntil = Math.max(1, rate.included_hours) * 60;
-  let extraHalves = 0;
-  let extraHours = 0;
-  let nextIsHalf = true;
-  while (elapsed > paidUntil + grace && extraHalves + extraHours < 500) {
-    if (nextIsHalf) {
-      extraHalves += 1;
-      paidUntil += 30;
-      nextIsHalf = false;
-    } else {
-      extraHours += 1;
-      paidUntil += 60;
-      nextIsHalf = true;
-    }
-  }
+  const includedMinutes = Math.max(1, rate.included_hours) * 60;
+  const extraMinutes = Math.max(0, elapsed - includedMinutes - grace);
+  const extraBlocks = Math.min(500, Math.ceil(extraMinutes / 30));
   const lines: LineItem[] = [
     {
       kind: "stay",
@@ -136,18 +124,11 @@ function billHourly(rate: RatePlan, checkIn: Date, now: Date): LineItem[] {
       amount_cents: rate.base_amount_cents,
     },
   ];
-  if (extraHalves > 0) {
+  if (extraBlocks > 0) {
     lines.push({
       kind: "extra_hour",
-      description: extraHalves === 1 ? "Adicional 30 min" : `Adicional 30 min (${extraHalves})`,
-      amount_cents: extraHalves * rate.extra_hour_cents,
-    });
-  }
-  if (extraHours > 0) {
-    lines.push({
-      kind: "extra_hour",
-      description: extraHours === 1 ? "Hora adicional" : `Hora adicional (${extraHours})`,
-      amount_cents: extraHours * rate.base_amount_cents,
+      description: extraBlocks === 1 ? "Adicional 30 min" : `Extra 30 min x${extraBlocks}`,
+      amount_cents: extraBlocks * rate.extra_hour_cents,
     });
   }
   return lines;

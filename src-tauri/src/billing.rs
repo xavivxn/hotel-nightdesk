@@ -170,47 +170,24 @@ pub fn crossed_cutoff(check_in: DateTime<Local>, now: DateTime<Local>, cutoff_ho
 fn bill_hourly(rate: &RatePlan, check_in: DateTime<Local>, now: DateTime<Local>) -> Vec<LineItem> {
     let elapsed = elapsed_minutes(check_in, now);
     let grace = rate.grace_minutes.max(0);
-    let mut paid_until = rate.included_hours.max(1) * 60;
-    let mut extra_halves: i64 = 0;
-    let mut extra_hours: i64 = 0;
-    let mut next_is_half = true;
-    while elapsed > paid_until + grace && extra_halves + extra_hours < 500 {
-        if next_is_half {
-            extra_halves += 1;
-            paid_until += 30;
-            next_is_half = false;
-        } else {
-            extra_hours += 1;
-            paid_until += 60;
-            next_is_half = true;
-        }
-    }
+    let included_minutes = rate.included_hours.max(1) * 60;
+    let extra_minutes = (elapsed - included_minutes - grace).max(0);
+    let extra_blocks = ((extra_minutes + 29) / 30).min(500);
 
     let mut lines = vec![LineItem {
         kind: "stay".into(),
         description: format!("{} (1 h)", rate.name),
         amount_cents: rate.base_amount_cents,
     }];
-    if extra_halves > 0 {
+    if extra_blocks > 0 {
         lines.push(LineItem {
             kind: "extra_hour".into(),
-            description: if extra_halves == 1 {
+            description: if extra_blocks == 1 {
                 "Adicional 30 min".into()
             } else {
-                format!("Adicional 30 min ({extra_halves})")
+                format!("Extra 30 min x{extra_blocks}")
             },
-            amount_cents: extra_halves * rate.extra_hour_cents,
-        });
-    }
-    if extra_hours > 0 {
-        lines.push(LineItem {
-            kind: "extra_hour".into(),
-            description: if extra_hours == 1 {
-                "Hora adicional".into()
-            } else {
-                format!("Hora adicional ({extra_hours})")
-            },
-            amount_cents: extra_hours * rate.base_amount_cents,
+            amount_cents: extra_blocks * rate.extra_hour_cents,
         });
     }
     lines
@@ -418,8 +395,20 @@ mod tests {
         assert_eq!(stay_and_extra(&on_grace), (45_000, 15_000));
 
         let past = bill_hourly(&rate, check_in, dt(2026, 8, 31, 15, 36));
-        assert_eq!(stay_and_extra(&past), (45_000, 15_000 + 45_000));
-        assert!(past.iter().any(|line| line.description == "Hora adicional"));
+        assert_eq!(stay_and_extra(&past), (45_000, 30_000));
+        assert_eq!(past[1].description, "Extra 30 min x2");
+    }
+
+    #[test]
+    fn many_hourly_extras_use_explicit_compact_quantities() {
+        let rate = hourly();
+        let check_in = dt(2026, 9, 19, 18, 18);
+        let lines = bill_hourly(&rate, check_in, dt(2026, 9, 23, 23, 56));
+
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[1].description, "Extra 30 min x202");
+        assert_eq!(lines[1].amount_cents, 3_030_000);
+        assert_eq!(lines.iter().map(|line| line.amount_cents).sum::<i64>(), 3_075_000);
     }
 
     #[test]
@@ -542,7 +531,7 @@ mod tests {
     }
 
     #[test]
-    fn hourly_turno_edges_are_base_then_half_then_hour() {
+    fn hourly_turno_edges_charge_each_started_half_hour() {
         let rate = hourly();
         let check_in = dt(2026, 8, 31, 14, 0);
         let cases = [
@@ -551,9 +540,9 @@ mod tests {
             (dt(2026, 8, 31, 15, 5), 45_000, 0),
             (dt(2026, 8, 31, 15, 6), 45_000, 15_000),
             (dt(2026, 8, 31, 15, 35), 45_000, 15_000),
-            (dt(2026, 8, 31, 15, 36), 45_000, 60_000),
-            (dt(2026, 8, 31, 16, 35), 45_000, 60_000),
-            (dt(2026, 8, 31, 16, 36), 45_000, 75_000),
+            (dt(2026, 8, 31, 15, 36), 45_000, 30_000),
+            (dt(2026, 8, 31, 16, 35), 45_000, 45_000),
+            (dt(2026, 8, 31, 16, 36), 45_000, 60_000),
         ];
         for (now, stay, extra) in cases {
             let (got_stay, got_extra) = stay_and_extra(&bill_hourly(&rate, check_in, now));
@@ -604,8 +593,8 @@ mod tests {
         assert_eq!(bill.duration_label, "4h 00m");
         let (stay, extra) = stay_and_extra(&bill.lines);
         assert_eq!(stay, 45_000);
-        assert_eq!(extra, 120_000);
-        assert_eq!(bill.total_cents, 165_000);
+        assert_eq!(extra, 90_000);
+        assert_eq!(bill.total_cents, 135_000);
     }
 
     #[test]
@@ -638,7 +627,7 @@ mod tests {
             0.0,
         );
         assert!(!still_hourly.overnight_applied);
-        assert_eq!(still_hourly.total_cents, 105_000);
+        assert_eq!(still_hourly.total_cents, 75_000);
 
         let later = preview_turno(
             dt(2026, 9, 1, 10, 0),

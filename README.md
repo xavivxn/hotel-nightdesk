@@ -1,12 +1,12 @@
-# Nightdesk
+# Love Nestt Motel App
 
-Sistema local de recepción para hotel/motel: tablero de habitaciones, check-in por hora o noche, cobro al checkout e impresión de tickets ESC/POS. Tauri + React + SQLite, 100% offline.
+Aplicación Windows para recepción y administración remota. Recepción opera con SQLite local, incluso sin internet; administración consulta y modifica catálogo mediante Supabase.
 
-Pensado para el dueño o el personal de recepción. Los datos quedan en el equipo: no hace falta internet ni un servidor en la nube.
+Un mismo instalador sirve para las dos PCs. El modo se elige en el primer arranque.
 
-## Evolución acordada (pendiente de implementación)
+## Arquitectura
 
-La operación de recepción sigue siendo local sobre SQLite. El admin remoto consulta y edita catálogo vía Supabase; recepción sincroniza con cola offline. Respaldo diario cifrado a Supabase Storage.
+La operación de recepción sigue siendo local sobre SQLite. El admin remoto consulta y edita catálogo vía Supabase; recepción sincroniza con cola offline. El respaldo diario cifrado se envía a Supabase Storage.
 
 Ver [Arquitectura, requisitos y criterios de aceptación](docs/arquitectura-offline-supabase.md). El documento [VPN/API privada](docs/arquitectura-offline-vpn-backups.md) quedó sustituido el 17/09/2026.
 
@@ -34,7 +34,7 @@ Medición de snapshot y retención 7/30/12 en [I03 — Conectividad y respaldos]
 - **Datos:** SQLite (en el directorio de datos de la app)
 - **Cobro e impresión:** Rust (`rusqlite` + bytes ESC/POS)
 
-## Requisitos
+## Requisitos para compilar
 
 - Node.js 20+
 - Rust (rustup, toolchain stable)
@@ -58,24 +58,30 @@ npm run dev
 
 Luego abrí [http://localhost:1420](http://localhost:1420).
 
-## Build
+## Instalador Windows
 
-Instalador de producción (en la misma plataforma donde lo compiles):
+Compilar en Windows desde la raíz del repositorio:
 
-```bash
-npm run tauri build
+```powershell
+npm ci
+npm run build:installer:windows
 ```
 
-Build de prueba, más rápido:
+El instalador NSIS por usuario queda en `src-tauri/target/release/bundle/nsis/`. Es el mismo archivo `.exe` para recepción y administración. La compilación requiere Node, Rust y Visual C++ Build Tools; **las PCs donde se instala no necesitan estas herramientas**. Si WebView2 no está presente, el instalador predeterminado necesita internet para descargarlo una vez. La operación de recepción posterior funciona sin internet.
+
+`npm run build:installer:windows` incrementa automáticamente la versión de parche antes de cada instalador (`0.1.1` → `0.1.2`) y la sincroniza en `package.json`, `package-lock.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` y `src-tauri/Cargo.lock`. Los builds de desarrollo no consumen versiones; usá este comando para generar entregables Windows.
+
+Desde la versión 0.1.1, el instalador registra la aplicación para abrirla automáticamente cuando inicia sesión el usuario de Windows. La entrada es por usuario (HKCU), se conserva durante una actualización y se elimina al desinstalar. Esto inicia la ventana después del inicio de sesión; no instala un servicio de Windows ni arranca antes de que el usuario inicie sesión.
+
+Para una compilación rápida de desarrollo:
 
 ```bash
 npm run tauri build -- --debug
 ```
 
-Los artefactos quedan en `src-tauri/target/release/bundle/` (o `debug/bundle/`).
+El instalador conserva `com.nightdesk.hotel` como identificador interno para mantener la ruta de datos al actualizar. No cambies ese identificador ni instales una versión anterior sobre una base ya migrada. Cerrá la aplicación antes de actualizar y verificá que exista un respaldo reciente. La actualización reemplaza los binarios y conserva `%APPDATA%\com.nightdesk.hotel\`.
 
-- **macOS:** `.app` / `.dmg`
-- **Windows:** instalador NSIS / `.exe` (hay que compilarlo en un PC con Windows)
+En el primer arranque de una instalación nueva, elegí **Recepción** o **Administración remota**. En recepción configurá la impresora y el dispositivo Supabase; sus credenciales se guardan en el Administrador de credenciales de Windows. Una configuración anterior en `device_supabase.json` se migra al abrir y se elimina tras guardar la credencial en Windows. En administración configurá URL/clave anónima e iniciá sesión con Supabase Auth. No se instala un servicio Windows ni WireGuard. El procedimiento y la evidencia pendiente por cada equipo están en [validación MOT-23](docs/validacion-instalacion-mot23.md).
 
 ## Datos locales
 
@@ -84,7 +90,7 @@ La base SQLite se crea al primer arranque en el data dir de la app, no dentro de
 - macOS: `~/Library/Application Support/com.nightdesk.hotel/`
 - Windows: `%APPDATA%\com.nightdesk.hotel\`
 
-Con WAL activo, no copiar únicamente `nightdesk.db` mientras la app está trabajando. El mecanismo previsto generará snapshots consistentes con SQLite Online Backup API y verificará su restauración. Ver la especificación de respaldos vinculada arriba.
+Con WAL activo, no copiar únicamente `nightdesk.db` mientras la app está trabajando. Usá el flujo de respaldos consistente de la aplicación; ver la [guía de recuperación](docs/guia-respaldos-recuperacion.md).
 
 ## Impresora
 

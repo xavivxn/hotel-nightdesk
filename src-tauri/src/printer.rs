@@ -558,6 +558,20 @@ mod tests {
     }
 
     #[test]
+    fn compact_extra_quantity_keeps_amount_right_aligned() {
+        let width = line_width(80);
+        let mut out = Vec::new();
+
+        write_bill_line(&mut out, width, "Extra 30 min x202", 3_030_000, "Gs.");
+
+        let text = String::from_utf8(out).unwrap();
+        let lines = text.lines().collect::<Vec<_>>();
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0], "Extra 30 min x202  3.030.000 Gs.");
+        assert!(lines.iter().all(|line| line.len() == width));
+    }
+
+    #[test]
     fn repeated_items_collapse_to_quantity_on_receipt() {
         let mut settings = AppSettings::default();
         settings.paper_width = 80;

@@ -31,9 +31,11 @@ pub fn run() {
             let db_path = dir.join("nightdesk.db");
             let conn = db::open(&db_path).map_err(|e| e.to_string())?;
             let mode = service::device_mode_get(&conn).ok().flatten();
-            let configured = credentials::device_configured(&dir);
+            // A vault failure must not block offline reception. sync_status and
+            // catalog operations will surface the underlying error to the UI.
+            let configured = credentials::device_configured(&dir).unwrap_or(false);
             let sync = if sync::worker::should_start(mode.as_deref(), configured) {
-                Some(sync::worker::start(app.handle().clone(), db_path.clone(), dir.clone()).map_err(|e| e.to_string())?)
+                sync::worker::start(app.handle().clone(), db_path.clone(), dir.clone()).ok()
             } else {
                 None
             };

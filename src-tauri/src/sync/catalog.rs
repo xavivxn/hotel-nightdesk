@@ -210,7 +210,7 @@ pub fn apply_result(conn: &mut Connection, request: &Value, result: &Value) -> A
 }
 
 /// Returns None for a standalone, unsynchronized installation.
-pub fn configured(path: &Path) -> bool { crate::credentials::device_configured(path) }
+pub fn configured(path: &Path) -> AppResult<bool> { crate::credentials::device_configured(path) }
 
 pub fn execute(client: &dyn RemoteClient, request: &Value) -> AppResult<Value> {
     client.write(request)
