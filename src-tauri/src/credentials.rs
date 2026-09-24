@@ -1,5 +1,7 @@
-//! Supabase configuration. Reception device credentials live in Windows Credential Manager.
-//! A legacy plaintext file is migrated on first load and then removed.
+//! Supabase configuration. On Windows, reception device credentials live in
+//! Credential Manager. Elsewhere they stay in the app data directory, same place
+//! as the remote admin URL and anon key. A legacy plaintext file on Windows is
+//! migrated on first load and then removed.
 
 use crate::error::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
@@ -62,10 +64,19 @@ fn write_device_marker(app_data: &Path) -> AppResult<()> {
 }
 
 fn remove_legacy_device_file(app_data: &Path) -> AppResult<()> {
-    let path = device_path(app_data);
-    if path.exists() {
-        std::fs::remove_file(path)
-            .map_err(|e| AppError::storage(format!("No se pudo eliminar la credencial anterior: {e}")))?;
+    // Windows keeps the secret in Credential Manager, so the JSON is only a
+    // migration source. On other systems that JSON is the store itself.
+    #[cfg(windows)]
+    {
+        let path = device_path(app_data);
+        if path.exists() {
+            std::fs::remove_file(path)
+                .map_err(|e| AppError::storage(format!("No se pudo eliminar la credencial anterior: {e}")))?;
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app_data;
     }
     Ok(())
 }
@@ -282,13 +293,35 @@ fn write_device_secret(app_data: &Path, raw: &[u8]) -> AppResult<()> {
 }
 
 #[cfg(not(windows))]
-fn read_device_secret(_app_data: &Path) -> AppResult<Option<Vec<u8>>> {
-    Ok(None)
+fn read_device_secret(app_data: &Path) -> AppResult<Option<Vec<u8>>> {
+    let path = device_path(app_data);
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let raw = std::fs::read(&path).map_err(|e| {
+        AppError::storage(format!("No se pudo leer la configuración del dispositivo: {e}"))
+    })?;
+    if raw.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(raw))
 }
 
 #[cfg(not(windows))]
-fn write_device_secret(_app_data: &Path, _raw: &[u8]) -> AppResult<()> {
-    Err(AppError::storage("Las credenciales del dispositivo requieren Windows"))
+fn write_device_secret(app_data: &Path, raw: &[u8]) -> AppResult<()> {
+    std::fs::create_dir_all(app_data).map_err(|e| AppError::storage(e.to_string()))?;
+    let path = device_path(app_data);
+    std::fs::write(&path, raw).map_err(|e| {
+        AppError::storage(format!("No se pudo guardar la configuración del dispositivo: {e}"))
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).map_err(|e| {
+            AppError::storage(format!("No se pudo proteger la configuración del dispositivo: {e}"))
+        })?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -372,6 +405,36 @@ mod tests {
             device_target(Path::new("C:\\Users\\Naser\\AppData\\Roaming\\com.nightdesk.hotel")),
             device_target(Path::new("c:\\users\\naser\\appdata\\roaming\\COM.NIGHTDESK.HOTEL"))
         );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn device_credentials_persist_in_app_data_outside_windows() -> AppResult<()> {
+        let dir = temp_dir();
+        save_device(
+            &dir,
+            "http://127.0.0.1:54321/",
+            "anon-test",
+            "device@example.test",
+            "password-test",
+        )?;
+        assert!(device_configured(&dir)?);
+        assert!(device_marker_path(&dir).is_file());
+        assert!(device_path(&dir).is_file(), "the device secret stays in app data");
+        let loaded = load_device(&dir)?;
+        assert_eq!(loaded.project_url, "http://127.0.0.1:54321");
+        assert_eq!(loaded.device_email, "device@example.test");
+        assert_eq!(loaded.device_password, "password-test");
+        assert!(device_path(&dir).is_file(), "a later load must keep the stored secret");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(device_path(&dir)).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(!device_configured(&dir).unwrap_or(true));
+        Ok(())
     }
 
     #[test]

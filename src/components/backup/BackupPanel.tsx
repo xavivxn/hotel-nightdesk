@@ -157,7 +157,9 @@ export function BackupPanel({ deviceMode }: { deviceMode: DeviceMode }) {
           <p className="page-kicker">Protección de datos</p>
           <h2 id="backup-heading" className="text-lg font-semibold tracking-tight">Respaldos y recuperación</h2>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            {local ? "Esta PC conserva la base operativa. La copia remota se envía a Supabase Storage." : "Consulta de las copias remotas confirmadas en Supabase."}
+            {local
+              ? "Esta PC conserva la base operativa. La copia local no espera a Supabase. La subida a Storage usa la configuración de sincronización."
+              : "Esta PC solo consulta las copias confirmadas en Supabase. El respaldo y la restauración se hacen en recepción."}
           </p>
         </div>
         <Button variant="secondary" size="sm" onClick={() => void refresh()} disabled={loading || running}>
@@ -223,6 +225,9 @@ export function BackupPanel({ deviceMode }: { deviceMode: DeviceMode }) {
       </div>
       {local && !status?.ready && (
         <p className="text-xs text-[var(--muted)]">La acción de respaldo se habilita cuando el motor local tiene la clave de cifrado y la cola operativa.</p>
+      )}
+      {local && (
+        <p className="text-xs text-[var(--muted)]">Sin dispositivo configurado en Sincronización, la copia queda en esta PC y no se sube.</p>
       )}
 
       <Dialog open={guideOpen} title="Recuperar una copia" subtitle="Solo administración, en el equipo de recepción" onClose={() => setGuideOpen(false)}>

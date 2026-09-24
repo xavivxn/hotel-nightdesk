@@ -1,6 +1,6 @@
 # N11 — Catálogo de consumos para administración
 
-La pantalla **Catálogo admin** permite mantener el catálogo que usa recepción: buscar por nombre, filtrar por categoría y estado, crear productos, editar nombre/categoría/precio y aplicar baja lógica mediante activar/desactivar.
+La pantalla **Catálogo** permite mantener el catálogo que usa recepción: buscar por nombre, filtrar por categoría y estado, crear productos, editar nombre/categoría/precio y aplicar baja lógica mediante activar/desactivar.
 
 ## Reglas de negocio
 
@@ -28,7 +28,7 @@ Las escrituras remotas van a Supabase (`catalog_write` → `catalog_upsert_*` co
 
 ## Revisión de uso
 
-1. Abrir **Catálogo admin** y comprobar los contadores de activos/inactivos.
+1. Abrir **Catálogo** y comprobar los contadores de activos/inactivos.
 2. Crear un producto con precio `15.000`; probar que un precio vacío, decimal o cero muestra un error claro.
 3. Editar nombre, categoría y precio; verificar que el cambio aparece al recargar.
 4. Desactivar el producto; comprobar que desaparece de **Tienda** en una cuenta abierta.

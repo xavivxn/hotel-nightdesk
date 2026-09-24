@@ -23,6 +23,7 @@ export function SettingsPage({
   const [busy, setBusy] = useState(false);
   const [printers, setPrinters] = useState<string[]>([]);
   const [sync, setSync] = useState<SyncStatus | null>(null);
+  const [replacingDevice, setReplacingDevice] = useState(false);
   const [deviceForm, setDeviceForm] = useState({
     project_url: "",
     anon_key: "",
@@ -190,12 +191,14 @@ export function SettingsPage({
           <section className="card space-y-4 rounded-lg p-5 lg:col-span-2">
             <h2 className="text-lg font-semibold tracking-tight">Sincronización</h2>
             <p className="text-sm text-[var(--muted)]">
-              Estado provisional hasta I07. Las credenciales no se muestran después de guardar.
+              {sync?.configured
+                ? "El worker y la subida de respaldos ya usan las credenciales guardadas en este equipo. No hace falta volver a cargarlas al abrir la app."
+                : "Estas credenciales habilitan el worker de sincronización y la subida de respaldos a Storage. Se guardan en este equipo y no se vuelven a mostrar."}
             </p>
             <dl className="grid gap-2 text-sm sm:grid-cols-2">
               <div>
                 <dt className="text-[var(--muted)]">Configurado</dt>
-                <dd>{sync?.configured ? "Sí" : "No"}</dd>
+                <dd>{sync ? (sync.configured ? "Sí" : "No") : "…"}</dd>
               </div>
               <div>
                 <dt className="text-[var(--muted)]">Cola pendiente</dt>
@@ -236,54 +239,77 @@ export function SettingsPage({
                 Sincronizar ahora
               </Button>
             </div>
-            <div className="grid gap-3 border-t border-[var(--line)] pt-4 md:grid-cols-2">
-              <Field label="URL del proyecto">
-                <Input
-                  value={deviceForm.project_url}
-                  onChange={(e) => setDeviceForm({ ...deviceForm, project_url: e.target.value })}
-                  placeholder="https://xxxx.supabase.co"
-                />
-              </Field>
-              <Field label="Clave anónima">
-                <Input
-                  type="password"
-                  value={deviceForm.anon_key}
-                  onChange={(e) => setDeviceForm({ ...deviceForm, anon_key: e.target.value })}
-                />
-              </Field>
-              <Field label="Email del dispositivo">
-                <Input
-                  value={deviceForm.device_email}
-                  onChange={(e) => setDeviceForm({ ...deviceForm, device_email: e.target.value })}
-                />
-              </Field>
-              <Field label="Contraseña del dispositivo">
-                <Input
-                  type="password"
-                  value={deviceForm.device_password}
-                  onChange={(e) => setDeviceForm({ ...deviceForm, device_password: e.target.value })}
-                />
-              </Field>
-            </div>
-            <Button
-              disabled={busy}
-              onClick={async () => {
-                setBusy(true);
-                setError(null);
-                try {
-                  await api.syncConfigureDevice(deviceForm);
-                  setDeviceForm({ project_url: "", anon_key: "", device_email: "", device_password: "" });
-                  setSync(await api.syncStatus());
-                  setNotice("Dispositivo configurado en este equipo.");
-                } catch (e) {
-                  setError(String(e));
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            >
-              Configurar dispositivo
-            </Button>
+            {sync === null ? null : sync.configured && !replacingDevice ? (
+              <Button variant="secondary" disabled={busy} onClick={() => setReplacingDevice(true)}>
+                Reemplazar credenciales
+              </Button>
+            ) : (
+              <>
+                <div className="grid gap-3 border-t border-[var(--line)] pt-4 md:grid-cols-2">
+                  <Field label="URL del proyecto">
+                    <Input
+                      value={deviceForm.project_url}
+                      onChange={(e) => setDeviceForm({ ...deviceForm, project_url: e.target.value })}
+                      placeholder="https://xxxx.supabase.co"
+                    />
+                  </Field>
+                  <Field label="Clave anónima">
+                    <Input
+                      type="password"
+                      value={deviceForm.anon_key}
+                      onChange={(e) => setDeviceForm({ ...deviceForm, anon_key: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="Email del dispositivo">
+                    <Input
+                      value={deviceForm.device_email}
+                      onChange={(e) => setDeviceForm({ ...deviceForm, device_email: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="Contraseña del dispositivo">
+                    <Input
+                      type="password"
+                      value={deviceForm.device_password}
+                      onChange={(e) => setDeviceForm({ ...deviceForm, device_password: e.target.value })}
+                    />
+                  </Field>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    disabled={busy}
+                    onClick={async () => {
+                      setBusy(true);
+                      setError(null);
+                      try {
+                        await api.syncConfigureDevice(deviceForm);
+                        setDeviceForm({ project_url: "", anon_key: "", device_email: "", device_password: "" });
+                        setReplacingDevice(false);
+                        setSync(await api.syncStatus());
+                        setNotice("Dispositivo configurado en este equipo. El worker y la subida de respaldos lo usan al abrir la app.");
+                      } catch (e) {
+                        setError(String(e));
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                  >
+                    {sync?.configured ? "Guardar credenciales" : "Configurar dispositivo"}
+                  </Button>
+                  {sync?.configured ? (
+                    <Button
+                      variant="ghost"
+                      disabled={busy}
+                      onClick={() => {
+                        setReplacingDevice(false);
+                        setDeviceForm({ project_url: "", anon_key: "", device_email: "", device_password: "" });
+                      }}
+                    >
+                      Cancelar
+                    </Button>
+                  ) : null}
+                </div>
+              </>
+            )}
           </section>
         )}
         <BackupPanel deviceMode={deviceMode} />

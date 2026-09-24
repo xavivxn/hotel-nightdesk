@@ -12,7 +12,7 @@ El navegador es una demostración independiente con usuarios de prueba en almace
 
 ## Verificación
 
-- `node scripts/test-auth.mjs`: configuración única, login, permisos de recepción, catálogo admin, expiración, logout y límite de intentos en mock.
+- `node scripts/test-auth.mjs`: configuración única, login, permisos de recepción, catálogo, expiración, logout y límite de intentos en mock.
 - `cargo test --offline --manifest-path src-tauri/Cargo.toml`: pruebas de sesiones Rust, Argon2id, roles, expiración, usuario inactivo y cobertura de guards en comandos, además de regresiones existentes.
 - `node node_modules/typescript/bin/tsc --noEmit` y build Vite.
 

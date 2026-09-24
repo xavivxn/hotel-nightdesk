@@ -9,6 +9,7 @@ import {
   Package,
   Settings2,
   Sun,
+  Users,
   Wifi,
   WifiOff,
 } from "lucide-react";
@@ -29,9 +30,9 @@ const links = [
   { to: "/habitaciones", label: "Habitaciones", icon: BedDouble },
   { to: "/historial", label: "Historial", icon: History },
   { to: "/analisis", label: "Análisis", icon: ChartNoAxesCombined },
-  { to: "/catalogo", label: "Catálogo admin", icon: Package },
+  { to: "/catalogo", label: "Catálogo", icon: Package },
+  { to: "/usuarios", label: "Usuarios", icon: Users },
   { to: "/ajustes", label: "Ajustes", icon: Settings2 },
-  { to: "/usuarios", label: "Usuarios", icon: Settings2 },
 ];
 
 function useOnline() {
