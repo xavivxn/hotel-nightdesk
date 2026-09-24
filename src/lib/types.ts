@@ -3,6 +3,7 @@ export type SessionUser = { id: number; username: string; role: "admin" | "recep
 export type SessionInfo = { token: string; user: SessionUser; expires_at: number };
 export type LoginPayload = { username: string; password: string };
 export type CreateUserPayload = LoginPayload & { role: SessionUser["role"] };
+export type ManagedUser = SessionUser & { active: boolean; version: number };
 
 export type Room = {
   id: number;

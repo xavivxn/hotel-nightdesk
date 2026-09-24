@@ -1,10 +1,10 @@
 import { Button } from "@/components/ui/Button";
 import { Drawer } from "@/components/ui/Drawer";
-import { Field, Input, Select } from "@/components/ui/Field";
+import { Field, Input, Select, reportInputIssue } from "@/components/ui/Field";
 import { api } from "@/lib/api";
-import { formatDateTime, localInputToRfc3339, statusLabel, toDateTimeLocal } from "@/lib/format";
+import { formatDateTime, localInputToRfc3339, parseIntegerField, statusLabel, toDateTimeLocal } from "@/lib/format";
 import type { RatePlan, Reservation, Room } from "@/lib/types";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export function ReservationsPage() {
   const [items, setItems] = useState<Reservation[]>([]);
@@ -19,8 +19,9 @@ export function ReservationsPage() {
     room_id: 0,
     rate_plan_id: 0,
     expected_arrival_at: toDateTimeLocal(),
-    expected_nights: 1,
+    expected_nights: "1",
   });
+  const nightsRef = useRef<HTMLInputElement>(null);
 
   async function load() {
     const [reservations, roomList, rateList] = await Promise.all([
@@ -126,21 +127,28 @@ export function ReservationsPage() {
           </Field>
           <Field label="Noches">
             <Input
-              type="number"
+              ref={nightsRef}
+              inputMode="numeric"
               min={1}
               value={form.expected_nights}
-              onChange={(e) => setForm({ ...form, expected_nights: Number(e.target.value) })}
+              onChange={(e) => setForm({ ...form, expected_nights: e.target.value })}
             />
           </Field>
           <Button
             className="w-full"
             onClick={async () => {
+              const expected_nights = parseIntegerField(form.expected_nights, { min: 1, max: 366 });
+              if (expected_nights == null) {
+                reportInputIssue(nightsRef.current, "Ingresá al menos una noche.");
+                return;
+              }
               try {
                 await api.createReservation({
                   ...form,
                   guest_name: "",
                   document: null,
                   phone: null,
+                  expected_nights,
                   expected_arrival_at: localInputToRfc3339(form.expected_arrival_at),
                 });
                 setOpen(false);

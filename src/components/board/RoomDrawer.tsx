@@ -1,13 +1,13 @@
-import { useContext, useEffect, useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Ban, Bath, Clock3, LogIn } from "lucide-react";
 import { RoleContext } from "@/lib/permissions";
 import { api } from "@/lib/api";
-import { formatDateTime, formatMoney, parseGuaranies, rateKindLabel } from "@/lib/format";
+import { FIELD_EMPTY, formatDateTime, formatMoney, parseMoneyInteger, rateKindLabel, requireTrimmed } from "@/lib/format";
 import { dormidaEnd, dormidaStartsAtMidnight, dormidaUnavailableMessage, dormidaWindowOpen } from "@/lib/billing";
 import type { AppSettings, BoardRoom, Charge, RatePlan } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { Input } from "@/components/ui/Field";
+import { Input, reportInputIssue } from "@/components/ui/Field";
 import { RoomShop } from "@/components/board/RoomShop";
 import { StayCart } from "@/components/board/StayCart";
 import { cn } from "@/lib/utils";
@@ -319,6 +319,8 @@ function StayDrawer({
   const admin = useContext(RoleContext) === "admin";
   const [extraDesc, setExtraDesc] = useState("Consumo");
   const [extraAmount, setExtraAmount] = useState("");
+  const extraDescRef = useRef<HTMLInputElement>(null);
+  const extraAmountRef = useRef<HTMLInputElement>(null);
   const [print, setPrint] = useState(settings.auto_print_on_checkout);
   const [error, setError] = useState<string | null>(null);
   const [printError, setPrintError] = useState<string | null>(null);
@@ -461,11 +463,13 @@ function StayDrawer({
             {admin ? (
               <div className="grid grid-cols-[1fr_100px_auto] gap-2 border-t border-[var(--line)] pt-4">
                 <Input
+                  ref={extraDescRef}
                   value={extraDesc}
                   onChange={(e) => setExtraDesc(e.target.value)}
                   placeholder="Otro cargo"
                 />
                 <Input
+                  ref={extraAmountRef}
                   value={extraAmount}
                   onChange={(e) => setExtraAmount(e.target.value)}
                   placeholder="0"
@@ -474,14 +478,24 @@ function StayDrawer({
                 <Button
                   variant="secondary"
                   onClick={async () => {
+                    const description = requireTrimmed(extraDesc);
+                    if (!description) {
+                      reportInputIssue(extraDescRef.current, FIELD_EMPTY);
+                      return;
+                    }
+                    const amount = parseMoneyInteger(extraAmount);
+                    if (amount == null || amount === 0) {
+                      reportInputIssue(extraAmountRef.current, "El importe del cargo debe ser distinto de cero.");
+                      return;
+                    }
                     setMutationBusy(true);
                     setError(null);
                     try {
                       await api.addCharge({
                         stay_id: stay.id,
-                        kind: parseGuaranies(extraAmount) < 0 ? "discount" : "surcharge",
-                        description: extraDesc,
-                        amount_cents: parseGuaranies(extraAmount),
+                        kind: amount < 0 ? "discount" : "surcharge",
+                        description,
+                        amount_cents: amount,
                       });
                       setExtraAmount("");
                       await refresh();

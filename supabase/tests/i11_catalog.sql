@@ -5,7 +5,7 @@ SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claims','{"sub":"11111111-1111-4111-8111-111111111111","app_metadata":{"role":"admin"}}',true);
 DO $$
 DECLARE
- op uuid:=gen_random_uuid(); product_uid uuid:=gen_random_uuid(); req jsonb; first_result jsonb; replay jsonb;
+ op uuid:=gen_random_uuid(); product_uid uuid:=gen_random_uuid(); user_uid uuid:=gen_random_uuid(); req jsonb; first_result jsonb; replay jsonb;
 BEGIN
  req:=jsonb_build_object('uid',product_uid,'expected_version',0,'name','I11 disposable product','category','Test','price_cents',15000,'active',true,'sort_order',0);
  first_result:=public.catalog_write('products',req,op,NULL);
@@ -34,6 +34,10 @@ BEGIN
  PERFORM public.catalog_write('rate_plans',jsonb_build_object('uid',gen_random_uuid(),'expected_version',0,'name','I11-rate','kind','hourly','base_amount_cents',80000,'extra_hour_cents',15000,'included_hours',1,'grace_minutes',5,'night_cutoff_hour',10,'active',true),gen_random_uuid(),NULL);
  op:=gen_random_uuid();
  PERFORM public.catalog_write('app_users',jsonb_build_object('uid',gen_random_uuid(),'expected_version',0,'username','i11-test','role','recepcion','password_hash','$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0c2FsdA$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhc2g','active',true),op,NULL);
+ PERFORM public.catalog_write('app_users',jsonb_build_object('uid',user_uid,'expected_version',0,'username','i11-delete','role','recepcion','password_hash','$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0c2FsdA$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhc2g','active',true),gen_random_uuid(),NULL);
+ PERFORM public.catalog_delete('app_users',user_uid,1,gen_random_uuid(),NULL);
+ IF EXISTS (SELECT 1 FROM public.app_users WHERE username='i11-delete') THEN RAISE EXCEPTION 'user not deleted'; END IF;
+ IF NOT EXISTS (SELECT 1 FROM public.catalog_deletes WHERE entity='app_users' AND uid=user_uid) THEN RAISE EXCEPTION 'missing tombstone'; END IF;
  IF (SELECT after_json ? 'password_hash' FROM public.catalog_audit WHERE operation_id=op) THEN RAISE EXCEPTION 'hash leaked into audit'; END IF;
  PERFORM public.catalog_write('settings','{"values":{"business_name":"I11","phone":"123"},"versions":{"business_name":0,"phone":0}}',gen_random_uuid(),NULL);
  BEGIN

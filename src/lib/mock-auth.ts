@@ -1,9 +1,9 @@
 import { fail } from "./errors";
-import type { CreateUserPayload, LoginPayload, SessionInfo, SessionUser } from "./types";
+import type { CreateUserPayload, LoginPayload, ManagedUser, SessionInfo, SessionUser } from "./types";
 import { ADMIN_COMMANDS } from "./permissions";
 
 // Browser demonstration only. Production credentials are verified by Rust/Argon2id.
-type User = SessionUser & { salt: string; hash: string; active: boolean };
+type User = SessionUser & { salt: string; hash: string; active: boolean; version: number };
 type AuthDb = { users: User[]; attempts: Record<string, { failures: number; blocked: number }> };
 const KEY = "nightdesk.mock.auth.v1";
 const sessions = new Map<string, SessionInfo>();
@@ -12,6 +12,9 @@ const PUBLIC_DEVICE_COMMANDS = new Set([
 ]);
 function load(): AuthDb { return JSON.parse(localStorage.getItem(KEY) ?? '{"users":[],"attempts":{}}'); }
 function save(db: AuthDb) { localStorage.setItem(KEY, JSON.stringify(db)); }
+function toManaged(user: User): ManagedUser {
+  return { id: user.id, username: user.username, role: user.role, active: user.active, version: user.version ?? 1 };
+}
 async function hash(password: string, salt: string) {
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
   const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: new TextEncoder().encode(salt), iterations: 210000 }, key, 256);
@@ -29,7 +32,11 @@ export function requireMockSession(args: Record<string, unknown>, admin = false)
 }
 export async function mockAuth(name: string, args: Record<string, unknown>): Promise<unknown> {
   if (PUBLIC_DEVICE_COMMANDS.has(name)) return;
-  if (!name.startsWith("auth_")) { requireMockSession(args, ADMIN_COMMANDS.has(name)); return; }
+  const managedUserCommand = name === "list_users" || name === "set_user_active" || name === "delete_user";
+  if (!name.startsWith("auth_") && !managedUserCommand) {
+    requireMockSession(args, ADMIN_COMMANDS.has(name));
+    return;
+  }
   const db = load();
   if (name === "auth_setup_required") return db.users.length === 0;
   if (name === "auth_session") return requireMockSession(args);
@@ -54,7 +61,61 @@ export async function mockAuth(name: string, args: Record<string, unknown>): Pro
     if (name === "auth_setup" && latest.users.length) fail("forbidden", "La administración ya está configurada");
     if (latest.users.some(u => u.username === username)) fail("conflict", "Ese usuario ya existe");
     const user: SessionUser = { id: Math.max(0, ...latest.users.map(u => u.id)) + 1, username, role };
-    latest.users.push({ ...user, salt, hash: passwordHash, active: true }); save(latest); return user;
+    latest.users.push({ ...user, salt, hash: passwordHash, active: true, version: 1 }); save(latest); return user;
+  }
+  if (name === "list_users") {
+    requireMockSession(args, true);
+    return load().users
+      .map(toManaged)
+      .sort((a, b) => a.username.localeCompare(b.username, "es"));
+  }
+  if (name === "set_user_active") {
+    const session = requireMockSession(args, true);
+    const userId = Number(args.user_id);
+    const active = Boolean(args.active);
+    const latest = load();
+    const target = latest.users.find((item) => item.id === userId);
+    if (!target) fail("not_found", "Usuario no encontrado");
+    if (
+      target.version != null
+      && args.expected_version != null
+      && Number.isFinite(Number(args.expected_version))
+      && Number(args.expected_version) !== Number(target.version)
+    ) {
+      fail("conflict", "La ficha cambió; recargá antes de guardar");
+    }
+    if (!active && target.active) {
+      if (target.id === session.user.id) fail("forbidden", "No podés desactivar tu propia cuenta");
+      if (target.role === "admin" && latest.users.filter((item) => item.role === "admin" && item.active && item.id !== target.id).length === 0) {
+        fail("forbidden", "Tiene que quedar al menos un administrador");
+      }
+    }
+    target.active = active;
+    target.version = (target.version ?? 1) + 1;
+    save(latest);
+    if (!active) {
+      for (const [token, open] of sessions) {
+        if (open.user.id === userId) sessions.delete(token);
+      }
+    }
+    return toManaged(target);
+  }
+  if (name === "delete_user") {
+    const session = requireMockSession(args, true);
+    const userId = Number(args.user_id);
+    const latest = load();
+    const target = latest.users.find((item) => item.id === userId);
+    if (!target) fail("not_found", "Usuario no encontrado");
+    if (target.id === session.user.id) fail("forbidden", "No podés eliminar tu propia cuenta");
+    if (target.role === "admin" && latest.users.filter((item) => item.role === "admin" && item.active && item.id !== target.id).length === 0) {
+      fail("forbidden", "Tiene que quedar al menos un administrador");
+    }
+    latest.users = latest.users.filter((item) => item.id !== userId);
+    save(latest);
+    for (const [token, open] of sessions) {
+      if (open.user.id === userId) sessions.delete(token);
+    }
+    return null;
   }
   if (name === "auth_login") {
     const payload = args.payload as LoginPayload;

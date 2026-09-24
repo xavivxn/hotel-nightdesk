@@ -19,6 +19,7 @@ import type {
   SessionInfo,
   SessionUser,
   Stay,
+  ManagedUser,
 } from "./types";
 
 let client: SupabaseClient | null = null;
@@ -70,6 +71,16 @@ export function initSupabase(projectUrl: string, anonKey: string) {
 function sb(): SupabaseClient {
   if (!client) fail("forbidden", "Configurá la URL y la clave anónima de Supabase en este equipo");
   return client;
+}
+
+function mapManagedUser(row: Record<string, unknown>): ManagedUser {
+  return {
+    id: Number(row.local_id ?? row.id ?? 0),
+    username: String(row.username ?? ""),
+    role: String(row.role ?? "recepcion") === "admin" ? "admin" : "recepcion",
+    active: Boolean(row.active ?? true),
+    version: Number(row.version ?? 1),
+  };
 }
 
 function mapAuthUser(user: { id: string; email?: string | null; app_metadata?: Record<string, unknown> }): SessionUser {
@@ -533,6 +544,12 @@ export async function supabaseInvoke<T>(name: string, args: Record<string, unkno
       if (error) fail("storage", error.message);
       return (data ?? []).map((r) => mapProduct(r as Record<string, unknown>)) as T;
     }
+    case "list_users": {
+      if (!authSession || authSession.user.role !== "admin") fail("forbidden", "Esta operación requiere administración");
+      const { data, error } = await sb().from("app_users").select("local_id,username,role,active,version").order("username");
+      if (error) fail("storage", error.message);
+      return (data ?? []).map((r) => mapManagedUser(r as Record<string, unknown>)) as T;
+    }
     case "list_board": {
       const { data: rooms, error: e1 } = await sb().from("rooms").select("*").order("number");
       if (e1) fail("storage", e1.message);
@@ -755,14 +772,45 @@ export async function supabaseInvoke<T>(name: string, args: Record<string, unkno
     }
     case "get_settings":
       return (await settingsFromKv()) as T;
+    case "delete_user": {
+      if (!authSession || authSession.user.role !== "admin") fail("forbidden", "Esta operación requiere administración");
+      const {data: currentRow, error: lookupError} = await sb().from("app_users").select("*").eq("local_id", args.user_id).maybeSingle();
+      if (lookupError) fail("storage","Requiere conexión con administración");
+      if (!currentRow) fail("not_found","Usuario no encontrado");
+      const current = mapManagedUser(currentRow as Record<string, unknown>);
+      const selfName = authSession.user.username.trim().toLowerCase();
+      if (current.username === selfName) fail("forbidden", "No podés eliminar tu propia cuenta");
+      if (current.role === "admin") {
+        const {data: admins, error: adminError} = await sb().from("app_users").select("local_id").eq("role","admin").eq("active",true);
+        if (adminError) fail("storage","Requiere conexión con administración");
+        const others = (admins ?? []).filter((row) => Number((row as {local_id?: number}).local_id) !== current.id);
+        if (others.length === 0) fail("forbidden", "Tiene que quedar al menos un administrador");
+      }
+      const operation = String(args.operation_id ?? crypto.randomUUID());
+      const {error} = await sb().rpc("catalog_delete", {
+        p_entity: "app_users",
+        p_uid: currentRow.uid,
+        p_expected_version: Number(currentRow.version ?? args.expected_version ?? 1),
+        p_operation_id: operation,
+        p_actor: null,
+      });
+      if (error) {
+        if (error.code === "42501") fail("forbidden", "Sin permiso para modificar el catálogo");
+        if (error.message.includes("conflict:")) fail("conflict", "La ficha cambió; recargá antes de guardar");
+        if (error.message.includes("validation:")) fail("validation", "No se pudo eliminar el usuario. Recargá la lista e intentá de nuevo.");
+        fail("storage", "Requiere conexión con administración. Revisá los datos y la migración I11.");
+      }
+      return null as T;
+    }
     case "save_room":
     case "save_rate_plan":
     case "save_product":
     case "set_product_active":
+    case "set_user_active":
     case "save_settings":
     case "auth_create_user": {
       if (!authSession || authSession.user.role !== "admin") fail("forbidden", "Esta operación requiere administración");
-      const entity = ({save_room:"rooms",save_rate_plan:"rate_plans",save_product:"products",set_product_active:"products",save_settings:"settings",auth_create_user:"app_users"} as Record<string,string>)[name];
+      const entity = ({save_room:"rooms",save_rate_plan:"rate_plans",save_product:"products",set_product_active:"products",set_user_active:"app_users",save_settings:"settings",auth_create_user:"app_users"} as Record<string,string>)[name];
       const original = (args.payload ?? {}) as Record<string,unknown>;
       const operation = String(args.operation_id ?? original.operation_id ?? crypto.randomUUID());
       let payload: Record<string,unknown>;
@@ -779,6 +827,29 @@ export async function supabaseInvoke<T>(name: string, args: Record<string, unkno
         const {api} = await import("./api");
         const {hash} = await api.hashPassword(String(original.password ?? ""), operation);
         payload = {uid:operation,expected_version:0,username:String(original.username ?? "").trim().toLowerCase(),password_hash:hash,role:original.role,active:true};
+      } else if (name === "set_user_active") {
+        const {data: currentRow, error: lookupError} = await sb().from("app_users").select("*").eq("local_id", args.user_id).maybeSingle();
+        if (lookupError) fail("storage","Requiere conexión con administración");
+        if (!currentRow) fail("not_found","Usuario no encontrado");
+        const current = mapManagedUser(currentRow as Record<string, unknown>);
+        const nextActive = Boolean(args.active);
+        if (!nextActive && current.active) {
+          const selfName = authSession.user.username.trim().toLowerCase();
+          if (current.id === authSession.user.id || current.username === selfName) {
+            fail("forbidden", "No podés desactivar tu propia cuenta");
+          }
+          if (current.role === "admin") {
+            const {data: admins, error: adminError} = await sb().from("app_users").select("local_id").eq("role","admin").eq("active",true);
+            if (adminError) fail("storage","Requiere conexión con administración");
+            const others = (admins ?? []).filter((row) => Number((row as {local_id?: number}).local_id) !== current.id);
+            if (others.length === 0) fail("forbidden", "Tiene que quedar al menos un administrador");
+          }
+        }
+        payload = {...currentRow, active: nextActive};
+        payload.uid = currentRow.uid;
+        payload.local_id = currentRow.local_id;
+        payload.expected_version = Number(currentRow.version ?? 1);
+        delete payload.id;
       } else {
         const id = name === "set_product_active" ? args.product_id : original.id;
         let row: Record<string,unknown> | null = null;
@@ -808,7 +879,9 @@ export async function supabaseInvoke<T>(name: string, args: Record<string, unkno
       if (entity==="rooms") return mapRoom(row) as T;
       if (entity==="rate_plans") return mapRate(row) as T;
       if (entity==="products") return mapProduct(row) as T;
-      if (entity==="app_users") return {id:Number(row.local_id),username:String(row.username),role:row.role} as T;
+      if (entity==="app_users") {
+        return (name === "set_user_active" ? mapManagedUser(row) : {id:Number(row.local_id),username:String(row.username),role:row.role}) as T;
+      }
       return await settingsFromKv() as T;
     }
     default:

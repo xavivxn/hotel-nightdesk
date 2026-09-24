@@ -48,6 +48,12 @@ pub fn require(state: &AppState, token: Option<&str>, admin: bool) -> AppResult<
     Ok(user)
 }
 
+pub fn revoke_sessions_for(state: &AppState, user_id: i64) {
+    if let Ok(mut auth) = state.auth.lock() {
+        auth.sessions.retain(|_, session| session.user_id != user_id);
+    }
+}
+
 fn insert_user(conn: &rusqlite::Connection, payload: &CreateUserPayload) -> AppResult<SessionUser> {
     let username = payload.username.trim().to_lowercase();
     if username.is_empty() || username.len() > 64 { return Err(AppError::msg("Ingresá un usuario de 1 a 64 caracteres")); }
@@ -196,7 +202,7 @@ mod tests {
     #[test]
     fn every_business_command_checks_session_and_admin_mutations_check_role() {
         let source = include_str!("commands.rs");
-        let admins = ["save_room", "save_rate_plan", "save_product", "set_product_active", "add_charge", "delete_charge", "save_settings", "print_test", "backup_run_now", "backup_list", "backup_import_key", "backup_restore", "analytics_summary", "save_analytics_pdf"];
+        let admins = ["save_room", "save_rate_plan", "save_product", "set_product_active", "list_users", "set_user_active", "delete_user", "add_charge", "delete_charge", "save_settings", "print_test", "backup_run_now", "backup_list", "backup_import_key", "backup_restore", "analytics_summary", "save_analytics_pdf"];
         let public = [
             "device_mode_get",
             "device_mode_set",

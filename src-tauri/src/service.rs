@@ -9,7 +9,6 @@ pub const CONTRACT_VERSION: u32 = 2;
 
 #[derive(Debug, Clone)]
 pub struct Actor {
-    #[allow(dead_code)]
     pub user_id: i64,
     #[allow(dead_code)]
     pub username: String,
@@ -37,6 +36,9 @@ pub enum Operation {
     SaveSettings,
     PrintTest,
     CreateUser,
+    ListUsers,
+    SetUserActive,
+    DeleteUser,
 }
 
 pub fn authorize(actor: &Actor, operation: Operation) -> AppResult<()> {
@@ -51,6 +53,9 @@ pub fn authorize(actor: &Actor, operation: Operation) -> AppResult<()> {
             | Operation::SaveSettings
             | Operation::PrintTest
             | Operation::CreateUser
+            | Operation::ListUsers
+            | Operation::SetUserActive
+            | Operation::DeleteUser
     );
     if admin_only && !actor.role.is_admin() {
         return Err(AppError::forbidden("Esta operación requiere administración"));
@@ -721,6 +726,159 @@ pub fn set_product_active(
     db::set_product_active(conn, product_id, active)
 }
 
+fn map_managed_user(row: &rusqlite::Row<'_>) -> rusqlite::Result<ManagedUser> {
+    Ok(ManagedUser {
+        id: row.get(0)?,
+        username: row.get(1)?,
+        role: Role::parse(&row.get::<_, String>(2)?),
+        active: row.get::<_, i64>(3)? != 0,
+        version: row.get(4)?,
+    })
+}
+
+pub fn list_users(conn: &Connection, actor: &Actor) -> AppResult<Vec<ManagedUser>> {
+    authorize(actor, Operation::ListUsers)?;
+    let mut stmt = conn.prepare(
+        "SELECT id, username, role, active, version FROM users ORDER BY username COLLATE NOCASE",
+    )?;
+    let users = stmt
+        .query_map([], map_managed_user)?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(users)
+}
+
+pub fn get_managed_user(conn: &Connection, user_id: i64) -> AppResult<ManagedUser> {
+    conn.query_row(
+        "SELECT id, username, role, active, version FROM users WHERE id = ?1",
+        [user_id],
+        map_managed_user,
+    )
+    .optional()?
+    .ok_or_else(|| AppError::not_found("Usuario no encontrado"))
+}
+
+pub fn user_catalog_row(conn: &Connection, user_id: i64) -> AppResult<(ManagedUser, String)> {
+    conn.query_row(
+        "SELECT id, username, role, active, version, password_hash FROM users WHERE id = ?1",
+        [user_id],
+        |row| {
+            Ok((
+                map_managed_user(row)?,
+                row.get::<_, String>(5)?,
+            ))
+        },
+    )
+    .optional()?
+    .ok_or_else(|| AppError::not_found("Usuario no encontrado"))
+}
+
+pub fn validate_set_user_active(
+    conn: &Connection,
+    actor: &Actor,
+    user_id: i64,
+    active: bool,
+    expected_version: Option<i64>,
+) -> AppResult<(ManagedUser, String)> {
+    authorize(actor, Operation::SetUserActive)?;
+    accept_reserved_fields(&None, &expected_version)?;
+    let (current, hash) = user_catalog_row(conn, user_id)?;
+    assert_user_active_change(conn, actor, &current, active)?;
+    Ok((current, hash))
+}
+
+fn assert_user_active_change(
+    conn: &Connection,
+    actor: &Actor,
+    current: &ManagedUser,
+    active: bool,
+) -> AppResult<()> {
+    if active || current.active == active {
+        return Ok(());
+    }
+    if current.id == actor.user_id {
+        return Err(AppError::forbidden("No podés desactivar tu propia cuenta"));
+    }
+    if current.role.is_admin() {
+        let others: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM users WHERE role = 'admin' AND active = 1 AND id != ?1",
+            [current.id],
+            |row| row.get(0),
+        )?;
+        if others == 0 {
+            return Err(AppError::forbidden("Tiene que quedar al menos un administrador"));
+        }
+    }
+    Ok(())
+}
+
+pub fn set_user_active(
+    conn: &Connection,
+    actor: &Actor,
+    user_id: i64,
+    active: bool,
+    expected_version: Option<i64>,
+) -> AppResult<ManagedUser> {
+    authorize(actor, Operation::SetUserActive)?;
+    accept_reserved_fields(&None, &expected_version)?;
+    let current = get_managed_user(conn, user_id)?;
+    if expected_version.unwrap_or(current.version) != 0 {
+        assert_expected_version(current.version, &expected_version)?;
+    }
+    assert_user_active_change(conn, actor, &current, active)?;
+    conn.execute(
+        "UPDATE users SET active = ?1, version = version + 1, updated_at = ?2 WHERE id = ?3",
+        params![if active { 1 } else { 0 }, now_rfc3339(), user_id],
+    )?;
+    get_managed_user(conn, user_id)
+}
+
+pub fn validate_delete_user(
+    conn: &Connection,
+    actor: &Actor,
+    user_id: i64,
+    expected_version: Option<i64>,
+) -> AppResult<ManagedUser> {
+    authorize(actor, Operation::DeleteUser)?;
+    accept_reserved_fields(&None, &expected_version)?;
+    let current = get_managed_user(conn, user_id)?;
+    assert_user_delete(conn, actor, &current)?;
+    Ok(current)
+}
+
+fn assert_user_delete(conn: &Connection, actor: &Actor, current: &ManagedUser) -> AppResult<()> {
+    if current.id == actor.user_id {
+        return Err(AppError::forbidden("No podés eliminar tu propia cuenta"));
+    }
+    if current.role.is_admin() {
+        let others: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM users WHERE role = 'admin' AND active = 1 AND id != ?1",
+            [current.id],
+            |row| row.get(0),
+        )?;
+        if others == 0 {
+            return Err(AppError::forbidden("Tiene que quedar al menos un administrador"));
+        }
+    }
+    Ok(())
+}
+
+pub fn delete_user(
+    conn: &Connection,
+    actor: &Actor,
+    user_id: i64,
+    expected_version: Option<i64>,
+) -> AppResult<ManagedUser> {
+    authorize(actor, Operation::DeleteUser)?;
+    accept_reserved_fields(&None, &expected_version)?;
+    let current = get_managed_user(conn, user_id)?;
+    if expected_version.unwrap_or(current.version) != 0 {
+        assert_expected_version(current.version, &expected_version)?;
+    }
+    assert_user_delete(conn, actor, &current)?;
+    conn.execute("DELETE FROM users WHERE id = ?1", [user_id])?;
+    Ok(current)
+}
+
 pub fn add_charge(conn: &mut Connection, actor: &Actor, payload: AddChargePayload) -> AppResult<Charge> {
     authorize(actor, Operation::AddCharge)?;
     accept_reserved_fields(&payload.operation_id, &payload.expected_version)?;
@@ -1094,6 +1252,9 @@ pub fn save_settings(
     new_pin: Option<String>,
 ) -> AppResult<AppSettings> {
     authorize(actor, Operation::SaveSettings)?;
+    if !payload.tax_percent.is_finite() || !(0.0..=100.0).contains(&payload.tax_percent) {
+        return Err(AppError::msg("Ingresá un IVA entre 0 y 100"));
+    }
     db::upsert_setting(conn, "business_name", payload.business_name.trim())?;
     db::upsert_setting(conn, "address", payload.address.trim())?;
     db::upsert_setting(conn, "phone", payload.phone.trim())?;
@@ -1667,6 +1828,116 @@ mod tests {
         )?;
         assert_eq!(updated.version, room.version + 1);
         assert_eq!(updated.number, "99");
+        Ok(())
+    }
+
+    fn users_fixture() -> AppResult<(Connection, i64, i64, i64)> {
+        let conn = db::open(Path::new(":memory:"))?;
+        conn.execute(
+            "INSERT INTO users (username, password_hash, role, active) VALUES
+                ('admin','hash','admin',1),
+                ('admin-dos','hash','admin',1),
+                ('recepcion','hash','recepcion',1)",
+            [],
+        )?;
+        Ok((conn, 1, 2, 3))
+    }
+
+    #[test]
+    fn reception_cannot_list_or_deactivate_users() -> AppResult<()> {
+        let (conn, _admin, _other, reception) = users_fixture()?;
+        assert_eq!(
+            list_users(&conn, &reception_actor()).unwrap_err().code(),
+            ErrorCode::Forbidden
+        );
+        assert_eq!(
+            set_user_active(&conn, &reception_actor(), reception, false, None)
+                .unwrap_err()
+                .code(),
+            ErrorCode::Forbidden
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn cannot_deactivate_self_or_last_admin_and_can_reactivate() -> AppResult<()> {
+        let (conn, admin, other_admin, reception) = users_fixture()?;
+        let actor = Actor {
+            user_id: admin,
+            username: "admin".into(),
+            role: Role::Admin,
+        };
+        assert_eq!(
+            set_user_active(&conn, &actor, admin, false, None)
+                .unwrap_err()
+                .to_string(),
+            "No podés desactivar tu propia cuenta"
+        );
+        let disabled = set_user_active(&conn, &actor, reception, false, None)?;
+        assert!(!disabled.active);
+        let remote = Actor {
+            user_id: 99,
+            username: "remoto".into(),
+            role: Role::Admin,
+        };
+        set_user_active(&conn, &actor, other_admin, false, None)?;
+        assert_eq!(
+            set_user_active(&conn, &remote, admin, false, None)
+                .unwrap_err()
+                .to_string(),
+            "Tiene que quedar al menos un administrador"
+        );
+        let restored = set_user_active(&conn, &actor, reception, true, None)?;
+        assert!(restored.active);
+        assert_eq!(list_users(&conn, &actor)?.len(), 3);
+        Ok(())
+    }
+
+    #[test]
+    fn reception_cannot_delete_users() -> AppResult<()> {
+        let (conn, _admin, _other, reception) = users_fixture()?;
+        assert_eq!(
+            delete_user(&conn, &reception_actor(), reception, None)
+                .unwrap_err()
+                .code(),
+            ErrorCode::Forbidden
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn cannot_delete_self_or_last_admin_and_username_is_freed() -> AppResult<()> {
+        let (conn, admin, other_admin, reception) = users_fixture()?;
+        let actor = Actor {
+            user_id: admin,
+            username: "admin".into(),
+            role: Role::Admin,
+        };
+        assert_eq!(
+            delete_user(&conn, &actor, admin, None)
+                .unwrap_err()
+                .to_string(),
+            "No podés eliminar tu propia cuenta"
+        );
+        delete_user(&conn, &actor, reception, None)?;
+        assert!(list_users(&conn, &actor)?.iter().all(|user| user.username != "recepcion"));
+        conn.execute(
+            "INSERT INTO users (username, password_hash, role, active) VALUES ('recepcion','hash','recepcion',1)",
+            [],
+        )?;
+        assert!(list_users(&conn, &actor)?.iter().any(|user| user.username == "recepcion"));
+        delete_user(&conn, &actor, other_admin, None)?;
+        let remote = Actor {
+            user_id: 99,
+            username: "remoto".into(),
+            role: Role::Admin,
+        };
+        assert_eq!(
+            delete_user(&conn, &remote, admin, None)
+                .unwrap_err()
+                .to_string(),
+            "Tiene que quedar al menos un administrador"
+        );
         Ok(())
     }
 }

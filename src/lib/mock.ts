@@ -337,7 +337,7 @@ function hashPin(pin: string) {
 
 export async function mockInvoke<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
   const authResult = await mockAuth(name, args);
-  if (name.startsWith("auth_")) return authResult as T;
+  if (name.startsWith("auth_") || name === "list_users" || name === "set_user_active" || name === "delete_user") return authResult as T;
   const db = load();
   const result = handle(db, name, args) as T;
   save(db);
@@ -402,20 +402,25 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
     case "save_room": {
       const payload = args.payload as { id?: number; number: string; room_type: string; floor: number; notes?: string | null; operation_id?: string | null; expected_version?: number | null };
       acceptReserved(payload);
+      const number = String(payload.number ?? "").trim();
+      const room_type = String(payload.room_type ?? "").trim();
+      if (!number) fail("El número de habitación es obligatorio");
+      if (!Number.isFinite(Number(payload.floor))) fail("Ingresá un piso válido");
+      const floor = Math.trunc(Number(payload.floor));
       if (payload.id) {
         const room = db.rooms.find((r) => r.id === payload.id) ?? fail("Habitación no encontrada");
         if (payload.expected_version != null && payload.expected_version !== room.version) {
           fail("conflict", "La ficha cambió; recargá antes de guardar");
         }
-        Object.assign(room, { number: payload.number, room_type: payload.room_type, floor: payload.floor, notes: payload.notes ?? null, version: (room.version ?? 1) + 1 });
+        Object.assign(room, { number, room_type, floor, notes: payload.notes ?? null, version: (room.version ?? 1) + 1 });
         return room;
       }
       db.ids.room += 1;
       const room: Room = {
         id: db.ids.room,
-        number: payload.number,
-        room_type: payload.room_type,
-        floor: payload.floor,
+        number,
+        room_type,
+        floor,
         status: "available",
         notes: payload.notes ?? null,
         active: true,
@@ -436,16 +441,30 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
     case "save_rate_plan": {
       const payload = args.payload as RatePlan & { id?: number; operation_id?: string | null; expected_version?: number | null };
       acceptReserved(payload);
+      const name = String(payload.name ?? "").trim();
+      if (!name) fail("El nombre de la tarifa es obligatorio");
+      const numeric = [payload.base_amount_cents, payload.extra_hour_cents, payload.included_hours, payload.grace_minutes, payload.night_cutoff_hour];
+      if (numeric.some((value) => !Number.isFinite(Number(value)))) fail("Ingresá números válidos en la tarifa");
+      const normalized = {
+        name,
+        kind: payload.kind,
+        base_amount_cents: Math.round(Number(payload.base_amount_cents)),
+        extra_hour_cents: Math.round(Number(payload.extra_hour_cents)),
+        included_hours: Math.max(1, Math.trunc(Number(payload.included_hours))),
+        grace_minutes: Math.max(0, Math.trunc(Number(payload.grace_minutes))),
+        night_cutoff_hour: Math.min(23, Math.max(0, Math.trunc(Number(payload.night_cutoff_hour)))),
+        active: payload.active,
+      };
       if (payload.id) {
         const rate = db.rates.find((r) => r.id === payload.id) ?? fail("Tarifa no encontrada");
         if (payload.expected_version != null && payload.expected_version !== rate.version) {
           fail("conflict", "La ficha cambió; recargá antes de guardar");
         }
-        Object.assign(rate, payload, { version: (rate.version ?? 1) + 1 });
+        Object.assign(rate, normalized, { version: (rate.version ?? 1) + 1 });
         return rate;
       }
       db.ids.rate += 1;
-      const rate = { ...payload, id: db.ids.rate, version: 1 };
+      const rate = { ...normalized, id: db.ids.rate, version: 1 };
       db.rates.push(rate);
       return rate;
     }
@@ -719,9 +738,22 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
       };
     case "save_settings": {
       const payload = args.payload as AppSettings;
+      if (!Number.isFinite(payload.tax_percent) || payload.tax_percent < 0 || payload.tax_percent > 100) {
+        fail("Ingresá un IVA entre 0 y 100");
+      }
       const newPin = args.new_pin;
       const previousHash = db.settings.pin_hash;
-      db.settings = { ...payload, pin_hash: previousHash };
+      db.settings = {
+        ...payload,
+        business_name: payload.business_name.trim(),
+        address: payload.address.trim(),
+        phone: payload.phone.trim(),
+        currency_symbol: payload.currency_symbol.trim(),
+        receipt_footer: payload.receipt_footer.trim(),
+        printer_path: payload.printer_path.trim(),
+        printer_name: payload.printer_name.trim(),
+        pin_hash: previousHash,
+      };
       if (typeof newPin === "string") {
         db.settings.pin_hash = newPin ? hashPin(newPin) : "";
       }

@@ -1,7 +1,7 @@
 import type {
   DailyReport,
   AnalyticsSummary,
-  SessionInfo, SessionUser, LoginPayload, CreateUserPayload,
+  SessionInfo, SessionUser, LoginPayload, CreateUserPayload, ManagedUser,
   AddChargePayload,
   AddProductChargePayload,
   AppSettings,
@@ -145,6 +145,11 @@ export const api = {
   logout: async () => { try { await cmd<void>("auth_logout"); } finally { sessionToken = null; } },
   clearSession: () => { sessionToken = null; },
   createUser: (payload: CreateUserPayload, operation_id = crypto.randomUUID()) => cmd<SessionUser>("auth_create_user", { payload, operation_id }),
+  listUsers: () => cmd<ManagedUser[]>("list_users"),
+  setUserActive: (user_id: number, active: boolean, expected_version?: number, operation_id = crypto.randomUUID()) =>
+    cmd<ManagedUser>("set_user_active", { user_id, active, expected_version, operation_id }),
+  deleteUser: (user_id: number, expected_version?: number, operation_id = crypto.randomUUID()) =>
+    cmd<void>("delete_user", { user_id, expected_version, operation_id }),
   contractInfo: () => cmd<ContractInfo>("contract_info"),
   listBoard: () => cmd<BoardRoom[]>("list_board"),
   listRooms: () => cmd<Room[]>("list_rooms"),

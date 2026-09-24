@@ -1,10 +1,11 @@
 import { cn } from "@/lib/utils";
-import type {
-  FormEvent,
-  InputHTMLAttributes,
-  ReactNode,
-  SelectHTMLAttributes,
-  TextareaHTMLAttributes,
+import {
+  forwardRef,
+  type FormEvent,
+  type InputHTMLAttributes,
+  type ReactNode,
+  type SelectHTMLAttributes,
+  type TextareaHTMLAttributes,
 } from "react";
 
 const field =
@@ -43,35 +44,34 @@ export function Label({ children }: { children: string }) {
   );
 }
 
-export function Input({ className, onInvalid, onInput, ...props }: InputHTMLAttributes<HTMLInputElement>) {
-  return (
-    <input
-      className={cn(field, className)}
-      {...props}
-      onInvalid={(e) => {
-        onInvalidSpanish(e);
-        onInvalid?.(e);
-      }}
-      onInput={(e) => {
-        clearCustomValidity(e);
-        onInput?.(e);
-      }}
-    />
-  );
-}
+export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
+  function Input({ className, onInvalid, onInput, ...props }, ref) {
+    return (
+      <input
+        ref={ref}
+        className={cn(field, className)}
+        {...props}
+        onInvalid={(e) => {
+          onInvalidSpanish(e);
+          onInvalid?.(e);
+        }}
+        onInput={(e) => {
+          clearCustomValidity(e);
+          onInput?.(e);
+        }}
+      />
+    );
+  },
+);
 
-export function PasswordInput({
-  show,
-  onToggle,
-  className,
-  disabled,
-  onInvalid,
-  onInput,
-  ...props
-}: InputHTMLAttributes<HTMLInputElement> & { show: boolean; onToggle: () => void }) {
+export const PasswordInput = forwardRef<
+  HTMLInputElement,
+  InputHTMLAttributes<HTMLInputElement> & { show: boolean; onToggle: () => void }
+>(function PasswordInput({ show, onToggle, className, disabled, onInvalid, onInput, ...props }, ref) {
   return (
     <div className="relative">
       <input
+        ref={ref}
         className={cn(field, "pr-11", className)}
         {...props}
         disabled={disabled}
@@ -109,7 +109,7 @@ export function PasswordInput({
       </button>
     </div>
   );
-}
+});
 
 export function Select({ className, onInvalid, onInput, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
@@ -152,4 +152,13 @@ export function Field({ label, children }: { label: string; children: ReactNode 
       {children}
     </div>
   );
+}
+
+export function reportInputIssue(
+  el: HTMLInputElement | HTMLTextAreaElement | null | undefined,
+  message: string,
+) {
+  if (!el) return;
+  el.setCustomValidity(message);
+  el.reportValidity();
 }

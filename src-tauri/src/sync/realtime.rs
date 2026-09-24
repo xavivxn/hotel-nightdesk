@@ -118,7 +118,7 @@ async fn connect_once(
 }
 
 fn join_payload(access_token: &str) -> String {
-    let tables = ["rooms", "rate_plans", "products", "business_settings", "app_users"];
+    let tables = ["rooms", "rate_plans", "products", "business_settings", "app_users", "catalog_deletes"];
     let changes: Vec<Value> = tables
         .iter()
         .map(|table| json!({"event":"*","schema":"public","table": table}))

@@ -6,6 +6,7 @@ use std::path::Path;
 
 pub trait RemoteClient {
     fn write(&self, request: &Value) -> AppResult<Value>;
+    fn delete(&self, request: &Value) -> AppResult<Value>;
 }
 
 pub fn columns(entity: &str) -> AppResult<&'static [&'static str]> {
@@ -216,6 +217,74 @@ pub fn execute(client: &dyn RemoteClient, request: &Value) -> AppResult<Value> {
     client.write(request)
 }
 
+pub fn execute_delete(client: &dyn RemoteClient, request: &Value) -> AppResult<Value> {
+    client.delete(request)
+}
+
+pub fn prepare_delete(
+    conn: &Connection,
+    actor: &Actor,
+    user_id: i64,
+    expected_version: i64,
+    operation: Option<String>,
+) -> AppResult<Value> {
+    authorize(actor, Operation::SaveSettings)?;
+    if expected_version < 0 {
+        return Err(AppError::msg("expected_version inválida"));
+    }
+    let op = operation.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    uuid::Uuid::parse_str(&op).map_err(|_| AppError::msg("operation_id debe ser UUID"))?;
+    let uid: String = conn
+        .query_row("SELECT uid FROM users WHERE id=?1", [user_id], |row| row.get(0))
+        .optional()?
+        .ok_or_else(|| AppError::not_found("Usuario no encontrado"))?;
+    Ok(json!({
+        "p_entity": "app_users",
+        "p_uid": uid,
+        "p_expected_version": expected_version,
+        "p_operation_id": op,
+        "p_actor": actor.user_id.to_string(),
+    }))
+}
+
+pub fn apply_delete(conn: &mut Connection, request: &Value, result: &Value) -> AppResult<()> {
+    let uid = request["p_uid"]
+        .as_str()
+        .ok_or_else(|| AppError::msg("Respuesta sin uid"))?;
+    if result["row"]["uid"].as_str() != Some(uid) {
+        return Err(AppError::storage("Administración devolvió otra ficha; no se aplicó el cambio"));
+    }
+    let tx = conn.transaction()?;
+    delete_local_user(&tx, uid)?;
+    let audit = &result["audit"];
+    let clean = |v: &Value| {
+        let mut v = v.clone();
+        if let Some(o) = v.as_object_mut() {
+            o.remove("password_hash");
+            o.remove("password");
+            o.remove("pin_hash");
+        }
+        v.to_string()
+    };
+    tx.execute(
+        "INSERT OR IGNORE INTO catalog_audit VALUES (?1,?2,?3,?4,?5,?6)",
+        params![
+            request["p_operation_id"].as_str(),
+            "app_users",
+            audit["actor"].as_str().unwrap_or("remote"),
+            audit["created_at"].as_str().ok_or_else(|| AppError::msg("Auditoría incompleta"))?,
+            clean(&audit["before"]),
+            clean(&audit["after"]),
+        ],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn delete_local_user(conn: &Connection, uid: &str) -> AppResult<bool> {
+    Ok(conn.execute("DELETE FROM users WHERE uid=?1", [uid])? > 0)
+}
+
 /// Standalone writes and their audit commit or roll back together.
 pub fn local<T: serde::Serialize>(conn: &Connection, actor: &Actor, entity: &str, write: impl FnOnce(&Connection)->AppResult<T>) -> AppResult<T> {
     authorize(actor, Operation::SaveSettings)?;
@@ -254,6 +323,10 @@ mod tests {
    let mut row=r["p_payload"].clone();
    row["version"]=json!(2); row["updated_at"]=json!("2026-09-20T12:00:00Z");
    Ok(json!({"row":row,"audit":{"actor":"test","created_at":"2026-09-20T12:00:00Z","before":null,"after":row}}))
+  }
+  fn delete(&self,r:&Value)->AppResult<Value> {
+   if self.fail { return Err(AppError::storage("Requiere conexión con administración")); }
+   Ok(json!({"row":{"uid":r["p_uid"],"entity":"app_users","deleted":true},"audit":{"actor":"test","created_at":"2026-09-20T12:00:00Z","before":null,"after":null}}))
   }
  }
  fn room()->Value { json!({"id":1,"number":"01","room_type":"Jacuzzi","floor":1,"notes":null,"active":false,"expected_version":1}) }
@@ -316,11 +389,24 @@ mod tests {
  }
  #[test] fn conflicting_remote_leaves_local_unchanged() {
   struct Conflict;
-  impl RemoteClient for Conflict { fn write(&self,_:&Value)->AppResult<Value> { Err(AppError::conflict("La ficha cambió")) } }
+  impl RemoteClient for Conflict {
+   fn write(&self,_:&Value)->AppResult<Value> { Err(AppError::conflict("La ficha cambió")) }
+   fn delete(&self,_:&Value)->AppResult<Value> { Err(AppError::conflict("La ficha cambió")) }
+  }
   let conn=db();
   let r=prepare(&conn,&actor(Role::Admin),"rooms",room(),None).unwrap();
   assert_eq!(execute(&Conflict,&r).unwrap_err().code(),crate::error::ErrorCode::Conflict);
   assert_eq!(crate::db::get_room(&conn,1).unwrap().version,1);
+ }
+ #[test] fn delete_user_applies_remote_and_removes_local() {
+  let mut conn=db();
+  conn.execute("INSERT INTO users (username, password_hash, role, active) VALUES ('recepcion','hash','recepcion',1)",[]).unwrap();
+  let id:i64=conn.last_insert_rowid();
+  let request=prepare_delete(&conn,&actor(Role::Admin),id,1,None).unwrap();
+  let result=execute_delete(&Fake{fail:false},&request).unwrap();
+  apply_delete(&mut conn,&request,&result).unwrap();
+  let left:i64=conn.query_row("SELECT count(*) FROM users WHERE id=?1",[id],|r|r.get(0)).unwrap();
+  assert_eq!(left,0);
  }
  #[test] fn operation_salt_makes_user_retry_identical() {
   let op=uuid::Uuid::new_v4().to_string();

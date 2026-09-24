@@ -274,7 +274,7 @@ export default function App() {
               <Route path="/analisis" element={admin ? <AnalyticsPage deviceMode={deviceMode} /> : <Navigate to="/" replace />} />
               <Route path="/habitaciones" element={admin ? <RoomsPage settings={settings} /> : <Navigate to="/" replace />} />
               <Route path="/catalogo" element={admin ? <CatalogPage settings={settings} /> : <Navigate to="/" replace />} />
-              <Route path="/usuarios" element={admin ? <UsersPage /> : <Navigate to="/" replace />} />
+              <Route path="/usuarios" element={admin ? <UsersPage user={session.user} /> : <Navigate to="/" replace />} />
               <Route
                 path="/ajustes"
                 element={admin ? <SettingsPage settings={settings} deviceMode={deviceMode} onSaved={setSettings} /> : <Navigate to="/" replace />}

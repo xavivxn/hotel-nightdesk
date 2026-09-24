@@ -21,14 +21,20 @@ impl SupabaseRemote {
 
 impl RemoteClient for SupabaseRemote {
     fn write(&self, request: &Value) -> AppResult<Value> {
-        self.client.rpc("catalog_write", request).map_err(|error| {
-            if error.code() == ErrorCode::Storage {
-                AppError::storage("Requiere conexión con administración. No se modificó el catálogo local; si hubo un corte, reintentá con la misma operación.")
-            } else if error.code() == ErrorCode::Forbidden {
-                AppError::forbidden("Sin permiso para modificar el catálogo")
-            } else {
-                error
-            }
-        })
+        self.client.rpc("catalog_write", request).map_err(map_catalog_error)
+    }
+
+    fn delete(&self, request: &Value) -> AppResult<Value> {
+        self.client.rpc("catalog_delete", request).map_err(map_catalog_error)
+    }
+}
+
+fn map_catalog_error(error: AppError) -> AppError {
+    if error.code() == ErrorCode::Storage {
+        AppError::storage("Requiere conexión con administración. No se modificó el catálogo local; si hubo un corte, reintentá con la misma operación.")
+    } else if error.code() == ErrorCode::Forbidden {
+        AppError::forbidden("Sin permiso para modificar el catálogo")
+    } else {
+        error
     }
 }

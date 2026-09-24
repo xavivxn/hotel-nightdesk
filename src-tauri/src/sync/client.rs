@@ -245,6 +245,7 @@ const PULL_TABLES: &[&str] = &[
     "products",
     "app_users",
     "business_settings",
+    "catalog_deletes",
 ];
 
 impl SyncClient for SupabaseClient {
@@ -261,16 +262,18 @@ impl SyncClient for SupabaseClient {
 
     fn pull_rows(&self, table: &str, cursor: Option<&str>, limit: i64) -> AppResult<Vec<Value>> {
         let cursor = cursor.unwrap_or("1970-01-01T00:00:00Z");
-        let order = if table == "business_settings" {
-            "updated_at.asc,key.asc"
+        let (stamp, order) = if table == "catalog_deletes" {
+            ("deleted_at", "deleted_at.asc,uid.asc")
+        } else if table == "business_settings" {
+            ("updated_at", "updated_at.asc,key.asc")
         } else {
-            "updated_at.asc,uid.asc"
+            ("updated_at", "updated_at.asc,uid.asc")
         };
         self.select(
             table,
             &[
                 ("select", "*".into()),
-                ("updated_at", format!("gte.{cursor}")),
+                (stamp, format!("gte.{cursor}")),
                 ("order", order.into()),
                 ("limit", limit.to_string()),
             ],
@@ -485,9 +488,10 @@ impl SyncClient for FakeClient {
         }
         let cursor = cursor.unwrap_or("1970-01-01T00:00:00Z");
         let rows = self.pull.lock().expect("fake").get(table).cloned().unwrap_or_default();
+        let stamp = if table == "catalog_deletes" { "deleted_at" } else { "updated_at" };
         let filtered: Vec<Value> = rows
             .into_iter()
-            .filter(|row| row["updated_at"].as_str().unwrap_or("").cmp(cursor) != std::cmp::Ordering::Less)
+            .filter(|row| row[stamp].as_str().unwrap_or("").cmp(cursor) != std::cmp::Ordering::Less)
             .take(limit as usize)
             .collect();
         Ok(filtered)

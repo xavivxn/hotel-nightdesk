@@ -11,8 +11,9 @@ import { Info, TriangleAlert } from "lucide-react";
 import { LoveNestLogoLayered } from "@/components/layout/BrandLogo";
 import { DutyClock } from "@/components/layout/DutyClock";
 import { Button } from "@/components/ui/Button";
-import { Input, PasswordInput } from "@/components/ui/Field";
+import { Input, PasswordInput, reportInputIssue } from "@/components/ui/Field";
 import { api } from "@/lib/api";
+import { FIELD_EMPTY, requireTrimmed } from "@/lib/format";
 import {
   LOGIN_MOTION,
   flipTransform,
@@ -68,6 +69,7 @@ export function LoginPage({
   const abortRef = useRef<AbortController | null>(null);
   const slotRef = useRef<HTMLDivElement>(null);
   const logoRef = useRef<HTMLDivElement>(null);
+  const usernameRef = useRef<HTMLInputElement>(null);
   const onDoneRef = useRef<(() => void) | undefined>(handoff?.onDone);
   onDoneRef.current = handoff?.onDone;
 
@@ -149,12 +151,19 @@ export function LoginPage({
       await wait(LOGIN_MOTION.btnPressMs, ac.signal);
       setBtnPressed(false);
 
+      const user = requireTrimmed(username);
+      if (!user) {
+        setPhase("idle");
+        reportInputIssue(usernameRef.current, FIELD_EMPTY);
+        return;
+      }
+
       if (needsSetup) {
         if (password !== confirm) throw "Las contraseñas no coinciden";
-        await api.setupAdmin({ username, password }, legacyPin);
+        await api.setupAdmin({ username: user, password }, requireTrimmed(legacyPin) ?? "");
         setNeedsSetup(false);
       }
-      const session = await api.login({ username, password });
+      const session = await api.login({ username: user, password });
 
       if (prefersReducedMotion()) {
         markShellEnter();
@@ -242,6 +251,7 @@ export function LoginPage({
 
           <LoginField label={remote ? "Email" : "Usuario"}>
             <Input
+              ref={usernameRef}
               autoFocus
               required
               maxLength={64}

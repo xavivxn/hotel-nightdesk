@@ -137,7 +137,7 @@ export function BackupPanel({ deviceMode }: { deviceMode: DeviceMode }) {
     setError(null);
     setNotice(null);
     try {
-      await api.backupImportKey(keyHex);
+      await api.backupImportKey(keyHex.trim());
       setNotice("Clave de cifrado importada. No se vuelve a mostrar.");
       setKeyHex("");
       setShowKey(false);

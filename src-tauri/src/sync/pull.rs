@@ -1,7 +1,7 @@
 use super::catalog;
 use super::client::SyncClient;
 use super::state;
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use rusqlite::Connection;
 
 pub const PAGE_LIMIT: i64 = 500;
@@ -11,6 +11,7 @@ const TABLES: &[&str] = &[
     "products",
     "app_users",
     "business_settings",
+    "catalog_deletes",
 ];
 
 fn cursor_key(table: &str) -> String {
@@ -47,17 +48,31 @@ pub fn pull_table(conn: &mut Connection, client: &dyn SyncClient, table: &str) -
     Ok(applied)
 }
 
+fn skip_missing_catalog_table(table: &str, error: &AppError) -> bool {
+    table == "catalog_deletes" && error.to_string().contains("schema cache")
+}
+
 pub fn pull_all(conn: &mut Connection, client: &dyn SyncClient) -> AppResult<bool> {
     let mut changed = false;
     for table in TABLES {
-        if pull_table(conn, client, table)? > 0 {
-            changed = true;
+        match pull_table(conn, client, table) {
+            Ok(n) if n > 0 => changed = true,
+            Ok(_) => {}
+            Err(error) if skip_missing_catalog_table(table, &error) => {}
+            Err(error) => return Err(error),
         }
     }
     Ok(changed)
 }
 
 pub fn apply_remote_row(conn: &rusqlite::Connection, table: &str, row: &serde_json::Value, force: bool) -> AppResult<bool> {
+    if table == "catalog_deletes" {
+        let uid = row["uid"].as_str().unwrap_or("");
+        if row["entity"].as_str() != Some("app_users") || uid.is_empty() {
+            return Ok(false);
+        }
+        return catalog::delete_local_user(conn, uid);
+    }
     if table == "business_settings" {
         return catalog::apply_setting_row(conn, row, force);
     }
@@ -203,5 +218,32 @@ mod tests {
             .unwrap();
         assert_eq!(id, local_id);
         assert_eq!(uid, remote_uid);
+    }
+
+    #[test]
+    fn catalog_delete_tombstone_removes_local_user() {
+        let mut conn = db();
+        conn.execute(
+            "INSERT INTO users (username, password_hash, role, active) VALUES ('recepcion','hash','recepcion',1)",
+            [],
+        )
+        .unwrap();
+        let extra_uid: String = conn
+            .query_row("SELECT uid FROM users WHERE username='recepcion'", [], |r| r.get(0))
+            .unwrap();
+        let client = FakeClient::new();
+        client.pull.lock().unwrap().insert(
+            "catalog_deletes".into(),
+            vec![json!({
+                "entity": "app_users",
+                "uid": extra_uid,
+                "deleted_at": "2026-09-24T18:00:00Z",
+            })],
+        );
+        assert!(pull_all(&mut conn, &client).unwrap());
+        let remaining: i64 = conn
+            .query_row("SELECT count(*) FROM users WHERE uid=?1", [&extra_uid], |r| r.get(0))
+            .unwrap();
+        assert_eq!(remaining, 0);
     }
 }

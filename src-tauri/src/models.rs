@@ -35,6 +35,15 @@ pub struct SessionUser {
     pub role: Role,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManagedUser {
+    pub id: i64,
+    pub username: String,
+    pub role: Role,
+    pub active: bool,
+    pub version: i64,
+}
+
 #[derive(Clone, Serialize)]
 pub struct SessionInfo {
     pub token: String,

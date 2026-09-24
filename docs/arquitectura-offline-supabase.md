@@ -71,7 +71,7 @@ No hay servicio Windows. El worker de sync y el planificador de respaldo viven d
 | Catálogo: `rooms` (número, tipo, piso, notas, `active`), `rate_plans`, `products`, ajustes del negocio, `users` / `app_users` | Admin remoto; recepción solo con sync (write-through) | **Supabase** |
 | Operación: estadías, cargos, pagos, reservas, `rooms.status`, huéspedes | Solo recepción | **Recepción** |
 
-Con sync habilitado, una edición de catálogo (incluso desde la PC de recepción) se escribe primero en Supabase con `expected_version` y la pull la aplica localmente. Sin conexión, esas pantallas muestran «Requiere conexión con administración» y **no** escriben en SQLite. Sin dispositivo configurado (instalación puramente local) el catálogo sigue operando en SQLite como hoy.
+Con sync habilitado, una edición de catálogo (incluso desde la PC de recepción) se escribe primero en Supabase con `expected_version` y la pull la aplica localmente. Sin conexión, esas pantallas muestran «Requiere conexión con administración» y **no** escriben en SQLite. Sin dispositivo configurado (instalación puramente local) el catálogo sigue operando en SQLite como hoy. Tras crear una migración en `supabase/migrations/`, aplicarla al local con `npx supabase migration up`. No usar `db reset`: borra datos y el usuario `device`.
 
 El admin remoto no puede modificar `stays`, `charges`, `payments`, `reservations` ni `rooms.status`. RLS lo rechaza. Preview de cuenta en remoto se calcula con `billing.ts` y se marca como estimativo; el importe definitivo llega con el cierre desde recepción.
 

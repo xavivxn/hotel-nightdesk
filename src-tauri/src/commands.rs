@@ -1,5 +1,5 @@
 use crate::db;
-use crate::error::{AppError, AppResult};
+use crate::error::{AppError, AppResult, ErrorCode};
 use crate::models::*;
 use crate::printer;
 use crate::service::{self, Actor};
@@ -51,6 +51,30 @@ pub(crate) async fn try_catalog(state: &AppState, app: &AppHandle, actor: &Actor
     let result = tauri::async_runtime::spawn_blocking(move || crate::sync::catalog::execute(&remote, &remote_request)).await.map_err(|_| AppError::storage("No se pudo completar la operación remota"))??;
     let id = crate::sync::catalog::apply_result(&mut conn(state), &request, &result)?;
     Ok(Some(id))
+}
+
+pub(crate) async fn try_catalog_delete(
+    state: &AppState,
+    app: &AppHandle,
+    actor: &Actor,
+    user_id: i64,
+    expected_version: i64,
+    operation_id: Option<String>,
+) -> AppResult<bool> {
+    let dir = app_data_dir(app)?;
+    if !crate::sync::catalog::configured(&dir)? {
+        return Ok(false);
+    }
+    let request = crate::sync::catalog::prepare_delete(&conn(state), actor, user_id, expected_version, operation_id)?;
+    let remote = crate::sync::remote::SupabaseRemote::load(&dir)?;
+    let remote_request = request.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        crate::sync::catalog::execute_delete(&remote, &remote_request)
+    })
+    .await
+    .map_err(|_| AppError::storage("No se pudo completar la operación remota"))??;
+    crate::sync::catalog::apply_delete(&mut conn(state), &request, &result)?;
+    Ok(true)
 }
 
 fn app_data_dir(app: &AppHandle) -> AppResult<PathBuf> {
@@ -178,6 +202,100 @@ pub async fn set_product_active(state: State<'_, AppState>, session_token: Optio
     if let Some(id) = try_catalog(&state, &app, &actor_from(&user), "products", payload, operation_id).await? { return db::get_product(&conn(&state), id); }
     let conn = conn(&state);
     crate::sync::catalog::local(&conn, &actor_from(&user), "products", |tx| service::set_product_active(tx, &actor_from(&user), product_id, active))
+}
+
+#[tauri::command]
+pub fn list_users(state: State<AppState>, session_token: Option<String>) -> AppResult<Vec<ManagedUser>> {
+    let user = crate::auth::require(&state, session_token.as_deref(), true)?;
+    let conn = conn(&state);
+    service::list_users(&conn, &actor_from(&user))
+}
+
+#[tauri::command]
+pub async fn set_user_active(
+    state: State<'_, AppState>,
+    session_token: Option<String>,
+    app: AppHandle,
+    user_id: i64,
+    active: bool,
+    operation_id: Option<String>,
+    expected_version: Option<i64>,
+) -> AppResult<ManagedUser> {
+    let user = crate::auth::require(&state, session_token.as_deref(), true)?;
+    let actor = actor_from(&user);
+    let (current, hash) = {
+        let conn = conn(&state);
+        service::validate_set_user_active(&conn, &actor, user_id, active, expected_version)?
+    };
+    let payload = |expected: i64| {
+        serde_json::json!({
+            "id": current.id,
+            "username": current.username,
+            "password_hash": hash,
+            "role": current.role.as_str(),
+            "active": active,
+            "expected_version": expected,
+        })
+    };
+    // A locally created user (first boot, or created offline) has version >= 1 but
+    // no remote row yet. catalog_upsert_user treats a missing uid as insert and
+    // requires expected_version 0; retry once after a conflict.
+    let catalog_id = match try_catalog(&state, &app, &actor, "app_users", payload(current.version), operation_id.clone()).await {
+        Ok(id) => id,
+        Err(error) if error.code() == ErrorCode::Conflict && current.version != 0 => {
+            try_catalog(&state, &app, &actor, "app_users", payload(0), operation_id).await?
+        }
+        Err(error) => return Err(error),
+    };
+    if let Some(id) = catalog_id {
+        if !active {
+            crate::auth::revoke_sessions_for(&state, user_id);
+        }
+        return service::get_managed_user(&conn(&state), id);
+    }
+    let conn = conn(&state);
+    let updated = crate::sync::catalog::local(&conn, &actor, "app_users", |tx| {
+        service::set_user_active(tx, &actor, user_id, active, Some(current.version))
+    })?;
+    if !active {
+        crate::auth::revoke_sessions_for(&state, user_id);
+    }
+    Ok(updated)
+}
+
+#[tauri::command]
+pub async fn delete_user(
+    state: State<'_, AppState>,
+    session_token: Option<String>,
+    app: AppHandle,
+    user_id: i64,
+    operation_id: Option<String>,
+    expected_version: Option<i64>,
+) -> AppResult<()> {
+    let user = crate::auth::require(&state, session_token.as_deref(), true)?;
+    let actor = actor_from(&user);
+    let current = {
+        let conn = conn(&state);
+        service::validate_delete_user(&conn, &actor, user_id, expected_version)?
+    };
+    let expected = expected_version.unwrap_or(current.version);
+    let deleted = match try_catalog_delete(&state, &app, &actor, current.id, expected, operation_id.clone()).await {
+        Ok(done) => done,
+        Err(error) if error.code() == ErrorCode::Conflict && expected != 0 => {
+            try_catalog_delete(&state, &app, &actor, current.id, 0, operation_id).await?
+        }
+        Err(error) => return Err(error),
+    };
+    if deleted {
+        crate::auth::revoke_sessions_for(&state, user_id);
+        return Ok(());
+    }
+    let conn = conn(&state);
+    crate::sync::catalog::local(&conn, &actor, "app_users", |tx| {
+        service::delete_user(tx, &actor, user_id, Some(current.version))
+    })?;
+    crate::auth::revoke_sessions_for(&state, user_id);
+    Ok(())
 }
 
 #[tauri::command]

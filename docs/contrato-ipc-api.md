@@ -96,6 +96,9 @@ Leyenda de `supabaseInvoke`: `lectura` = PostgREST/vista; `catálogo` = RPC `cat
 | `auth_session` | sí | sesión Auth en memoria | autenticado |
 | `auth_logout` | sí | signOut Auth | autenticado |
 | `auth_create_user` | admin; write-through si hay sync | `catalog_write` `app_users` + hash vía `hash_password` | admin |
+| `list_users` | admin | lectura `app_users` (sin `password_hash`) | admin |
+| `set_user_active` | admin; write-through si hay sync | `catalog_write` `app_users` (`active`) | admin |
+| `delete_user` | admin; write-through si hay sync | `catalog_delete` `app_users` | admin |
 | `contract_info` | sí | constante de app | autenticado |
 | `list_board` | sí | lectura `stays`/`rooms` + Realtime | autenticado |
 | `list_rooms` | sí | lectura `rooms` | autenticado |
@@ -190,6 +193,24 @@ Campos reservados en todos: `operation_id?: string`, `expected_version?: number`
 **delete_charge** (admin): baja lógica (`charges.deleted_at`). `list_charges` / preview / detalle omiten filas borradas. La outbox registra `op=delete`.
 
 **auth_create_user** (admin): `{ payload: { username, password, role }, operation_id? }`. Con sync: hash local (`hash_password` + mismo `operation_id`) y `catalog_write` `app_users` (el hash viaja; la contraseña en claro no).
+
+**list_users** (admin): sin payload. Devuelve `{ id, username, role, active, version }[]`. Nunca incluye `password_hash`.
+
+**set_user_active** (admin):
+
+```
+{ user_id, active, expected_version?, operation_id? }
+```
+
+Baja lógica. No se puede desactivar la propia cuenta ni al último administrador activo. Reactivar está permitido. Con sync: write-through a `app_users`; el hash se relee en el servidor.
+
+**delete_user** (admin):
+
+```
+{ user_id, expected_version?, operation_id? }
+```
+
+Borra la fila. El nombre queda libre para crear otra cuenta. No se puede eliminar la propia cuenta ni al último administrador activo. Con sync: `catalog_delete` deja lápida en `catalog_deletes` y la pull local hace `DELETE`. Sin sync: `DELETE` en SQLite.
 
 Mutaciones operativas escriben `sync_outbox` en la misma TX. El `operation_id` de `api.ts` es `root_operation_id`; si una operación genera varias filas (checkout: stay + cargos + room), los sub-ops usan un UUID v5 derivado. Repetir el mismo `operation_id` → `conflict` y rollback (no hay segunda estadía ni segunda fila). El adaptador IPC despierta al worker (`wake_push`) después de cada mutación operativa.
 
