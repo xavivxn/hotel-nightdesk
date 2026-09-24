@@ -63,8 +63,8 @@ Tras `db reset` quedan dos usuarios Auth de desarrollo (no usar en hosted):
 
 | Email | `app_metadata` | Contraseña |
 |---|---|---|
-| `admin@nightdesk.local` | `role=admin` | placeholder local en `seed.sql` |
-| `device@nightdesk.local` | `role=device`, `device_id` fijo | placeholder local en `seed.sql` |
+| `admin@nightdesk.local` | `role=admin` | `123456` (solo local) |
+| `device@nightdesk.local` | `role=device`, `device_id` fijo | `123456` (solo local) |
 
 ### Hosted
 
