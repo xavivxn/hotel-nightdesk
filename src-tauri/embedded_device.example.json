@@ -2,5 +2,8 @@
   "project_url": "https://your-project.supabase.co",
   "anon_key": "sb_publishable_or_anon_key",
   "device_email": "device@example.test",
-  "device_password": "replace-me"
+  "device_password": "replace-me",
+  "remote_email": "admin@example.test",
+  "remote_password": "replace-me",
+  "remote_auth_version": 1
 }

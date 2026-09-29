@@ -4,6 +4,8 @@ Réplica de lectura, autoridad del catálogo y destino de respaldos. SQLite en r
 
 No commitear URL, anon key, `service_role` ni contraseñas. En git/Jira solo «configurado».
 
+Credenciales de fábrica del instalador: `src-tauri/embedded_device.local.json` (gitignored; plantilla `embedded_device.example.json`). Incluye `device_*` (sync / respaldos / updates) y opcionalmente `remote_email` / `remote_password` / `remote_auth_version` (admin remoto embebido). Para rotar el admin embebido, subí `remote_auth_version` y recompilá.
+
 ## Requisitos locales
 
 - Docker Desktop en marcha
