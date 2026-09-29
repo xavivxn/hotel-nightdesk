@@ -37,6 +37,15 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "PEGAR_AQUI_LA_CLAVE_PUBLICA_nightdesk.key.pub",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

@@ -816,6 +816,10 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
     case "sync_pull_now":
       window.dispatchEvent(new Event("sync:catalog-updated"));
       return;
+    case "app_update_check":
+      return null;
+    case "app_update_install":
+      fail("validation", "Las actualizaciones solo se instalan en la app de escritorio");
     case "sync_configure_device": {
       const payload = args.payload as {
         project_url: string;

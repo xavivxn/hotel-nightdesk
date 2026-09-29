@@ -581,3 +581,20 @@ pub struct BackupListItem {
 fn default_backup_source() -> String {
     "local".into()
 }
+
+/// Newer build published in the `updates` Storage bucket.
+#[derive(Debug, Clone, Serialize)]
+pub struct AppUpdateInfo {
+    pub current_version: String,
+    pub version: String,
+    pub notes: Option<String>,
+}
+
+/// Streamed to the UI while an update downloads and installs.
+#[derive(Debug, Clone, Serialize)]
+pub struct AppUpdateProgress {
+    /// `downloading` | `installing`
+    pub stage: &'static str,
+    pub downloaded: u64,
+    pub total: Option<u64>,
+}

@@ -26,6 +26,7 @@ src-tauri/src/billing.rs      cobro (fuente de verdad + tests)
 src-tauri/src/db.rs           SQLite, seed, queries
 src-tauri/src/sync/           outbox, client, push, pull, bootstrap, realtime, worker (I06/I07)
 src-tauri/src/backup.rs       snapshot cifrado a Storage (I05/I08)
+src-tauri/src/updater.rs      actualizaciones (bucket privado `updates`; docs/actualizaciones.md)
 src-tauri/migrations/         schema SQLite (001_init … 014_sync)
 supabase/                     esquema Postgres, RLS, RPC (N12)
 docs/contrato-ipc-api.md      contrato IPC v1 + mapeo supabaseInvoke

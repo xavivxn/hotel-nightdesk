@@ -11,6 +11,7 @@ mod service;
 mod reports;
 mod analytics;
 mod sync;
+mod updater;
 
 use rusqlite::Connection;
 use std::sync::Mutex;
@@ -26,6 +27,7 @@ pub struct AppState {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
             std::fs::create_dir_all(&dir)?;
@@ -125,6 +127,8 @@ pub fn run() {
             commands::backup_list,
             commands::backup_import_key,
             commands::backup_restore,
+            commands::app_update_check,
+            commands::app_update_install,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Nightdesk");

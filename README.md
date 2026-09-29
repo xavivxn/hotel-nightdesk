@@ -83,6 +83,8 @@ El instalador conserva `com.nightdesk.hotel` como identificador interno para man
 
 En el primer arranque de una instalación nueva, elegí **Recepción** o **Administración remota**. En recepción configurá la impresora y el dispositivo Supabase; sus credenciales se guardan en el Administrador de credenciales de Windows. Una configuración anterior en `device_supabase.json` se migra al abrir y se elimina tras guardar la credencial en Windows. En administración configurá URL/clave anónima e iniciá sesión con Supabase Auth. No se instala un servicio Windows ni WireGuard. El procedimiento y la evidencia pendiente por cada equipo están en [validación MOT-23](docs/validacion-instalacion-mot23.md).
 
+Desde la versión que incluye el actualizador, las PCs se actualizan con el botón **Actualizar** de la barra de título. Configuración de la clave de firma y cómo publicar una versión: [Actualizaciones desde la app](docs/actualizaciones.md).
+
 ## Datos locales
 
 La base SQLite se crea al primer arranque en el data dir de la app, no dentro de esta carpeta.

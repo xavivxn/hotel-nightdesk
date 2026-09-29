@@ -32,6 +32,8 @@ import type {
   BackupRunResult,
   BackupListItem,
   BackupSource,
+  AppUpdateInfo,
+  AppUpdateProgress,
 } from "./types";
 import { toApiError } from "./errors";
 
@@ -74,6 +76,8 @@ const LOCAL_ALWAYS = new Set([
   "sync_status",
   "sync_pull_now",
   "sync_configure_device",
+  "app_update_check",
+  "app_update_install",
 ]);
 
 let sessionToken: string | null = null;
@@ -241,6 +245,16 @@ export const api = {
   backupImportKey: (key_hex: string) => cmd<void>("backup_import_key", { payload: { key_hex } }),
   backupRestore: (backup_id: string, source?: BackupSource) =>
     cmd<void>("backup_restore", { payload: { backup_id, source } }),
+  /** Versión nueva publicada o `null`. Siempre local: el binario se actualiza en esta PC. */
+  updateCheck: () => cmd<AppUpdateInfo | null>("app_update_check"),
+  /** Descarga, verifica e instala. En Windows la app se cierra y el instalador la vuelve a abrir. */
+  updateInstall: async (onProgress: (progress: AppUpdateProgress) => void) => {
+    if (!isTauri()) return cmd<void>("app_update_install");
+    const { Channel } = await import("@tauri-apps/api/core");
+    const channel = new Channel<AppUpdateProgress>();
+    channel.onmessage = onProgress;
+    return cmd<void>("app_update_install", { on_progress: channel });
+  },
   subscribeOperational: async (onChange: () => void) => {
     const mode = await getDeviceMode();
     if (mode !== "remote") return () => {};

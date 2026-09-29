@@ -707,3 +707,16 @@ fn maybe_start_backup(state: &AppState, app: &AppHandle) -> AppResult<()> {
     }
     Ok(())
 }
+
+#[tauri::command]
+pub async fn app_update_check(app: AppHandle) -> AppResult<Option<AppUpdateInfo>> {
+    crate::updater::check(&app).await
+}
+
+#[tauri::command]
+pub async fn app_update_install(
+    app: AppHandle,
+    on_progress: tauri::ipc::Channel<AppUpdateProgress>,
+) -> AppResult<()> {
+    crate::updater::install(&app, on_progress).await
+}

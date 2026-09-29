@@ -324,3 +324,17 @@ export type BackupListItem = {
 };
 
 export type HashPasswordResult = { hash: string };
+
+/** Espejo de `AppUpdateInfo` (models.rs): versión nueva publicada en el bucket `updates`. */
+export type AppUpdateInfo = {
+  current_version: string;
+  version: string;
+  notes: string | null;
+};
+
+/** Espejo de `AppUpdateProgress` (models.rs). */
+export type AppUpdateProgress = {
+  stage: "downloading" | "installing";
+  downloaded: number;
+  total: number | null;
+};
