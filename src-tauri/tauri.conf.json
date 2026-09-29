@@ -42,7 +42,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "PEGAR_AQUI_LA_CLAVE_PUBLICA_nightdesk.key.pub",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEIwMzFFRUI4NDMxRTlBMkQKUldRdG1oNUR1TzR4c05mWkpEenY4NU5XbUwvKzAwOGowaHRHWVJGcmgrVmxDUWttVU1FSUtZeHoK",
       "windows": {
         "installMode": "passive"
       }

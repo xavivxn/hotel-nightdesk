@@ -1,90 +1,161 @@
 # Actualizaciones desde la app
 
-La app de Windows se actualiza sola desde un botón **Actualizar** en la barra de título. Usa el plugin oficial de Tauri 2 (`tauri-plugin-updater`): descarga el instalador, verifica su firma, cierra la app, instala en modo pasivo y la vuelve a abrir.
+La app de Windows se actualiza sola desde el botón **Actualizar** de la barra de título (`tauri-plugin-updater`). Descarga el instalador, verifica la firma, cierra la app, instala en modo pasivo y la vuelve a abrir. Los datos de `%APPDATA%\com.nightdesk.hotel\` no se tocan.
+
+Esta guía es el procedimiento operativo: primer build con versionado e instalaciones a mano, y cada update posterior al bucket `updates`.
 
 ## Cómo funciona
 
 - La app consulta `updates/windows/latest.json` en Supabase Storage 20 s después de abrir, cada 4 h y cuando vuelve internet.
-- Se autentica con la cuenta del dispositivo (la misma de sync y respaldos). El bucket `updates` es **privado** porque el instalador lleva embebidas esas credenciales (`embedded_device.local.json`).
-- Si la versión publicada es mayor que la instalada, aparece **Actualizar X.Y.Z** junto a los botones de ventana. Al confirmar: descarga con progreso, verifica la firma, la app se cierra, el instalador NSIS corre en modo pasivo (barra de progreso, sin preguntas ni permisos de administrador) y la app se vuelve a abrir.
-- Los datos de `%APPDATA%\com.nightdesk.hotel\` no se tocan. Las migraciones de SQLite corren al abrir, como en cualquier instalación.
-- Sin internet o sin credenciales de dispositivo el botón no aparece y la recepción sigue funcionando igual.
+- Se autentica con la cuenta del dispositivo (la misma de sync y respaldos). El bucket `updates` es **privado**: el instalador lleva embebidas esas credenciales y, si está en `embedded_device.local.json`, las de administración remota (`remote_email`, `remote_password`, `remote_auth_version`). Para rotar esa cuenta: subí `remote_auth_version`, compilá y publicá; las PCs que actualizan reemplazan la credencial guardada.
+- Si la versión publicada es **mayor** que la instalada, aparece **Actualizar X.Y.Z**. Al confirmar: descarga con progreso, verifica la firma, NSIS en modo pasivo, la app se reabre.
+- Sin internet o sin credenciales de dispositivo el botón no aparece y la recepción sigue igual.
 
-| Pieza | Archivo |
-|-------|---------|
+| Pieza | Dónde |
+|-------|--------|
 | Consulta e instalación | `src-tauri/src/updater.rs` |
-| Comandos IPC | `app_update_check`, `app_update_install` en `commands.rs` |
-| Botón y diálogo | `src/components/layout/UpdateButton.tsx` (dentro de `TitleBar.tsx`) |
-| Clave pública y modo pasivo | `src-tauri/tauri.conf.json` → `plugins.updater` |
-| Bucket y permisos | `supabase/migrations/20260929120000_updates_bucket.sql` |
+| Comandos IPC | `app_update_check`, `app_update_install` |
+| Botón | `src/components/layout/UpdateButton.tsx` |
+| Clave pública | `src-tauri/tauri.conf.json` → `plugins.updater.pubkey` |
+| Subir versión al build | `scripts/bump-version.mjs` (lo llama `npm run build:installer:windows`) |
+| Bucket | Storage → `updates` (migración ya aplicada) |
 
-## Configuración (una sola vez)
+## Versionado
 
-### 1. Clave de firma
+No edites `version` a mano. El comando de instalador corre `scripts/bump-version.mjs` **antes** de compilar y suma el patch en:
 
-En la PC donde se compila, desde PowerShell en la raíz del repo:
+- `package.json` y `package-lock.json`
+- `src-tauri/tauri.conf.json`
+- `src-tauri/Cargo.toml` y `src-tauri/Cargo.lock`
+
+Hoy el repo está en **0.1.7**. El primer `npm run build:installer:windows` deja **0.1.8**. El siguiente deja **0.1.9**, y así.
+
+Si el build falla **después** del bump (por ejemplo faltan las variables de firma), la versión ya quedó subida. No rebobines esos archivos: la próxima compilación usa el número siguiente.
+
+## Qué ya está hecho (no lo repitas)
+
+1. **Clave de firma.** Par generado en esta Mac, fuera del repo:
+   - privada: `~/.tauri/nightdesk.key`
+   - pública: `~/.tauri/nightdesk.key.pub`
+   - contraseña: `~/.tauri/nightdesk.key.password`
+2. **Pública en el repo.** Ya está en `src-tauri/tauri.conf.json` → `plugins.updater.pubkey`. No la reemplaces ni generes otra clave: las PCs que instalen un build firmado con esta clave rechazarían updates firmados con otra.
+3. **Bucket.** `updates` ya existe en el proyecto nightdesk, privado, lectura para dispositivo y admin. No vuelvas a aplicar la migración.
+
+**Nunca** commitees `nightdesk.key` ni la contraseña. `*.key` está en `.gitignore`. Guardá una copia de la privada y de la contraseña fuera de esta Mac.
+
+## Copiar la clave a la PC de Windows (una vez)
+
+El instalador se arma en Windows. Esa PC necesita la **misma** privada.
+
+1. En Windows creá `%USERPROFILE%\.tauri\` si no existe.
+2. Copiá `nightdesk.key` (y, si querés, `nightdesk.key.password`) desde la Mac.
+3. No corras `tauri signer generate` otra vez. Eso crea un par distinto y rompe la pública del repo.
+
+---
+
+## Parte A — Primer build con versionado (última instalación a mano)
+
+Las PCs con 0.1.7 **no tienen** el botón. Esta build se instala a mano. **No** publiques `latest.json` de esta versión.
+
+### A1. PowerShell, raíz del repo, con la clave en el entorno
 
 ```powershell
-npx tauri signer generate -w "$env:USERPROFILE\.tauri\nightdesk.key"
+$env:TAURI_SIGNING_PRIVATE_KEY = Get-Content "$env:USERPROFILE\.tauri\nightdesk.key" -Raw
+$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = Get-Content "$env:USERPROFILE\.tauri\nightdesk.key.password" -Raw
+npm run build:installer:windows
 ```
 
-Pide una contraseña y genera dos archivos:
+Si no copiaste el archivo de contraseña, asigná `$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD` a mano.
 
-- `nightdesk.key.pub` (pública): copiá su contenido completo en `src-tauri/tauri.conf.json` → `plugins.updater.pubkey`, reemplazando `PEGAR_AQUI_LA_CLAVE_PUBLICA_nightdesk.key.pub`.
-- `nightdesk.key` (privada): **nunca** va al repo. Guardá una copia junto con su contraseña en un lugar seguro. Si se pierde, las PCs instaladas no aceptan más actualizaciones y hay que reinstalar a mano en cada una.
+### A2. Artefactos
 
-### 2. Bucket en Supabase
+En `src-tauri\target\release\bundle\nsis\`:
 
-Aplicá la migración `20260929120000_updates_bucket.sql` (`supabase db push`, o pegala en el SQL Editor del dashboard). Crea el bucket privado `updates` y permite lectura solo a cuentas de dispositivo y administradores.
+- `Love Nestt Motel App_0.1.8_x64-setup.exe`
+- `Love Nestt Motel App_0.1.8_x64-setup.exe.sig`
 
-### 3. Última instalación manual
+El nombre lleva espacios; para Storage se renombra después. Renombrar **no** invalida la firma.
 
-Las PCs con 0.1.7 o anterior no saben actualizarse. La primera versión que incluye el botón se instala a mano una última vez en cada PC. Desde ahí, todo se hace con el botón.
+### A3. Instalar en cada recepción
 
-## Publicar una versión
+1. Cerrá la app si está abierta.
+2. Corré el `.exe` de 0.1.8.
+3. Comprobá que arranca, que el tablero y el historial siguen, y que el identificador sigue siendo `com.nightdesk.hotel`.
 
-1. Compilá con la clave en el entorno:
+Opcional: subí el instalador a Storage → `updates` → carpeta `windows` como `nightdesk_0.1.8_x64-setup.exe` por si hay que reinstalar a mano. **No** subas `latest.json` con `"version": "0.1.8"`: las PCs que acaban de instalar 0.1.8 no verían botón, y las de 0.1.7 no saben consultar el bucket.
 
-   ```powershell
-   $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content "$env:USERPROFILE\.tauri\nightdesk.key" -Raw
-   $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = "<contraseña de la clave>"
-   npm run build:installer:windows
-   ```
+---
 
-   En `src-tauri/target/release/bundle/nsis/` quedan `Love Nestt Motel App_X.Y.Z_x64-setup.exe` y `Love Nestt Motel App_X.Y.Z_x64-setup.exe.sig`. Si faltan las variables, el build falla al final (la versión ya subió; usá la siguiente sin problema).
+## Parte B — Cada update siguiente (botón Actualizar)
 
-2. En el dashboard: **Storage → updates → carpeta `windows`**, subí el `.exe` renombrado sin espacios: `nightdesk_X.Y.Z_x64-setup.exe`. Renombrar no afecta la firma.
+Cuando haya un cambio que valga la pena entregar por el botón (el próximo bump será **0.1.9**, o el número que muestre el script).
 
-3. Armá `latest.json` y subilo a `updates/windows/latest.json`, reemplazando el anterior. Subilo **después** del `.exe`.
+### B1. Mismo build firmado
 
-   ```json
-   {
-     "version": "X.Y.Z",
-     "notes": "Qué cambia, en una o dos líneas para recepción.",
-     "pub_date": "2026-09-29T15:00:00Z",
-     "platforms": {
-       "windows-x86_64": {
-         "signature": "<contenido completo del .exe.sig>",
-         "url": "https://rkbilukqaoafpojkoljm.supabase.co/storage/v1/object/updates/windows/nightdesk_X.Y.Z_x64-setup.exe"
-       }
-     }
-   }
-   ```
+```powershell
+$env:TAURI_SIGNING_PRIVATE_KEY = Get-Content "$env:USERPROFILE\.tauri\nightdesk.key" -Raw
+$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = Get-Content "$env:USERPROFILE\.tauri\nightdesk.key.password" -Raw
+npm run build:installer:windows
+```
 
-   Para copiar la firma: `Get-Content "src-tauri\target\release\bundle\nsis\Love Nestt Motel App_X.Y.Z_x64-setup.exe.sig" -Raw | Set-Clipboard`.
+Anotá la versión que imprimió el script (`Versión actualizada: A.B.C → X.Y.Z`). El `.exe` y el `.sig` quedan en la misma carpeta `nsis\` con ese `X.Y.Z`.
 
-4. Las PCs muestran el botón al abrir la app o en la próxima consulta (cada 4 h). Si tarda, puede ser la caché de Storage (hasta 1 h).
+### B2. Subir el instalador (antes que el manifiesto)
+
+Dashboard → **Storage** → bucket **updates** → carpeta **windows**:
+
+1. Subí el `.exe` como `nightdesk_X.Y.Z_x64-setup.exe` (sin espacios).
+2. Dejá los `.exe` viejos: sirven para reinstalar a mano.
+
+### B3. Armar y subir `latest.json` (después del `.exe`)
+
+Copiá la firma:
+
+```powershell
+Get-Content "src-tauri\target\release\bundle\nsis\Love Nestt Motel App_X.Y.Z_x64-setup.exe.sig" -Raw | Set-Clipboard
+```
+
+Subí `updates/windows/latest.json` **reemplazando** el anterior:
+
+```json
+{
+  "version": "X.Y.Z",
+  "notes": "Qué cambia, en una o dos líneas para recepción.",
+  "pub_date": "2026-09-29T15:00:00Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "<contenido completo del .exe.sig>",
+      "url": "https://rkbilukqaoafpojkoljm.supabase.co/storage/v1/object/updates/windows/nightdesk_X.Y.Z_x64-setup.exe"
+    }
+  }
+}
+```
+
+`version` tiene que ser **exactamente** la del `.exe` y **mayor** que la instalada (después de la parte A: mayor que 0.1.8). `pub_date` en UTC. La firma es la de **ese** archivo.
+
+### B4. Comprobar en una PC que ya tiene 0.1.8 (o la última instalada)
+
+1. Abrí la app (con internet y dispositivo configurado). A los ~20 s, o al volver la red, aparece **Actualizar X.Y.Z**.
+2. **Más tarde** cierra el diálogo y deja el botón.
+3. **Actualizar ahora**: descarga, cierra, barra del instalador, la app se reabre sola.
+4. Tablero e historial iguales; la app sigue abriéndose al iniciar sesión en Windows.
+
+Si el botón tarda: caché de Storage (hasta 1 h) o el equipo no tiene credenciales de dispositivo.
+
+---
 
 ## Reglas
 
-- `version` en `latest.json` tiene que ser exactamente la del instalador subido y mayor que la instalada. No se puede bajar de versión: para volver atrás, publicá una versión nueva con el código anterior.
-- La firma tiene que ser la del mismo `.exe`. Si no coincide, la app rechaza la instalación y queda como estaba.
-- Conservá los `.exe` anteriores en el bucket: sirven para reinstalar a mano si hace falta.
-- No cambies el identificador `com.nightdesk.hotel` ni el nombre del producto: el instalador los usa para reemplazar la instalación existente.
+- No se puede bajar de versión con el botón. Para volver atrás, publicá una versión **nueva** con el código anterior.
+- Firma y `.exe` tienen que ser del mismo build. Si no coinciden, la app rechaza el update y queda como estaba.
+- No cambies `com.nightdesk.hotel` ni el `productName`: el instalador los usa para reemplazar la instalación existente.
+- Commiteá el bump de versión que dejó el script (queda en el working tree después del build). No subas `.exe`, `.sig` ni la clave privada.
 
-## Verificar una versión nueva
+## Si algo falla
 
-1. El botón aparece en la barra de título con la versión publicada.
-2. **Más tarde** cierra el diálogo y deja el botón visible.
-3. **Actualizar ahora** muestra el progreso, la app se cierra, aparece la barra del instalador y la app se vuelve a abrir sola.
-4. La versión nueva está instalada, el tablero y el historial siguen iguales y la app sigue abriéndose al iniciar sesión en Windows.
+| Qué ves | Qué hacer |
+|---------|-----------|
+| El build termina sin `.sig` | Faltaban `TAURI_SIGNING_PRIVATE_KEY` / `_PASSWORD`. La versión ya subió; repetí el build (siguiente número). |
+| No aparece el botón | Versión publicada no es mayor; sin internet; sin cuenta de dispositivo; o `latest.json` se subió antes que el `.exe`. |
+| “No se pudo actualizar” / firma | Pública del instalado ≠ par que firmó este `.exe`, o pegaste mal el `.sig` en `latest.json`. |
+| Generaste otra clave por error | No la uses. Seguí con `~/.tauri/nightdesk.key` (el par cuya pública está en `tauri.conf.json`). |

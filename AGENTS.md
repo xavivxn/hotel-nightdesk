@@ -44,6 +44,7 @@ Leer el skill que corresponda **antes** de tocar esa área:
 | `nightdesk-billing` | tarifas, IVA, preview, checkout, recargos, tickets |
 | `nightdesk-add-command` | comando Tauri, payload, llamada desde UI, caso supabaseInvoke |
 | `nightdesk-schema` | migraciones, habitaciones, reservas, ocupación |
+| `nightdesk-updates` | instalador Windows, firma, `latest.json`, bump de versión |
 
 No hay tests de frontend.
 
