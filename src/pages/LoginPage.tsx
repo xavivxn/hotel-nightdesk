@@ -7,7 +7,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { Info, TriangleAlert } from "lucide-react";
+import { ArrowLeft, Info, TriangleAlert } from "lucide-react";
 import { LoveNestLogoLayered } from "@/components/layout/BrandLogo";
 import { DutyClock } from "@/components/layout/DutyClock";
 import { Button } from "@/components/ui/Button";
@@ -60,10 +60,8 @@ export function LoginPage({
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [legacyPin, setLegacyPin] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
-  const [showPin, setShowPin] = useState(false);
   const [capsOn, setCapsOn] = useState(false);
   const [phase, setPhase] = useState<LoginPhase>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -192,7 +190,7 @@ export function LoginPage({
       if (needsSetup) {
         if (password !== confirm) throw "Las contraseñas no coinciden";
         try {
-          await api.setupAdmin({ username: user, password }, requireTrimmed(legacyPin) ?? "");
+          await api.setupAdmin({ username: user, password }, "");
           setNeedsSetup(false);
         } catch (cause) {
           if (String(cause).includes("ya está configurada")) {
@@ -231,7 +229,6 @@ export function LoginPage({
     } finally {
       setPassword("");
       setConfirm("");
-      setLegacyPin("");
     }
   }
 
@@ -317,31 +314,20 @@ export function LoginPage({
             />
           </LoginField>
           {needsSetup ? (
-            <>
-              <LoginField label="Repetir contraseña">
-                <PasswordInput
-                  required
-                  show={showConfirm}
-                  onToggle={() => setShowConfirm((v) => !v)}
-                  autoComplete="new-password"
-                  value={confirm}
-                  disabled={locked}
-                  onKeyDown={trackCaps}
-                  onKeyUp={trackCaps}
-                  onBlur={() => setCapsOn(false)}
-                  onChange={(e) => setConfirm(e.target.value)}
-                />
-              </LoginField>
-              <LoginField label="PIN anterior (si el equipo tenía uno)">
-                <PasswordInput
-                  show={showPin}
-                  onToggle={() => setShowPin((v) => !v)}
-                  value={legacyPin}
-                  disabled={locked}
-                  onChange={(e) => setLegacyPin(e.target.value)}
-                />
-              </LoginField>
-            </>
+            <LoginField label="Repetir contraseña">
+              <PasswordInput
+                required
+                show={showConfirm}
+                onToggle={() => setShowConfirm((v) => !v)}
+                autoComplete="new-password"
+                value={confirm}
+                disabled={locked}
+                onKeyDown={trackCaps}
+                onKeyUp={trackCaps}
+                onBlur={() => setCapsOn(false)}
+                onChange={(e) => setConfirm(e.target.value)}
+              />
+            </LoginField>
           ) : null}
           {capsOn ? (
             <p role="status" className="flex items-center gap-1.5 text-sm font-medium text-[var(--warn)]">
@@ -369,6 +355,22 @@ export function LoginPage({
               "Entrar"
             )}
           </Button>
+          {needsSetup ? (
+            <Button
+              type="button"
+              variant="ghost"
+              className="w-full"
+              disabled={locked}
+              onClick={() => {
+                setNeedsSetup(false);
+                setConfirm("");
+                setError(null);
+              }}
+            >
+              <ArrowLeft size={16} aria-hidden="true" />
+              Atrás
+            </Button>
+          ) : null}
         </form>
       </section>
     </div>
