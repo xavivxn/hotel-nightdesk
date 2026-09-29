@@ -14,11 +14,11 @@ const fills: Record<string, string> = {
 };
 
 const stamps: Record<string, string> = {
-  available: "border-0 bg-[var(--ok)] text-[var(--ok-ink)]",
-  occupied: "border-0 bg-[var(--warn)] text-[var(--warn-ink)]",
+  available: "bg-[var(--ok)] text-[var(--ok-ink)]",
+  occupied: "bg-[var(--warn)] text-[var(--warn-ink)]",
   dirty: "stamp-dirty",
   blocked: "stamp-blocked",
-  reserved: "border-0 bg-[var(--info)] text-[var(--info-ink)]",
+  reserved: "bg-[var(--info)] text-[var(--info-ink)]",
 };
 
 const icons: Record<string, LucideIcon> = {
