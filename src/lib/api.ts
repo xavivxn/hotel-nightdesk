@@ -77,6 +77,7 @@ const LOCAL_ALWAYS = new Set([
   "remote_configure",
   "remote_configured",
   "remote_get_config",
+  "remote_embedded_auth",
   "hash_password",
   "sync_status",
   "sync_pull_now",
@@ -85,12 +86,37 @@ const LOCAL_ALWAYS = new Set([
   "app_update_install",
 ]);
 
+/** Local SQLite auth when the binary embeds the remote Supabase admin. */
+const AUTH_WHEN_EMBEDDED = new Set([
+  "auth_setup_required",
+  "auth_setup",
+  "auth_login",
+  "auth_session",
+  "auth_logout",
+]);
+
 let sessionToken: string | null = null;
 let cachedMode: DeviceMode | null | undefined;
+let cachedEmbeddedRemote: boolean | undefined;
 
 export async function refreshDeviceMode(): Promise<DeviceMode | null> {
   cachedMode = undefined;
+  cachedEmbeddedRemote = undefined;
   return getDeviceMode();
+}
+
+export async function remoteEmbeddedAuth(): Promise<boolean> {
+  if (cachedEmbeddedRemote !== undefined) return cachedEmbeddedRemote;
+  cachedEmbeddedRemote = await cmdRaw<boolean>("remote_embedded_auth", {});
+  return cachedEmbeddedRemote;
+}
+
+function publicSession(session: SessionInfo): SessionInfo {
+  return {
+    token: session.token,
+    user: session.user,
+    expires_at: session.expires_at,
+  };
 }
 
 export async function getDeviceMode(): Promise<DeviceMode | null> {
@@ -137,8 +163,12 @@ async function receptionCmd<T>(name: string, args?: Record<string, unknown>, rem
 }
 
 export async function cmd<T>(name: string, args?: Record<string, unknown>): Promise<T> {
-  const mode = LOCAL_ALWAYS.has(name) ? null : await getDeviceMode();
-  if (isTauri() && mode === "remote" && !LOCAL_ALWAYS.has(name)) {
+  if (LOCAL_ALWAYS.has(name)) return cmdRaw<T>(name, args);
+  const mode = await getDeviceMode();
+  if (isTauri() && mode === "remote") {
+    if (AUTH_WHEN_EMBEDDED.has(name) && (await remoteEmbeddedAuth())) {
+      return cmdRaw<T>(name, args);
+    }
     const { supabaseInvoke } = await import("./supabase");
     try {
       return await supabaseInvoke<T>(name, { ...args, session_token: sessionToken });
@@ -160,11 +190,44 @@ export const api = {
   login: async (payload: LoginPayload) => {
     const session = await cmd<SessionInfo>("auth_login", { payload });
     sessionToken = session.token;
-    return session;
+    try {
+      if (session.supabase_access_token && session.supabase_refresh_token) {
+        const { adoptEmbeddedSession } = await import("./supabase");
+        await adoptEmbeddedSession(
+          session.supabase_access_token,
+          session.supabase_refresh_token,
+          publicSession(session),
+        );
+      }
+      return publicSession(session);
+    } catch (error) {
+      sessionToken = null;
+      try {
+        await cmd<void>("auth_logout");
+      } catch {
+        /* local session already unusable */
+      }
+      throw error;
+    }
   },
-  session: () => cmd<SessionInfo>("auth_session"),
-  logout: async () => { try { await cmd<void>("auth_logout"); } finally { sessionToken = null; } },
-  clearSession: () => { sessionToken = null; },
+  session: () => cmd<SessionInfo>("auth_session").then(publicSession),
+  logout: async () => {
+    try {
+      await cmd<void>("auth_logout");
+    } finally {
+      sessionToken = null;
+      if (isTauri()) {
+        const { clearSupabaseAuth } = await import("./supabase");
+        await clearSupabaseAuth();
+      }
+    }
+  },
+  clearSession: () => {
+    sessionToken = null;
+    if (isTauri()) {
+      void import("./supabase").then(({ clearSupabaseAuth }) => clearSupabaseAuth());
+    }
+  },
   createUser: (payload: CreateUserPayload, operation_id = crypto.randomUUID()) => cmd<SessionUser>("auth_create_user", { payload, operation_id }),
   listUsers: () => cmd<ManagedUser[]>("list_users"),
   setUserActive: (user_id: number, active: boolean, expected_version?: number, operation_id = crypto.randomUUID()) =>
@@ -241,6 +304,7 @@ export const api = {
   deviceModeSet: async (mode: DeviceMode) => {
     await cmd<void>("device_mode_set", { payload: { mode } });
     cachedMode = mode;
+    cachedEmbeddedRemote = undefined;
   },
   remoteConfigure: async (payload: RemoteConfigurePayload) => {
     await cmd<void>("remote_configure", { payload });
@@ -251,6 +315,7 @@ export const api = {
   },
   remoteConfigured: () => cmd<boolean>("remote_configured"),
   remoteGetConfig: () => cmd<RemoteConfigurePayload | null>("remote_get_config"),
+  remoteEmbeddedAuth: () => remoteEmbeddedAuth(),
   hashPassword: (password: string, operation_id?: string) => cmd<HashPasswordResult>("hash_password", { payload: { password }, operation_id }),
   syncStatus: () => cmd<SyncStatus>("sync_status"),
   syncPullNow: () => cmd<void>("sync_pull_now"),

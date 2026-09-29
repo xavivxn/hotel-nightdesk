@@ -22,6 +22,12 @@ pub struct ApplyOutcome {
 }
 
 #[derive(Clone)]
+pub struct AdminGrant {
+    pub access_token: String,
+    pub refresh_token: String,
+}
+
+#[derive(Clone)]
 struct Session {
     access_token: String,
     refresh_token: String,
@@ -89,6 +95,24 @@ impl SupabaseClient {
             .send()
             .map_err(|_| connect_failed())?;
         parse_auth_reply(reply, "No se pudo autenticar el dispositivo de recepción")
+    }
+
+    /// Password grant for the embedded remote-admin account. Does not require `device_id`.
+    pub fn password_grant_admin(
+        project_url: &str,
+        anon_key: &str,
+        email: &str,
+        password: &str,
+    ) -> AppResult<AdminGrant> {
+        let base = validate_base(project_url)?;
+        let client = http()?;
+        let reply = client
+            .post(format!("{base}/auth/v1/token?grant_type=password"))
+            .header("apikey", anon_key)
+            .json(&json!({"email": email, "password": password}))
+            .send()
+            .map_err(|_| connect_failed())?;
+        parse_admin_grant(reply)
     }
 
     fn login_refresh(&self, refresh_token: &str) -> AppResult<Session> {
@@ -360,6 +384,32 @@ fn parse_auth_reply(reply: reqwest::blocking::Response, forbidden: &str) -> AppR
         refresh_token: refresh,
         expires_at,
         device_id,
+    })
+}
+
+fn parse_admin_grant(reply: reqwest::blocking::Response) -> AppResult<AdminGrant> {
+    let status = reply.status();
+    let body: Value = reply.json().map_err(|_| {
+        AppError::storage("Administración no respondió con una sesión válida. Revisá la URL y la clave anónima.")
+    })?;
+    if !status.is_success() {
+        if status.as_u16() == 401 || status.as_u16() == 403 {
+            return Err(AppError::forbidden("No se pudo autenticar la administración remota"));
+        }
+        return Err(connect_failed());
+    }
+    let access = body["access_token"].as_str().ok_or_else(connect_failed)?;
+    let refresh = body["refresh_token"].as_str().unwrap_or("");
+    if refresh.is_empty() {
+        return Err(AppError::storage("Administración no devolvió una sesión renovable"));
+    }
+    let claims = decode_jwt_claims(access)?;
+    if claims["app_metadata"]["role"].as_str() != Some("admin") {
+        return Err(AppError::forbidden("Esta cuenta no es administración remota"));
+    }
+    Ok(AdminGrant {
+        access_token: access.to_string(),
+        refresh_token: refresh.to_string(),
     })
 }
 

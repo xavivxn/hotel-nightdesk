@@ -49,6 +49,7 @@ export default function App() {
   const [setup, setSetup] = useState<boolean | null>(null);
   const [deviceMode, setDeviceMode] = useState<DeviceMode | null | undefined>(undefined);
   const [remoteReady, setRemoteReady] = useState<boolean | null>(null);
+  const [remoteEmbedded, setRemoteEmbedded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -77,7 +78,9 @@ export default function App() {
       }
       setDeviceMode(mode);
       if (mode === "remote") {
-        const configured = await api.remoteConfigured();
+        const embedded = await api.remoteEmbeddedAuth();
+        setRemoteEmbedded(embedded);
+        const configured = embedded || (await api.remoteConfigured());
         if (configured) {
           const cfg = await api.remoteGetConfig();
           if (cfg) {
@@ -86,11 +89,13 @@ export default function App() {
           }
         }
         setRemoteReady(configured);
-        setSetup(false);
+        setSetup(embedded ? await api.setupRequired() : false);
       } else if (mode === "reception") {
+        setRemoteEmbedded(false);
         setRemoteReady(null);
         setSetup(await api.setupRequired());
       } else {
+        setRemoteEmbedded(false);
         setSetup(null);
         setRemoteReady(null);
       }
@@ -194,7 +199,9 @@ export default function App() {
   let body: ReactNode = null;
   let login: ReactNode = null;
   const inHandoff = session !== null && handoff !== "none";
-  if (deviceMode === undefined || (deviceMode === "reception" && setup === null)) {
+  const waitingRemote =
+    deviceMode === "remote" && (remoteReady === null || (remoteEmbedded && setup === null));
+  if (deviceMode === undefined || (deviceMode === "reception" && setup === null) || waitingRemote) {
     body = (
       <div className="p-8">
         <p role="alert">{error || "Preparando acceso…"}</p>
@@ -205,13 +212,28 @@ export default function App() {
     body = (
       <DeviceModePage
         onChosen={(mode) => {
-          setDeviceMode(mode);
-          if (mode === "remote") {
-            setSetup(false);
-            setRemoteReady(false);
-          } else {
-            void api.setupRequired().then(setSetup);
-          }
+          void (async () => {
+            setDeviceMode(mode);
+            if (mode === "remote") {
+              const embedded = await api.remoteEmbeddedAuth();
+              setRemoteEmbedded(embedded);
+              if (embedded) {
+                const cfg = await api.remoteGetConfig();
+                if (cfg) {
+                  const { initSupabase } = await import("@/lib/supabase");
+                  initSupabase(cfg.project_url, cfg.anon_key);
+                }
+                setRemoteReady(true);
+                setSetup(await api.setupRequired());
+              } else {
+                setSetup(false);
+                setRemoteReady(false);
+              }
+            } else {
+              setRemoteEmbedded(false);
+              void api.setupRequired().then(setSetup);
+            }
+          })();
         }}
       />
     );
@@ -222,6 +244,7 @@ export default function App() {
       <LoginPage
         setup={Boolean(setup)}
         remote={deviceMode === "remote"}
+        localAuth={remoteEmbedded}
         notice={notice}
         handoff={
           inHandoff

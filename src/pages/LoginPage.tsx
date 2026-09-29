@@ -39,6 +39,7 @@ export type LoginHandoff = {
 export function LoginPage({
   setup,
   remote = false,
+  localAuth = false,
   notice,
   handoff,
   onLogin,
@@ -46,6 +47,8 @@ export function LoginPage({
 }: {
   setup: boolean;
   remote?: boolean;
+  /** Remote PC with factory Auth: local username/password, not Supabase email. */
+  localAuth?: boolean;
   notice: string | null;
   /** Present while App keeps this page mounted as an overlay above the shell. */
   handoff?: LoginHandoff;
@@ -64,7 +67,7 @@ export function LoginPage({
   const [capsOn, setCapsOn] = useState(false);
   const [phase, setPhase] = useState<LoginPhase>("idle");
   const [error, setError] = useState<string | null>(null);
-  const [needsSetup, setNeedsSetup] = useState(setup && !remote);
+  const [needsSetup, setNeedsSetup] = useState(setup && (!remote || localAuth));
   const [btnPressed, setBtnPressed] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const slotRef = useRef<HTMLDivElement>(null);
@@ -78,11 +81,11 @@ export function LoginPage({
   useEffect(() => () => abortRef.current?.abort(), []);
 
   useEffect(() => {
-    if (!setup || remote) setNeedsSetup(false);
-  }, [setup, remote]);
+    if (!setup || (remote && !localAuth)) setNeedsSetup(false);
+  }, [setup, remote, localAuth]);
 
   useEffect(() => {
-    if (remote || !needsSetup) return;
+    if ((remote && !localAuth) || !needsSetup) return;
     let cancelled = false;
     async function refreshSetup() {
       try {
@@ -103,7 +106,7 @@ export function LoginPage({
       window.removeEventListener("sync:catalog-updated", refreshSetup);
       window.clearInterval(timer);
     };
-  }, [remote, needsSetup]);
+  }, [remote, localAuth, needsSetup]);
 
   const revealing = handoff?.phase === "reveal";
 
@@ -271,8 +274,10 @@ export function LoginPage({
             <h1 className="page-title">{needsSetup ? "Crear administrador" : "Iniciar sesión"}</h1>
             <p className="mt-2 text-sm text-[var(--muted)]">
               {needsSetup
-                ? "Configurá la primera cuenta de este equipo. Después podrás crear usuarios de recepción."
-                : remote
+                ? remote
+                  ? "Configurá la primera cuenta de este equipo. Usá el mismo usuario que en recepción."
+                  : "Configurá la primera cuenta de este equipo. Después podrás crear usuarios de recepción."
+                : remote && !localAuth
                   ? "Ingresá con tu email."
                   : "Ingresá con tu usuario."}
             </p>
@@ -285,7 +290,7 @@ export function LoginPage({
             </p>
           ) : null}
 
-          <LoginField label={remote ? "Email" : "Usuario"}>
+          <LoginField label={remote && !localAuth ? "Email" : "Usuario"}>
             <Input
               ref={usernameRef}
               autoFocus

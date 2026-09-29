@@ -9,6 +9,7 @@ const KEY = "nightdesk.mock.auth.v1";
 const sessions = new Map<string, SessionInfo>();
 const PUBLIC_DEVICE_COMMANDS = new Set([
   "device_mode_get", "device_mode_set", "remote_configure", "remote_configured", "remote_get_config",
+  "remote_embedded_auth",
 ]);
 function load(): AuthDb { return JSON.parse(localStorage.getItem(KEY) ?? '{"users":[],"attempts":{}}'); }
 function save(db: AuthDb) { localStorage.setItem(KEY, JSON.stringify(db)); }

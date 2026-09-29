@@ -11,7 +11,7 @@ Este documento sustituye el 17/09/2026 a [arquitectura-offline-vpn-backups.md](a
 
 - 23 habitaciones: 19 normales y 4 con jacuzzi.
 - Un solo binario de escritorio Windows. En el primer arranque se elige el rol del equipo: **Recepción** o **Administración remota**.
-- Inicio de sesión individual con roles `admin` y `recepcion` en la app. En Supabase Auth: usuario `admin` y un usuario `device` por PC de recepción.
+- Inicio de sesión individual con roles `admin` y `recepcion` en la app. En Supabase Auth: un usuario `admin` embebido en el instalador (peticiones del modo remoto) y un usuario `device` por PC de recepción. El cliente no recibe esas cuentas.
 - El admin remoto consulta tablero, historial y reservas en vivo (solo lectura) y modifica catálogo, ajustes del negocio y usuarios. Esta decisión reemplaza tanto el administrador de solo consulta como la escritura remota operativa de la propuesta VPN.
 - Recepción conserva habitaciones, estadías, consumos, cuentas e impresión **sin internet**.
 - Solo la PC de recepción tiene impresora. El modo remoto no dispara impresión ni PDF.
@@ -124,10 +124,11 @@ Matriz para el **modo Administración remota**. En recepción, IPC sigue la matr
 
 - Autorización en Rust (`service::authorize`) **y** en Postgres (RLS). Ocultar botones no basta.
 - Login de recepción: 100 % local (Argon2id, sesiones en memoria, límite de intentos). Ver [acceso-sesiones.md](acceso-sesiones.md). `login_attempts` no se sincroniza.
-- Login del modo remoto: Supabase Auth, `persistSession: false`, sesión en memoria.
-- Usuarios de la app se replican en `app_users` (uid, username, password_hash, role, active, version). El admin remoto crea/desactiva/cambia rol; recepción lo recibe por pull.
-- Auth de dispositivo: `app_metadata.role = 'device'` + `device_id`. Credenciales en Windows Credential Manager (`keyring`), nunca en `settings`, repo, logs ni frontend.
-- Solo la anon key viaja en las apps. La `service_role` no sale del panel.
+- Login del modo remoto con binario de fábrica: el cliente crea a mano un administrador local (el mismo usuario que en recepción, el día de la instalación). Esa contraseña abre la app. Rust hace el password grant con el usuario Auth embebido (`app_metadata.role = 'admin'`) y la UI adopta el JWT (`persistSession: false`). Sin red no se entra. El email y la contraseña embebidos no salen a la UI. Builds sin esos campos conservan el camino anterior: URL, anon key y login por email de Supabase.
+- Usuarios de la app se replican en `app_users` (uid, username, password_hash, role, active, version). El admin remoto crea/desactiva/cambia rol; recepción lo recibe por pull. La cuenta local del PC remoto no se copia sola desde recepción.
+- Auth de dispositivo: `app_metadata.role = 'device'` + `device_id`. Credenciales en Windows Credential Manager (`keyring`), nunca en `settings`, repo, logs ni frontend. Van en `embedded_device.local.json` (gitignored) al compilar.
+- Auth remoto embebido: mismos `project_url` / `anon_key` más `remote_email`, `remote_password` y `remote_auth_version` (entero ≥ 1) en ese json. Al arrancar se escriben si faltan; si el número del binario es mayor que el guardado, se reemplazan. Un exe más viejo no pisa una versión más nueva. El `device` sigue escribiéndose solo la primera vez.
+- Solo la anon key viaja hacia el webview. La `service_role` no sale del panel. El instalador es privado porque el exe lleva secretos de dispositivo y de admin remoto.
 - Auditoría de catálogo: actor, fecha UTC, equipo, entidad, valores anterior/nuevo. Sin secretos.
 
 ## 6. Persistencia local
@@ -193,8 +194,8 @@ Trazado en Jira MOT. Documentación de este archivo: I12 (`MOT-79`).
 
 Reemplazan D08 (VPN) y D09 (S3/VPS). En git/Jira solo «configurado» y quién custodia; secretos por canal seguro.
 
-- URL del proyecto Supabase y anon key (configuración de app, no `service_role`).
-- Usuario Auth admin (`app_metadata.role = 'admin'`) y usuario `device` de la PC de recepción (`device_id`).
+- URL del proyecto Supabase y anon key (en `embedded_device.local.json` al armar el instalador, no `service_role`).
+- Usuario Auth admin embebido (`remote_email` / `remote_password` / `remote_auth_version`) y usuario `device` de la PC de recepción (`device_id`). Para rotar el admin embebido: subir `remote_auth_version`, compilar y publicar esa versión.
 - Custodio de la clave de cifrado AES-GCM y quién prueba la restauración en otro equipo (D10 se mantiene). Horario 04:00 sigue propuesto.
 - Nombres de usuarios iniciales de la app y aceptación de la matriz de permisos de §5.
 - Política de conservación de datos personales y permisos del usuario de Windows sobre la base.

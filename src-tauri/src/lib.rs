@@ -129,6 +129,7 @@ pub fn run() {
             commands::remote_configure,
             commands::remote_configured,
             commands::remote_get_config,
+            commands::remote_embedded_auth,
             commands::hash_password,
             commands::sync_status,
             commands::sync_pull_now,

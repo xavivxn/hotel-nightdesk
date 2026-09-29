@@ -61,11 +61,34 @@ export function clearSupabaseClient() {
   settingsVersions = null;
 }
 
+export async function clearSupabaseAuth() {
+  authSession = null;
+  if (client) await client.auth.signOut();
+}
+
 export function initSupabase(projectUrl: string, anonKey: string) {
   clearSupabaseClient();
   client = createClient(projectUrl, anonKey, {
     auth: { persistSession: false, autoRefreshToken: true, detectSessionInUrl: false },
   });
+}
+
+/** Adopts JWTs from the embedded remote grant. Keeps the local username on screen. */
+export async function adoptEmbeddedSession(
+  accessToken: string,
+  refreshToken: string,
+  local: SessionInfo,
+) {
+  const { data, error } = await sb().auth.setSession({
+    access_token: accessToken,
+    refresh_token: refreshToken,
+  });
+  if (error || !data.session) fail("storage", "No se pudo conectar con administración. Revisá la conexión.");
+  authSession = {
+    token: data.session.access_token,
+    user: local.user,
+    expires_at: local.expires_at,
+  };
 }
 
 function sb(): SupabaseClient {

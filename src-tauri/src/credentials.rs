@@ -13,6 +13,14 @@ struct RemoteCreds {
     anon_key: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct RemoteAuthCreds {
+    pub(crate) email: String,
+    /// Stored only for the remote password grant; never returned to the UI.
+    pub(crate) password: String,
+    pub(crate) version: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct DeviceCreds {
     pub(crate) project_url: String,
@@ -85,6 +93,10 @@ fn remote_path(app_data: &Path) -> PathBuf {
     app_data.join("remote_supabase.json")
 }
 
+fn remote_auth_path(app_data: &Path) -> PathBuf {
+    app_data.join("remote_auth.json")
+}
+
 fn device_path(app_data: &Path) -> PathBuf {
     app_data.join("device_supabase.json")
 }
@@ -146,19 +158,91 @@ pub fn has_embedded_defaults() -> bool {
 
 /// Compile-time reception defaults from `embedded_device.local.json`. Empty when the file is absent.
 pub fn apply_embedded_defaults(app_data: &Path) -> AppResult<bool> {
-    let Some((project_url, anon_key, device_email, device_password)) = embedded_device_defaults() else {
-        return Ok(false);
-    };
     let mut wrote = false;
-    if !device_configured(app_data).unwrap_or(false) {
-        save_device(app_data, project_url, anon_key, device_email, device_password)?;
-        wrote = true;
+    if let Some((project_url, anon_key, device_email, device_password)) = embedded_device_defaults() {
+        if !device_configured(app_data).unwrap_or(false) {
+            save_device(app_data, project_url, anon_key, device_email, device_password)?;
+            wrote = true;
+        }
+        if !remote_configured(app_data) {
+            save_remote(app_data, project_url, anon_key)?;
+            wrote = true;
+        }
     }
-    if !remote_configured(app_data) {
-        save_remote(app_data, project_url, anon_key)?;
+    if apply_embedded_remote_auth(app_data)? {
         wrote = true;
     }
     Ok(wrote)
+}
+
+fn apply_embedded_remote_auth(app_data: &Path) -> AppResult<bool> {
+    let Some((project_url, anon_key, email, password, version)) = embedded_remote_auth() else {
+        return Ok(false);
+    };
+    if !replace_remote_auth_if_newer(app_data, email, password, version)? {
+        return Ok(false);
+    }
+    save_remote(app_data, project_url, anon_key)?;
+    Ok(true)
+}
+
+/// Writes factory remote Auth when missing or when `version` is greater than the stored one.
+pub(crate) fn replace_remote_auth_if_newer(
+    app_data: &Path,
+    email: &str,
+    password: &str,
+    version: i64,
+) -> AppResult<bool> {
+    let stored_version = load_remote_auth(app_data)?.map(|creds| creds.version).unwrap_or(0);
+    if version <= stored_version {
+        return Ok(false);
+    }
+    save_remote_auth(app_data, email, password, version)?;
+    Ok(true)
+}
+
+pub(crate) fn load_remote_auth(app_data: &Path) -> AppResult<Option<RemoteAuthCreds>> {
+    let path = remote_auth_path(app_data);
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let raw = std::fs::read_to_string(&path).map_err(|e| AppError::storage(e.to_string()))?;
+    let creds: RemoteAuthCreds = serde_json::from_str(&raw)
+        .map_err(|_| AppError::storage("Credencial remota inválida"))?;
+    if creds.email.trim().is_empty() || creds.password.is_empty() || creds.version < 1 {
+        return Ok(None);
+    }
+    Ok(Some(creds))
+}
+
+pub fn remote_auth_configured(app_data: &Path) -> bool {
+    load_remote_auth(app_data).ok().flatten().is_some()
+}
+
+fn save_remote_auth(app_data: &Path, email: &str, password: &str, version: i64) -> AppResult<()> {
+    let email = email.trim();
+    if email.is_empty() || password.is_empty() || version < 1 {
+        return Err(AppError::msg("La cuenta remota embebida está incompleta"));
+    }
+    std::fs::create_dir_all(app_data).map_err(|e| AppError::storage(e.to_string()))?;
+    let body = serde_json::to_string(&RemoteAuthCreds {
+        email: email.to_string(),
+        password: password.to_string(),
+        version,
+    })
+    .map_err(|e| AppError::msg(e.to_string()))?;
+    let path = remote_auth_path(app_data);
+    std::fs::write(&path, body).map_err(|e| {
+        AppError::storage(format!("No se pudo guardar la credencial remota: {e}"))
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).map_err(|e| {
+            AppError::storage(format!("No se pudo proteger la credencial remota: {e}"))
+        })?;
+    }
+    Ok(())
 }
 
 fn embedded_device_defaults() -> Option<(&'static str, &'static str, &'static str, &'static str)> {
@@ -170,6 +254,18 @@ fn embedded_device_defaults() -> Option<(&'static str, &'static str, &'static st
         return None;
     }
     Some((project_url, anon_key, device_email, device_password))
+}
+
+fn embedded_remote_auth() -> Option<(&'static str, &'static str, &'static str, &'static str, i64)> {
+    let project_url = env!("NIGHTDESK_DEVICE_URL").trim();
+    let anon_key = env!("NIGHTDESK_DEVICE_ANON").trim();
+    let email = env!("NIGHTDESK_REMOTE_EMAIL").trim();
+    let password = env!("NIGHTDESK_REMOTE_PASSWORD");
+    let version: i64 = env!("NIGHTDESK_REMOTE_AUTH_VERSION").parse().unwrap_or(0);
+    if project_url.is_empty() || anon_key.is_empty() || email.is_empty() || password.is_empty() || version < 1 {
+        return None;
+    }
+    Some((project_url, anon_key, email, password, version))
 }
 
 fn backup_key_path(app_data: &Path) -> PathBuf {
@@ -471,12 +567,38 @@ mod tests {
 
     #[test]
     fn apply_embedded_defaults_skips_when_compile_time_values_absent() -> AppResult<()> {
-        if embedded_device_defaults().is_some() {
+        if embedded_device_defaults().is_some() || embedded_remote_auth().is_some() {
             return Ok(());
         }
         let dir = temp_dir();
         assert!(!apply_embedded_defaults(&dir)?);
         std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn remote_auth_replaces_only_when_version_is_greater() -> AppResult<()> {
+        let dir = temp_dir();
+        assert!(replace_remote_auth_if_newer(&dir, "admin@example.test", "first", 1)?);
+        let first = load_remote_auth(&dir)?.expect("stored");
+        assert_eq!(first.email, "admin@example.test");
+        assert_eq!(first.version, 1);
+        assert!(!replace_remote_auth_if_newer(&dir, "other@example.test", "same", 1)?);
+        assert_eq!(load_remote_auth(&dir)?.unwrap().email, "admin@example.test");
+        assert!(replace_remote_auth_if_newer(&dir, "rotated@example.test", "second", 2)?);
+        let rotated = load_remote_auth(&dir)?.expect("rotated");
+        assert_eq!(rotated.email, "rotated@example.test");
+        assert_eq!(rotated.password, "second");
+        assert_eq!(rotated.version, 2);
+        assert!(!replace_remote_auth_if_newer(&dir, "older@example.test", "old", 1)?);
+        assert_eq!(load_remote_auth(&dir)?.unwrap().email, "rotated@example.test");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(remote_auth_path(&dir)).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+        std::fs::remove_dir_all(dir)?;
         Ok(())
     }
 

@@ -1,6 +1,12 @@
 export type RateKind = "hourly" | "night" | "overnight";
 export type SessionUser = { id: number; username: string; role: "admin" | "recepcion" };
-export type SessionInfo = { token: string; user: SessionUser; expires_at: number };
+export type SessionInfo = {
+  token: string;
+  user: SessionUser;
+  expires_at: number;
+  supabase_access_token?: string;
+  supabase_refresh_token?: string;
+};
 export type LoginPayload = { username: string; password: string };
 export type CreateUserPayload = LoginPayload & { role: SessionUser["role"] };
 export type ManagedUser = SessionUser & { active: boolean; version: number };

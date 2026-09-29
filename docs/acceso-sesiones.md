@@ -8,7 +8,7 @@ Las contraseñas de escritorio se almacenan con Argon2id y salt aleatorio. Las s
 
 La UI verifica la sesión cada 15 segundos y al recuperar foco, además del vencimiento programado. Una sesión vencida limpia las vistas y vuelve al acceso. Un rechazo de permisos no cierra la sesión. Un error de servicio se muestra sin conceder acceso ni reenviar escrituras automáticamente. Si una operación falla, comprobar su resultado antes de repetirla.
 
-El navegador es una demostración independiente con usuarios de prueba en almacenamiento local y PBKDF2 mediante Web Crypto. No usarla para credenciales reales: la seguridad operativa de recepción está en Rust. El modo Administración remota autentica con Supabase Auth (`persistSession: false`); ver [arquitectura](arquitectura-offline-supabase.md) §5. Aquí no se habilita SQLite por red.
+El navegador es una demostración independiente con usuarios de prueba en almacenamiento local y PBKDF2 mediante Web Crypto. No usarla para credenciales reales: la seguridad operativa de recepción está en Rust. El modo Administración remota, con instalador de fábrica, pide el mismo alta de administrador local que recepción; esa cuenta vive solo en la SQLite de esa PC y no viaja a Supabase Auth. Tras un login local válido, Rust autentica con el usuario Auth embebido en el binario y la UI adopta el JWT (`persistSession: false`). Sin esos campos de fábrica se conserva el login por email de Supabase. Ver [arquitectura](arquitectura-offline-supabase.md) §5. Aquí no se habilita SQLite por red.
 
 ## Verificación
 

@@ -9,25 +9,50 @@ fn main() {
 fn embed_device_defaults() {
     let path = Path::new("embedded_device.local.json");
     println!("cargo:rerun-if-changed=embedded_device.local.json");
-    let keys = [
-        "NIGHTDESK_DEVICE_URL",
-        "NIGHTDESK_DEVICE_ANON",
-        "NIGHTDESK_DEVICE_EMAIL",
-        "NIGHTDESK_DEVICE_PASSWORD",
-    ];
-    let values = if path.is_file() {
+    let parsed = if path.is_file() {
         let raw = fs::read_to_string(path).unwrap_or_default();
-        let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap_or(serde_json::Value::Null);
-        [
-            parsed["project_url"].as_str().unwrap_or("").trim().to_string(),
-            parsed["anon_key"].as_str().unwrap_or("").trim().to_string(),
-            parsed["device_email"].as_str().unwrap_or("").trim().to_string(),
-            parsed["device_password"].as_str().unwrap_or("").to_string(),
-        ]
+        serde_json::from_str(&raw).unwrap_or(serde_json::Value::Null)
     } else {
-        [String::new(), String::new(), String::new(), String::new()]
+        serde_json::Value::Null
     };
-    for (key, value) in keys.iter().zip(values.iter()) {
+    let version = parsed["remote_auth_version"]
+        .as_i64()
+        .or_else(|| parsed["remote_auth_version"].as_u64().map(|n| n as i64))
+        .or_else(|| {
+            parsed["remote_auth_version"]
+                .as_str()
+                .and_then(|s| s.trim().parse().ok())
+        })
+        .unwrap_or(0)
+        .max(0);
+    let pairs = [
+        (
+            "NIGHTDESK_DEVICE_URL",
+            parsed["project_url"].as_str().unwrap_or("").trim().to_string(),
+        ),
+        (
+            "NIGHTDESK_DEVICE_ANON",
+            parsed["anon_key"].as_str().unwrap_or("").trim().to_string(),
+        ),
+        (
+            "NIGHTDESK_DEVICE_EMAIL",
+            parsed["device_email"].as_str().unwrap_or("").trim().to_string(),
+        ),
+        (
+            "NIGHTDESK_DEVICE_PASSWORD",
+            parsed["device_password"].as_str().unwrap_or("").to_string(),
+        ),
+        (
+            "NIGHTDESK_REMOTE_EMAIL",
+            parsed["remote_email"].as_str().unwrap_or("").trim().to_string(),
+        ),
+        (
+            "NIGHTDESK_REMOTE_PASSWORD",
+            parsed["remote_password"].as_str().unwrap_or("").to_string(),
+        ),
+        ("NIGHTDESK_REMOTE_AUTH_VERSION", version.to_string()),
+    ];
+    for (key, value) in pairs {
         if value.bytes().any(|b| b == b'\n' || b == b'\r' || b == 0) {
             panic!("{key} no puede tener saltos de línea");
         }

@@ -892,6 +892,8 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
       const raw = localStorage.getItem("nightdesk.remote_config");
       return raw ? JSON.parse(raw) : null;
     }
+    case "remote_embedded_auth":
+      return false;
     case "hash_password": {
       const payload = args.payload as { password: string };
       return { hash: `mock-argon2:${payload.password}` };

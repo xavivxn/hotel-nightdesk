@@ -49,6 +49,11 @@ pub struct SessionInfo {
     pub token: String,
     pub user: SessionUser,
     pub expires_at: i64,
+    /// Supabase JWT when remote mode used the embedded admin. Never shown in UI.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supabase_access_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supabase_refresh_token: Option<String>,
 }
 
 #[derive(Deserialize)]

@@ -4,7 +4,7 @@ use rand_core::{OsRng, RngCore};
 use rusqlite::{params, OptionalExtension};
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, time::{Duration, Instant}};
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 pub const SESSION_SECONDS: i64 = 8 * 60 * 60;
 pub struct ActiveSession { pub user_id: i64, pub deadline: Instant, pub expires_at: i64 }
@@ -103,8 +103,57 @@ pub async fn auth_create_user(state: State<'_, AppState>, session_token: Option<
 }
 
 #[tauri::command]
-pub fn auth_login(state: State<AppState>, payload: LoginPayload) -> AppResult<SessionInfo> {
-    login(&state, payload)
+pub fn auth_login(state: State<AppState>, app: AppHandle, payload: LoginPayload) -> AppResult<SessionInfo> {
+    let session = login(&state, payload)?;
+    attach_embedded_remote_session(&state, &app, session)
+}
+
+fn revoke_token(state: &AppState, token: &str) {
+    if let Ok(mut auth) = state.auth.lock() {
+        auth.sessions.remove(&key(token));
+    }
+}
+
+fn attach_embedded_remote_session(state: &AppState, app: &AppHandle, mut session: SessionInfo) -> AppResult<SessionInfo> {
+    let mode = {
+        let conn = state.db.lock().map_err(|_| AppError::msg("Base no disponible"))?;
+        crate::service::device_mode_get(&conn)?
+    };
+    if mode.as_deref() != Some("remote") {
+        return Ok(session);
+    }
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::storage(e.to_string()))?;
+    let _ = crate::credentials::apply_embedded_defaults(&data_dir);
+    let Some(remote_auth) = crate::credentials::load_remote_auth(&data_dir)? else {
+        return Ok(session);
+    };
+    if !session.user.role.is_admin() {
+        revoke_token(state, &session.token);
+        return Err(error("FORBIDDEN", "Esta cuenta no es administración remota"));
+    }
+    let Some((project_url, anon_key)) = crate::credentials::load_remote(&data_dir)? else {
+        revoke_token(state, &session.token);
+        return Err(AppError::storage("No se pudo conectar con administración. Revisá la URL y que Supabase esté en marcha."));
+    };
+    match crate::sync::client::SupabaseClient::password_grant_admin(
+        &project_url,
+        &anon_key,
+        &remote_auth.email,
+        &remote_auth.password,
+    ) {
+        Ok(grant) => {
+            session.supabase_access_token = Some(grant.access_token);
+            session.supabase_refresh_token = Some(grant.refresh_token);
+            Ok(session)
+        }
+        Err(err) => {
+            revoke_token(state, &session.token);
+            Err(err)
+        }
+    }
 }
 
 fn login(state: &AppState, payload: LoginPayload) -> AppResult<SessionInfo> {
@@ -131,7 +180,7 @@ fn login(state: &AppState, payload: LoginPayload) -> AppResult<SessionInfo> {
     let mut auth = state.auth.lock().unwrap();
     auth.sessions.retain(|_, s| s.deadline > Instant::now());
     auth.sessions.insert(key(&token), ActiveSession { user_id: user.id, deadline: Instant::now() + Duration::from_secs(SESSION_SECONDS as u64), expires_at });
-    Ok(SessionInfo { token, user, expires_at })
+    Ok(SessionInfo { token, user, expires_at, supabase_access_token: None, supabase_refresh_token: None })
 }
 
 #[tauri::command]
@@ -140,7 +189,7 @@ pub fn auth_session(state: State<AppState>, session_token: Option<String>) -> Ap
     let token = session_token.unwrap();
     let auth = state.auth.lock().unwrap();
     let session = auth.sessions.get(&key(&token)).ok_or_else(|| error("SESSION_EXPIRED", "La sesión terminó"))?;
-    Ok(SessionInfo { token, user, expires_at: session.expires_at })
+    Ok(SessionInfo { token, user, expires_at: session.expires_at, supabase_access_token: None, supabase_refresh_token: None })
 }
 
 #[tauri::command]
@@ -209,6 +258,7 @@ mod tests {
             "remote_configure",
             "remote_configured",
             "remote_get_config",
+            "remote_embedded_auth",
             "hash_password",
             "sync_status",
             "sync_pull_now",

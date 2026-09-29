@@ -37,7 +37,7 @@ Impresión, reimpresión, `save_daily_pdf` y `list_printers` son solo `invoke` (
 - JSON snake_case. `null` ↔ `Option<T>`.
 - Montos: enteros en guaraníes en campos `*_cents` (1 = 1 Gs).
 - Fechas persistidas: RFC3339 UTC. La UI muestra hora local.
-- Toda operación de negocio en recepción lleva `session_token` (excepto `auth_setup_required`, `auth_setup` y `auth_login`). En modo remoto la sesión es el JWT de Supabase Auth.
+- Toda operación de negocio en recepción lleva `session_token` (excepto `auth_setup_required`, `auth_setup` y `auth_login`). En modo remoto con Auth embebido, el login local sigue esas mismas excepciones y el JWT de Supabase se adopta después. Sin embed, la sesión remota es el JWT de Supabase Auth.
 - Mutaciones aceptan `operation_id` (UUID del cliente) y `expected_version` (entero ≥ 0). Vacío o negativo → `validation`.
 - **`operation_id`:** clave idempotente de extremo a extremo. `api.ts` la genera con `crypto.randomUUID()` en mutaciones de estadía/cargo/reserva **y** en escrituras de catálogo (`save_*`, `set_product_active`, `save_settings`, `auth_create_user`). En recepción operativa, I06 la persiste en `sync_outbox` (sub-ops = UUID v5 del root). En catálogo I11, la misma clave llega a Postgres `nightdesk.catalog_operations` / `public.catalog_audit` vía RPC `catalog_write`; repetir el mismo id con el mismo payload no duplica el efecto. Reutilizar el id con otro payload → `conflict`.
 - **`expected_version`:** control de concurrencia del **catálogo** (`rooms`, `rate_plans`, `products`, ajustes de negocio, `users` / `app_users`). Si no coincide con `version` → `conflict` («La ficha cambió; recargá antes de guardar») y **no** se escribe SQLite local cuando hay sync. Con sync deshabilitado (instalación sin dispositivo), el IPC sigue validando en local.
@@ -90,11 +90,11 @@ Leyenda de `supabaseInvoke`: `lectura` = PostgREST/vista; `catálogo` = RPC `cat
 
 | Comando | IPC recepción | supabaseInvoke (admin remoto) | Rol IPC |
 |---|---|---|---|
-| `auth_setup_required` | sí | no (setup solo en recepción) | público |
-| `auth_setup` | sí | no | público (instalación vacía) |
-| `auth_login` | sí (Argon2 local) | Auth email/password | público |
-| `auth_session` | sí | sesión Auth en memoria | autenticado |
-| `auth_logout` | sí | signOut Auth | autenticado |
+| `auth_setup_required` | sí | no (salvo Auth embebido: IPC local) | público |
+| `auth_setup` | sí | no (salvo Auth embebido: IPC local) | público (instalación vacía) |
+| `auth_login` | sí (Argon2 local) | Auth email/password, o IPC local + grant embebido | público |
+| `auth_session` | sí | sesión Auth en memoria, o IPC local si hay embed | autenticado |
+| `auth_logout` | sí | signOut Auth (+ IPC local si hay embed) | autenticado |
 | `auth_create_user` | admin; write-through si hay sync | `catalog_write` `app_users` + hash vía `hash_password` | admin |
 | `list_users` | admin | lectura `app_users` (sin `password_hash`) | admin |
 | `set_user_active` | admin; write-through si hay sync | `catalog_write` `app_users` (`active`) | admin |
@@ -147,7 +147,8 @@ Solo tienen sentido en recepción salvo donde se indica. Seguir `nightdesk-add-c
 | `device_mode_get` | `{}` → `"reception" \| "remote" \| null` | Ajuste de dispositivo. `null` = primer arranque. Siempre IPC local. |
 | `device_mode_set` | `{ mode }` → `void` | Primer arranque. No se sincroniza. |
 | `remote_configure` | `{ project_url, anon_key }` → `void` | Solo PC admin. Credenciales en app data; nunca en `settings`. |
-| `remote_configured` / `remote_get_config` | `{}` → `bool` / payload | Lectura local de URL/anon. |
+| `remote_configured` / `remote_get_config` | `{}` → `bool` / payload | Lectura local de URL/anon. Nunca email ni contraseña. |
+| `remote_embedded_auth` | `{}` → `bool` | True si el exe trajo `remote_email` / `remote_password` y ya están guardados. Siempre IPC local. |
 | `sync_configure_device` | `{ project_url, anon_key, device_email, device_password }` → `void` | Credenciales a app data (nunca en `settings` ni en la respuesta). Habilita write-through I11 y, en modo recepción, arranca el worker I07. |
 | `sync_status` | `{}` → `{ connected, pending_outbox, last_push_at, last_pull_at, last_error, configured, realtime_connected, embedded }` | Indicador de `AppShell`. `pending_outbox` se cuenta en SQLite; el resto sale del snapshot del worker. `embedded` es true si el exe trae URL/clave/dispositivo de fábrica. |
 | `sync_pull_now` | `{}` → `void` | Drena la outbox y hace pull. Espera hasta 20 s; sin worker o sin red → `storage`. Si el catálogo cambió, el worker emite `sync:catalog-updated` (Tauri → `window`). |

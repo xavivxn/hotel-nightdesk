@@ -577,6 +577,13 @@ pub fn remote_get_config(app: AppHandle) -> AppResult<Option<RemoteConfigurePayl
 }
 
 #[tauri::command]
+pub fn remote_embedded_auth(app: AppHandle) -> AppResult<bool> {
+    let data_dir = app_data_dir(&app)?;
+    let _ = crate::credentials::apply_embedded_defaults(&data_dir);
+    Ok(crate::credentials::remote_auth_configured(&data_dir))
+}
+
+#[tauri::command]
 pub fn hash_password(payload: HashPasswordPayload, operation_id: Option<String>) -> AppResult<HashPasswordResult> {
     service::hash_password_with_operation(&payload.password, operation_id.as_deref())
 }
