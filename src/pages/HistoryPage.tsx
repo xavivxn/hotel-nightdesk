@@ -2,8 +2,9 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Field";
 import { api } from "@/lib/api";
 import { formatDateTime, formatMoney } from "@/lib/format";
+import { RoleContext } from "@/lib/permissions";
 import type { AppSettings, HistoryStay } from "@/lib/types";
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 
 function todayInput() {
   const date = new Date();
@@ -12,6 +13,7 @@ function todayInput() {
 }
 
 export function HistoryPage({ settings }: { settings: AppSettings }) {
+  const admin = useContext(RoleContext) === "admin";
   const [date, setDate] = useState(todayInput);
   const [items, setItems] = useState<HistoryStay[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -39,10 +41,12 @@ export function HistoryPage({ settings }: { settings: AppSettings }) {
           <h1 className="page-title">Historial del día</h1>
         </div>
         <div className="flex items-center gap-3">
-          <div className="rounded-lg border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-sm">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">Total del día</span>
-            <p className="font-mono text-lg font-semibold tabular-nums">{formatMoney(total, settings.currency_symbol)}</p>
-          </div>
+          {admin ? (
+            <div className="rounded-lg border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-sm">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">Total del día</span>
+              <p className="font-mono text-lg font-semibold tabular-nums">{formatMoney(total, settings.currency_symbol)}</p>
+            </div>
+          ) : null}
           <Input type="date" className="w-44" value={date} onChange={(e) => setDate(e.target.value)} />
           <Button disabled={exporting || !date || loading} onClick={async () => {
             setExporting(true); setNotice(null); setError(null);
