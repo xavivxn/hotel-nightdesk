@@ -13,7 +13,23 @@ pub struct BillingContext<'a> {
     pub tax_percent: f64,
 }
 
+/// Promotion price snapshotted on a stay (see `pricing.rs`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PriceOverride {
+    pub plan_id: i64,
+    pub base_amount_cents: i64,
+    pub extra_hour_cents: i64,
+    pub rule_name: String,
+}
+
+#[cfg(test)]
 pub fn preview(ctx: BillingContext<'_>) -> BillPreview {
+    preview_with(ctx, None)
+}
+
+/// `price` applies only while its plan is the one being billed: a promotion on "1 hora"
+/// stops counting once the stay is converted to dormida.
+pub fn preview_with(ctx: BillingContext<'_>, price: Option<PriceOverride>) -> BillPreview {
     let overnight_applied = ctx.converted_to_overnight;
 
     let (applied, applied_kind) = if overnight_applied {
@@ -26,6 +42,20 @@ pub fn preview(ctx: BillingContext<'_>) -> BillPreview {
         }
     } else {
         (ctx.rate, ctx.rate.kind)
+    };
+
+    let priced;
+    let applied = match price {
+        Some(price) if price.plan_id == applied.id => {
+            priced = RatePlan {
+                name: format!("{} · {}", applied.name, price.rule_name),
+                base_amount_cents: price.base_amount_cents,
+                extra_hour_cents: price.extra_hour_cents,
+                ..applied.clone()
+            };
+            &priced
+        }
+        _ => applied,
     };
 
     let mut lines = match applied_kind {
@@ -908,5 +938,38 @@ mod tests {
         assert_eq!(dormida.subtotal_cents, 120_000);
         assert_eq!(dormida.tax_cents, 12_000);
         assert_eq!(dormida.total_cents, 132_000);
+    }
+
+    #[test]
+    fn promotion_price_applies_only_to_its_plan() {
+        fn ctx(rate: &RatePlan) -> BillingContext<'_> {
+            BillingContext {
+                stay_id: 1,
+                check_in_at: dt(2026, 9, 29, 14, 0),
+                now: dt(2026, 9, 29, 15, 40),
+                rate,
+                converted_to_overnight: false,
+                overnight_plan: None,
+                night_plan: None,
+                manual_lines: vec![],
+                tax_percent: 0.0,
+            }
+        }
+        let rate = hourly();
+        let promo = PriceOverride {
+            plan_id: rate.id,
+            base_amount_cents: 35_000,
+            extra_hour_cents: 10_000,
+            rule_name: "Promo tarde".into(),
+        };
+        // 100 min: 1 h included + 35 min past the 5 min grace = 2 blocks of 30 min.
+        let bill = preview_with(ctx(&rate), Some(promo.clone()));
+        assert_eq!(stay_and_extra(&bill.lines), (35_000, 20_000));
+        assert_eq!(bill.lines[0].description, "Test · Promo tarde (1 h)");
+        assert_eq!(bill.total_cents, 55_000);
+
+        let other_plan = PriceOverride { plan_id: 99, ..promo };
+        let bill = preview_with(ctx(&rate), Some(other_plan));
+        assert_eq!(stay_and_extra(&bill.lines), (45_000, 30_000));
     }
 }

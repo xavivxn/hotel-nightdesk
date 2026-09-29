@@ -4,7 +4,7 @@ import { RoleContext } from "@/lib/permissions";
 import { api } from "@/lib/api";
 import { FIELD_EMPTY, formatDateTime, formatMoney, parseMoneyInteger, rateKindLabel, requireTrimmed } from "@/lib/format";
 import { dormidaEnd, dormidaStartsAtMidnight, dormidaUnavailableMessage, dormidaWindowOpen } from "@/lib/billing";
-import type { AppSettings, BoardRoom, Charge, RatePlan } from "@/lib/types";
+import type { AppSettings, BoardRoom, Charge, EffectivePrice, RatePlan } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Input, reportInputIssue } from "@/components/ui/Field";
@@ -84,7 +84,16 @@ function CheckInDrawer({
   const [rateId, setRateId] = useState(activeRates[0]?.id ?? 0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [prices, setPrices] = useState<Map<number, EffectivePrice>>(new Map());
   const selected = activeRates.find((r) => r.id === rateId);
+  const selectedPrice = selected ? prices.get(selected.id) : undefined;
+
+  // Promotions depend on the hour: refresh with the clock. The charge itself is decided in Rust.
+  useEffect(() => {
+    api.currentPrices()
+      .then((rows) => setPrices(new Map(rows.map((row) => [row.rate_plan_id, row]))))
+      .catch(() => undefined);
+  }, [now]);
   const blocked = item.display_status === "blocked";
   const dirty = item.display_status === "dirty";
   const dormidaOpen = selected
@@ -201,8 +210,15 @@ function CheckInDrawer({
                             : "22:00 a 10:00"}
                     </span>
                   </span>
-                  <span className="font-mono text-sm font-semibold tabular-nums text-[var(--ink)]">
-                    {formatMoney(rate.base_amount_cents, settings.currency_symbol)}
+                  <span className="shrink-0 text-right">
+                    <span className="block font-mono text-sm font-semibold tabular-nums text-[var(--ink)]">
+                      {formatMoney(prices.get(rate.id)?.base_amount_cents ?? rate.base_amount_cents, settings.currency_symbol)}
+                    </span>
+                    {prices.get(rate.id)?.rule_name ? (
+                      <span className="block text-[11px] font-semibold text-[var(--accent)]">
+                        {prices.get(rate.id)?.rule_name} · antes {formatMoney(rate.base_amount_cents, settings.currency_symbol)}
+                      </span>
+                    ) : null}
                   </span>
                 </button>
               );
@@ -223,7 +239,7 @@ function CheckInDrawer({
                   : rateKindLabel(selected.kind)}
               </span>
               <span className="font-mono text-lg font-semibold tabular-nums">
-                {formatMoney(selected.base_amount_cents, settings.currency_symbol)}
+                {formatMoney(selectedPrice?.base_amount_cents ?? selected.base_amount_cents, settings.currency_symbol)}
               </span>
             </div>
             <p className="mt-2 text-xs text-[var(--muted)]">

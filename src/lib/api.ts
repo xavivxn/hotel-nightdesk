@@ -34,8 +34,13 @@ import type {
   BackupSource,
   AppUpdateInfo,
   AppUpdateProgress,
+  EffectivePrice,
+  PriceRule,
+  ProductStock,
+  StockMovement,
+  UpdateStockPayload,
 } from "./types";
-import { toApiError } from "./errors";
+import { ApiError, toApiError } from "./errors";
 
 function isTauri() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -117,6 +122,18 @@ async function cmdRaw<T>(name: string, args?: Record<string, unknown>): Promise<
     }
     throw apiError;
   }
+}
+
+/**
+ * Stock and promotions live in the reception SQLite only. The remote admin PC gets the fallback
+ * for reads and a clear message for writes instead of touching its own, non-operational database.
+ */
+async function receptionCmd<T>(name: string, args?: Record<string, unknown>, remoteFallback?: T): Promise<T> {
+  if (isTauri() && (await getDeviceMode()) === "remote") {
+    if (remoteFallback !== undefined) return remoteFallback;
+    throw new ApiError("validation", "Esto se configura en la PC de recepción.");
+  }
+  return cmdRaw<T>(name, args);
 }
 
 export async function cmd<T>(name: string, args?: Record<string, unknown>): Promise<T> {
@@ -245,6 +262,14 @@ export const api = {
   backupImportKey: (key_hex: string) => cmd<void>("backup_import_key", { payload: { key_hex } }),
   backupRestore: (backup_id: string, source?: BackupSource) =>
     cmd<void>("backup_restore", { payload: { backup_id, source } }),
+  listProductStock: () => receptionCmd<ProductStock[]>("list_product_stock", undefined, []),
+  updateProductStock: (payload: UpdateStockPayload) =>
+    receptionCmd<ProductStock | null>("update_product_stock", { payload }),
+  listStockMovements: (product_id: number) =>
+    receptionCmd<StockMovement[]>("list_stock_movements", { product_id }, []),
+  listPriceRules: () => receptionCmd<PriceRule[]>("list_price_rules", undefined, []),
+  savePriceRules: (rules: PriceRule[]) => receptionCmd<PriceRule[]>("save_price_rules", { rules }),
+  currentPrices: () => receptionCmd<EffectivePrice[]>("current_prices", undefined, []),
   /** Versión nueva publicada o `null`. Siempre local: el binario se actualiza en esta PC. */
   updateCheck: () => cmd<AppUpdateInfo | null>("app_update_check"),
   /** Descarga, verifica e instala. En Windows la app se cierra y el instalador la vuelve a abrir. */

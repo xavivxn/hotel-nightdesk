@@ -1,12 +1,13 @@
+import { StockBadge, StockDialog, stockLevel } from "@/components/catalog/StockDialog";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Field, Input, Select } from "@/components/ui/Field";
 import { api } from "@/lib/api";
 import { formatMoney } from "@/lib/format";
 import { PRODUCT_CATEGORIES, type ProductCategory } from "@/lib/products";
-import type { AppSettings, Product } from "@/lib/types";
+import type { AppSettings, Product, ProductStock } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { Package, Pencil, Plus, Power, Search, ShieldCheck, Wifi, WifiOff } from "lucide-react";
+import { Boxes, Package, Pencil, Plus, Power, Search, ShieldCheck, Wifi } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 type ProductForm = {
@@ -47,7 +48,9 @@ function inputPrice(value: number) {
 export function CatalogPage({ settings }: { settings: AppSettings }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [category, setCategory] = useState<"all" | ProductCategory>("all");
-  const [status, setStatus] = useState<"all" | "active" | "inactive">("active");
+  const [status, setStatus] = useState<"all" | "active" | "inactive" | "low">("active");
+  const [stock, setStock] = useState<Map<number, ProductStock>>(new Map());
+  const [stockFor, setStockFor] = useState<Product | null>(null);
   const [query, setQuery] = useState("");
   const [form, setForm] = useState<ProductForm | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +58,9 @@ export function CatalogPage({ settings }: { settings: AppSettings }) {
   const [busy, setBusy] = useState(false);
 
   async function load() {
-    setProducts(await api.listProducts(false));
+    const [list, levels] = await Promise.all([api.listProducts(false), api.listProductStock()]);
+    setProducts(list);
+    setStock(new Map(levels.map((row) => [row.product_id, row])));
   }
 
   useEffect(() => {
@@ -68,11 +73,13 @@ export function CatalogPage({ settings }: { settings: AppSettings }) {
       if (category !== "all" && product.category !== category) return false;
       if (status === "active" && !product.active) return false;
       if (status === "inactive" && product.active) return false;
+      if (status === "low" && (!product.active || !["low", "out"].includes(stockLevel(stock.get(product.id))))) return false;
       return !normalizedQuery || `${product.name} ${product.category}`.toLocaleLowerCase().includes(normalizedQuery);
     });
-  }, [category, products, query, status]);
+  }, [category, products, query, status, stock]);
 
   const activeCount = products.filter((product) => product.active).length;
+  const lowCount = products.filter((product) => product.active && ["low", "out"].includes(stockLevel(stock.get(product.id)))).length;
   const inactiveCount = products.length - activeCount;
 
   function edit(product: Product) {
@@ -141,7 +148,7 @@ export function CatalogPage({ settings }: { settings: AppSettings }) {
     <div className="px-6 py-6 lg:px-8">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="page-kicker">Administración · N11</p>
+          <p className="page-kicker">Administración</p>
           <h1 className="page-title">Catálogo de consumos</h1>
           <p className="page-description">Productos, categorías y precios que recepción puede cargar en una cuenta.</p>
         </div>
@@ -150,10 +157,11 @@ export function CatalogPage({ settings }: { settings: AppSettings }) {
         </Button>
       </header>
 
-      <div className="mt-6 grid gap-3 sm:grid-cols-3">
+      <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="card rounded-lg p-4"><p className="page-kicker">Total</p><p className="mt-1 font-mono text-2xl tabular-nums">{products.length}</p><p className="mt-1 text-xs text-[var(--muted)]">Productos registrados</p></div>
         <div className="card rounded-lg p-4"><p className="page-kicker">Activos</p><p className="mt-1 font-mono text-2xl tabular-nums text-[var(--ok)]">{activeCount}</p><p className="mt-1 text-xs text-[var(--muted)]">Visibles en recepción</p></div>
         <div className="card rounded-lg p-4"><p className="page-kicker">Inactivos</p><p className="mt-1 font-mono text-2xl tabular-nums text-[var(--muted)]">{inactiveCount}</p><p className="mt-1 text-xs text-[var(--muted)]">Conservados para el historial</p></div>
+        <button type="button" className="card rounded-lg p-4 text-left hover:bg-[var(--surface-2)]" onClick={() => setStatus("low")}><p className="page-kicker">Stock bajo</p><p className={cn("mt-1 font-mono text-2xl tabular-nums", lowCount ? "text-[var(--warn)]" : "text-[var(--muted)]")}>{lowCount}</p><p className="mt-1 text-xs text-[var(--muted)]">Para reponer en recepción</p></button>
       </div>
 
       <section className="card mt-6 rounded-lg p-4">
@@ -167,9 +175,10 @@ export function CatalogPage({ settings }: { settings: AppSettings }) {
             <option value="all">Todas las categorías</option>
             {PRODUCT_CATEGORIES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
           </Select>
-          <Select className="w-auto min-w-[130px]" value={status} onChange={(e) => setStatus(e.target.value as "all" | "active" | "inactive")}>
+          <Select className="w-auto min-w-[130px]" value={status} onChange={(e) => setStatus(e.target.value as "all" | "active" | "inactive" | "low")}>
             <option value="active">Activos</option>
             <option value="inactive">Inactivos</option>
+            <option value="low">Stock bajo</option>
             <option value="all">Todos</option>
           </Select>
         </div>
@@ -180,7 +189,7 @@ export function CatalogPage({ settings }: { settings: AppSettings }) {
                 <div className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-lg", product.active ? "bg-[var(--accent-soft)] text-[var(--accent)]" : "bg-[var(--surface-2)] text-[var(--muted)]")}><Package size={18} /></div>
                 <div className="min-w-0"><p className={cn("truncate font-semibold", !product.active && "text-[var(--muted)]")}>{product.name}</p><p className="text-xs text-[var(--muted)]">{categoryLabel(product.category)} · {product.active ? "Activo" : "Inactivo"}</p></div>
               </div>
-              <div className="flex items-center gap-3"><span className="font-mono text-sm font-semibold tabular-nums">{formatMoney(product.price_cents, settings.currency_symbol)}</span><Button size="sm" variant="ghost" aria-label={`Editar ${product.name}`} onClick={() => edit(product)}><Pencil size={15} /> Editar</Button><Button size="sm" variant={product.active ? "danger" : "secondary"} disabled={busy} onClick={() => toggle(product)}><Power size={15} /> {product.active ? "Desactivar" : "Activar"}</Button></div>
+              <div className="flex items-center gap-3"><StockBadge stock={stock.get(product.id)} /><span className="font-mono text-sm font-semibold tabular-nums">{formatMoney(product.price_cents, settings.currency_symbol)}</span><Button size="sm" variant="ghost" aria-label={`Stock de ${product.name}`} onClick={() => setStockFor(product)}><Boxes size={15} /> Stock</Button><Button size="sm" variant="ghost" aria-label={`Editar ${product.name}`} onClick={() => edit(product)}><Pencil size={15} /> Editar</Button><Button size="sm" variant={product.active ? "danger" : "secondary"} disabled={busy} onClick={() => toggle(product)}><Power size={15} /> {product.active ? "Desactivar" : "Activar"}</Button></div>
             </div>
           ))}
           {filtered.length === 0 ? <p className="py-8 text-center text-sm text-[var(--muted)]">No hay productos para esos filtros.</p> : null}
@@ -189,11 +198,13 @@ export function CatalogPage({ settings }: { settings: AppSettings }) {
 
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         <div className="rounded-lg border border-[var(--line)] bg-[var(--surface-2)] p-4"><div className="flex items-center gap-2 font-semibold"><ShieldCheck size={17} className="text-[var(--accent)]" /> Permisos y trazabilidad</div><p className="mt-2 text-sm text-[var(--muted)]">Este menú corresponde al rol administrador. Desactivar aplica baja lógica: nunca se borra un producto usado en cuentas.</p></div>
-        <div className="rounded-lg border border-[var(--line)] bg-[var(--surface-2)] p-4"><div className="flex items-center gap-2 font-semibold"><Wifi size={17} className="text-[var(--accent)]" /> Operación local y remota</div><p className="mt-2 text-sm text-[var(--muted)]">La recepción sigue funcionando sin internet. La publicación remota se autentica contra la API privada únicamente cuando WireGuard está conectado.</p><div className="mt-3 flex items-center gap-2 text-xs text-[var(--muted)]"><WifiOff size={14} /> Sin acceso directo a la SQLite de recepción</div></div>
+        <div className="rounded-lg border border-[var(--line)] bg-[var(--surface-2)] p-4"><div className="flex items-center gap-2 font-semibold"><Wifi size={17} className="text-[var(--accent)]" /> Operación local y remota</div><p className="mt-2 text-sm text-[var(--muted)]">Productos y precios se sincronizan con administración. El stock se lleva en la PC de recepción, donde está la mercadería: cada venta descuenta una unidad.</p></div>
       </div>
 
       {error ? <p className="mt-4 text-sm text-[var(--danger)]">{error}</p> : null}
       {notice ? <p className="mt-4 text-sm text-[var(--muted)]">{notice}</p> : null}
+
+      <StockDialog product={stockFor} stock={stockFor ? stock.get(stockFor.id) : undefined} onClose={() => setStockFor(null)} onSaved={load} />
 
       <Dialog open={Boolean(form)} title={form?.id ? "Editar producto" : "Nuevo producto"} subtitle="Los precios se guardan como guaraníes enteros." onClose={() => !busy && setForm(null)}>
         {form ? <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); void saveProduct(); }}>

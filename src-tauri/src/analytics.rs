@@ -2,8 +2,8 @@ use crate::{
     db,
     error::{AppError, AppResult},
     models::{
-        AnalyticsDay, AnalyticsExtra, AnalyticsHour, AnalyticsRoomTotal, AnalyticsStatusCount,
-        AnalyticsSummary, AnalyticsTypeTotal,
+        AnalyticsDay, AnalyticsExtra, AnalyticsHour, AnalyticsHourRevenue, AnalyticsRoomTotal,
+        AnalyticsStatusCount, AnalyticsSummary, AnalyticsTypeTotal,
     },
     reports, service,
 };
@@ -162,6 +162,11 @@ pub fn summary(
         by_room_type: Vec::new(),
         by_room: Vec::new(),
         top_extras: Vec::new(),
+        closed_hours: (0..24)
+            .map(|hour| AnalyticsHourRevenue { hour, count: 0, revenue_cents: 0 })
+            .collect(),
+        voided_count: 0,
+        voided_cents: 0,
     };
     let mut type_totals = BTreeMap::<String, (i64, i64)>::new();
     let mut room_totals = BTreeMap::<(String, String), (i64, i64)>::new();
@@ -280,6 +285,9 @@ pub fn summary(
         }
         checked_add(&mut result.total_revenue_cents, line_total)?;
         checked_add(&mut result.closed_accounts, 1)?;
+        let hour = &mut result.closed_hours[check_out.hour() as usize];
+        checked_add(&mut hour.count, 1)?;
+        checked_add(&mut hour.revenue_cents, line_total)?;
         checked_add(&mut day.revenue_cents, line_total)?;
         checked_add(&mut day.closed_accounts, 1)?;
         let type_entry = type_totals.entry(row.room_type.clone()).or_default();
@@ -290,6 +298,27 @@ pub fn summary(
             .or_default();
         checked_add(&mut room_entry.0, line_total)?;
         checked_add(&mut room_entry.1, 1)?;
+    }
+
+    // Charges removed from open accounts, by the day they were removed: money that did not end
+    // up billed. Checkout never deletes charges, so these are always manual voids.
+    let voided: Vec<(i64, String, String)> = tx
+        .prepare(
+            "SELECT c.amount_cents, c.deleted_at, r.room_type
+             FROM charges c JOIN stays s ON s.id = c.stay_id JOIN rooms r ON r.id = s.room_id
+             WHERE c.deleted_at IS NOT NULL AND c.kind IN ('surcharge', 'product')",
+        )?
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+        .collect::<Result<_, _>>()?;
+    for (amount_cents, deleted_at, voided_room_type) in voided {
+        if !matches_type(&voided_room_type, filter) {
+            continue;
+        }
+        let deleted = db::parse_dt(&deleted_at)?;
+        if daily.contains_key(&deleted.date_naive()) {
+            checked_add(&mut result.voided_count, 1)?;
+            checked_add(&mut result.voided_cents, amount_cents)?;
+        }
     }
 
     if result.closed_accounts > 0 {
@@ -392,8 +421,15 @@ mod tests {
         assert_eq!(all.top_extras.len(), 1);
         assert_eq!(all.top_extras[0].description, "Agua");
         assert_eq!(all.daily[0].check_ins, 2);
+        // Both accounts closed at 12:00 local; the deleted "Anulado" is a void of 9.000.
+        assert_eq!(all.closed_hours.len(), 24);
+        assert_eq!((all.closed_hours[12].count, all.closed_hours[12].revenue_cents), (2, 205_000));
+        assert_eq!((all.voided_count, all.voided_cents), (1, 9_000));
         let jacuzzi = summary(&conn, &date, &date, Some("JACUZZI"))?;
         assert_eq!(jacuzzi.total_revenue_cents, 125_000);
+        assert_eq!(jacuzzi.voided_count, 1, "room 1 is a jacuzzi");
+        let normal = summary(&conn, &date, &date, Some("normal"))?;
+        assert_eq!(normal.voided_count, 0);
         assert_eq!(jacuzzi.closed_accounts, 1);
         assert_eq!(
             jacuzzi

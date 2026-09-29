@@ -1,6 +1,13 @@
 /** Mock-only preview for `npm run dev`. Authority is `src-tauri/src/billing.rs`. */
 import type { BillPreview, LineItem, RateKind, RatePlan } from "./types";
 
+export type PriceOverride = {
+  plan_id: number;
+  base_amount_cents: number;
+  extra_hour_cents: number;
+  rule_name: string;
+};
+
 function extraHoursAfter(includedMinutes: number, elapsedMinutes: number, graceMinutes: number) {
   if (elapsedMinutes <= includedMinutes + graceMinutes) return 0;
   const remainder = elapsedMinutes - includedMinutes;
@@ -178,6 +185,8 @@ export function previewBill(args: {
   nightPlan?: RatePlan | null;
   manualLines: LineItem[];
   taxPercent: number;
+  /** Promo snapshotted on the stay; applies only while its plan is the one billed (billing.rs). */
+  priceOverride?: PriceOverride | null;
 }): BillPreview {
   const overnightApplied = args.converted;
   let applied = args.rate;
@@ -190,6 +199,15 @@ export function previewBill(args: {
       applied = args.nightPlan;
       appliedKind = args.nightPlan.kind;
     }
+  }
+  const price = args.priceOverride;
+  if (price && price.plan_id === applied.id) {
+    applied = {
+      ...applied,
+      name: `${applied.name} · ${price.rule_name}`,
+      base_amount_cents: price.base_amount_cents,
+      extra_hour_cents: price.extra_hour_cents,
+    };
   }
   const lines =
     appliedKind === "hourly"

@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/Button";
 import { Drawer } from "@/components/ui/Drawer";
+import { PriceRulesSection } from "@/components/rates/PriceRulesSection";
 import { Field, Input, Select, reportInputIssue } from "@/components/ui/Field";
 import { api } from "@/lib/api";
 import {
@@ -154,6 +155,7 @@ export function RoomsPage({ settings }: { settings: AppSettings }) {
           </div>
         </section>
       </div>
+      <PriceRulesSection rates={rates} currency={settings.currency_symbol} />
       <Drawer open={Boolean(roomForm)} title={roomForm?.id ? "Editar habitación" : "Nueva habitación"} onClose={() => setRoomForm(null)}>
         {roomForm ? (
           <div className="space-y-4">

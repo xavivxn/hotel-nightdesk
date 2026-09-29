@@ -465,6 +465,13 @@ pub struct AnalyticsExtra {
 }
 
 #[derive(Debug, Serialize)]
+pub struct AnalyticsHourRevenue {
+    pub hour: i64,
+    pub count: i64,
+    pub revenue_cents: i64,
+}
+
+#[derive(Debug, Serialize)]
 pub struct AnalyticsSummary {
     pub from: String,
     pub to: String,
@@ -486,6 +493,11 @@ pub struct AnalyticsSummary {
     pub by_room_type: Vec<AnalyticsTypeTotal>,
     pub by_room: Vec<AnalyticsRoomTotal>,
     pub top_extras: Vec<AnalyticsExtra>,
+    /// Closed accounts and their revenue by local checkout hour (0..24), for the daily summary.
+    pub closed_hours: Vec<AnalyticsHourRevenue>,
+    /// Shop or manual charges deleted from open accounts in the period (by deletion date).
+    pub voided_count: i64,
+    pub voided_cents: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -597,4 +609,76 @@ pub struct AppUpdateProgress {
     pub stage: &'static str,
     pub downloaded: u64,
     pub total: Option<u64>,
+}
+
+/// Stock kept at reception for one product. Products without a row are not tracked.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProductStock {
+    pub product_id: i64,
+    pub quantity: i64,
+    pub min_quantity: i64,
+    pub updated_at: String,
+}
+
+/// One line of the stock trail: sale, void, restock or physical count.
+#[derive(Debug, Clone, Serialize)]
+pub struct StockMovement {
+    pub id: i64,
+    pub product_id: i64,
+    pub delta: i64,
+    pub quantity_after: i64,
+    pub reason: String,
+    pub username: Option<String>,
+    pub note: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UpdateStockPayload {
+    pub product_id: i64,
+    /// `add` (units received), `set` (physical count) or `untrack` (stop counting).
+    pub mode: String,
+    #[serde(default)]
+    pub quantity: i64,
+    #[serde(default)]
+    pub min_quantity: Option<i64>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Promotion or special price for a rate plan, chosen by the check-in weekday (or date) and hour.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PriceRule {
+    #[serde(default)]
+    pub id: String,
+    pub name: String,
+    pub rate_plan_id: i64,
+    /// ISO weekdays: 1 = lunes ... 7 = domingo. Empty when the rule uses `dates`.
+    #[serde(default)]
+    pub days: Vec<u8>,
+    /// `YYYY-MM-DD`. On those dates a date rule wins over weekday rules.
+    #[serde(default)]
+    pub dates: Vec<String>,
+    /// Check-in hour window [from_hour, to_hour), 0..=24.
+    pub from_hour: u8,
+    pub to_hour: u8,
+    pub base_amount_cents: i64,
+    /// `None` keeps the plan's additional 30 min price.
+    #[serde(default)]
+    pub extra_hour_cents: Option<i64>,
+    #[serde(default = "default_true")]
+    pub active: bool,
+}
+
+/// Price a rate plan would get if the check-in happened now.
+#[derive(Debug, Clone, Serialize)]
+pub struct EffectivePrice {
+    pub rate_plan_id: i64,
+    pub base_amount_cents: i64,
+    pub extra_hour_cents: i64,
+    pub rule_name: Option<String>,
 }

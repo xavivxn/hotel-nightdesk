@@ -160,7 +160,8 @@ pub fn build_preview(conn: &Connection, stay: &Stay) -> AppResult<BillPreview> {
         })
         .collect();
 
-    Ok(billing::preview(BillingContext {
+    let price = crate::pricing::stay_override(conn, stay.id)?;
+    Ok(billing::preview_with(BillingContext {
         stay_id: stay.id,
         check_in_at: check_in,
         now,
@@ -170,7 +171,7 @@ pub fn build_preview(conn: &Connection, stay: &Stay) -> AppResult<BillPreview> {
         night_plan: night.as_ref(),
         manual_lines,
         tax_percent: settings.tax_percent,
-    }))
+    }, price))
 }
 
 pub fn bill_for_stay(conn: &Connection, stay: &Stay) -> AppResult<BillPreview> {
@@ -639,6 +640,7 @@ fn check_in_in_tx(conn: &Connection, payload: CheckInPayload, operation_id: &str
         }
     })?;
     let stay_id = conn.last_insert_rowid();
+    crate::pricing::snapshot_on_stay(conn, stay_id, &rate, check_in_local)?;
     db::set_room_status(conn, room.id, "occupied")?;
     enqueue_guest_stay_room(conn, operation_id, guest_id, stay_id, room.id, reservation_id)?;
     Ok(stay_id)
@@ -680,6 +682,8 @@ pub fn convert_to_overnight(conn: &mut Connection, stay_id: i64) -> AppResult<St
         "UPDATE stays SET converted_to_overnight = 1, overnight_rate_plan_id = ?1, expected_checkout_at = COALESCE(?2, expected_checkout_at) WHERE id = ?3",
         params![overnight.id, expected_checkout, stay_id],
     )?;
+    // The dormida price is set when the dormida starts, not when the hourly stay began.
+    crate::pricing::snapshot_on_stay(&tx, stay_id, &overnight, chrono::Local::now())?;
     outbox::enqueue(
         &tx,
         &root,
@@ -932,9 +936,16 @@ pub fn add_charge(conn: &mut Connection, actor: &Actor, payload: AddChargePayloa
     })
 }
 
-pub fn add_product_charge(
+#[cfg(test)]
+pub fn add_product_charge(conn: &mut Connection, payload: AddProductChargePayload) -> AppResult<Charge> {
+    add_product_charge_by(conn, payload, "")
+}
+
+/// Shop sale: the charge and, when the product is tracked, one unit less of stock, in one TX.
+pub fn add_product_charge_by(
     conn: &mut Connection,
     payload: AddProductChargePayload,
+    username: &str,
 ) -> AppResult<Charge> {
     accept_reserved_fields(&payload.operation_id, &payload.expected_version)?;
     let stay = db::get_stay(conn, payload.stay_id)?;
@@ -958,6 +969,7 @@ pub fn add_product_charge(
         params![payload.stay_id, product.name, product.price_cents, now],
     )?;
     let charge_id = tx.last_insert_rowid();
+    crate::stock::record_sale(&tx, product.id, charge_id, username)?;
     outbox::enqueue(
         &tx,
         &root,
@@ -1003,6 +1015,7 @@ pub fn delete_charge(conn: &mut Connection, actor: &Actor, charge_id: i64) -> Ap
     if tx.changes() != 1 {
         return Err(AppError::not_found("Cargo no encontrado"));
     }
+    crate::stock::record_void(&tx, charge_id, &actor.username)?;
     outbox::enqueue(
         &tx,
         &root,
@@ -1643,6 +1656,55 @@ mod tests {
         let denied = delete_charge(&mut conn, &reception_actor(), charge.id).expect_err("forbidden");
         assert_eq!(denied.code(), ErrorCode::Forbidden);
         delete_charge(&mut conn, &admin_actor(), charge.id)?;
+        Ok(())
+    }
+
+    #[test]
+    fn shop_sale_counts_stock_and_admin_void_returns_it() -> AppResult<()> {
+        let mut conn = db::open(Path::new(":memory:"))?;
+        let stay = check_in_on(&mut conn, walk_in_payload(1))?;
+        let product = db::list_products(&conn, true)?.into_iter().next().expect("seed products");
+        crate::stock::update(
+            &mut conn,
+            "admin",
+            UpdateStockPayload { product_id: product.id, mode: "set".into(), quantity: 3, min_quantity: Some(1), note: None },
+        )?;
+        let sale = AddProductChargePayload { stay_id: stay.id, product_id: product.id, operation_id: None, expected_version: None };
+        let charge = add_product_charge_by(&mut conn, sale, "recepcion01")?;
+        let quantity = || crate::stock::list(&conn).map(|rows| rows[0].quantity);
+        assert_eq!(quantity()?, 2);
+        delete_charge(&mut conn, &admin_actor(), charge.id)?;
+        assert_eq!(crate::stock::list(&conn)?[0].quantity, 3);
+        let trail = crate::stock::movements(&conn, product.id, 5)?;
+        assert_eq!(trail[1].username.as_deref(), Some("recepcion01"));
+        assert_eq!(trail[0].reason, "void");
+        Ok(())
+    }
+
+    #[test]
+    fn promotion_is_snapshotted_at_check_in() -> AppResult<()> {
+        let mut conn = db::open(Path::new(":memory:"))?;
+        let plan = db::get_rate_plan(&conn, 1)?;
+        crate::pricing::save(
+            &conn,
+            vec![PriceRule {
+                id: String::new(),
+                name: "Promo".into(),
+                rate_plan_id: plan.id,
+                days: vec![1, 2, 3, 4, 5, 6, 7],
+                dates: vec![],
+                from_hour: 0,
+                to_hour: 24,
+                base_amount_cents: plan.base_amount_cents - 10_000,
+                extra_hour_cents: None,
+                active: true,
+            }],
+        )?;
+        let stay = check_in_on(&mut conn, walk_in_payload(1))?;
+        crate::pricing::save(&conn, vec![])?;
+        let bill = preview_bill(&conn, stay.id)?;
+        assert_eq!(bill.lines[0].amount_cents, plan.base_amount_cents - 10_000);
+        assert!(bill.lines[0].description.contains("Promo"));
         Ok(())
     }
 

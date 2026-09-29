@@ -88,6 +88,14 @@ const MIGRATIONS: &[Migration] = &[
         id: "017_closed_detail_marker",
         sql: include_str!("../migrations/017_closed_detail_marker.sql"),
     },
+    Migration {
+        id: "018_product_stock",
+        sql: include_str!("../migrations/018_product_stock.sql"),
+    },
+    Migration {
+        id: "019_price_rules",
+        sql: include_str!("../migrations/019_price_rules.sql"),
+    },
 ];
 
 pub fn open(db_path: &Path) -> AppResult<Connection> {

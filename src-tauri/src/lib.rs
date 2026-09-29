@@ -10,6 +10,8 @@ mod printer;
 mod service;
 mod reports;
 mod analytics;
+mod pricing;
+mod stock;
 mod sync;
 mod updater;
 
@@ -27,6 +29,15 @@ pub struct AppState {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Must be the first plugin: a second launch (desktop icon while the app already started
+        // with Windows) focuses this window instead of opening another copy over the same SQLite.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -129,6 +140,12 @@ pub fn run() {
             commands::backup_restore,
             commands::app_update_check,
             commands::app_update_install,
+            commands::list_product_stock,
+            commands::update_product_stock,
+            commands::list_stock_movements,
+            commands::list_price_rules,
+            commands::save_price_rules,
+            commands::current_prices,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Nightdesk");

@@ -1,4 +1,5 @@
-import { previewBill, theoreticalNightEnd, dormidaWindowOpen, dormidaUnavailableMessage } from "./billing";
+import { previewBill, theoreticalNightEnd, dormidaWindowOpen, dormidaUnavailableMessage, type PriceOverride } from "./billing";
+import { matchingRule, validateRules } from "./price-rules";
 import { mockAuth } from "./mock-auth";
 import { buildSeedProducts } from "./products";
 import { fail as throwApi } from "./errors";
@@ -23,6 +24,10 @@ import type {
   BackupListItem,
   BackupRunResult,
   BackupStatus,
+  PriceRule,
+  ProductStock,
+  StockMovement,
+  UpdateStockPayload,
 } from "./types";
 
 type Db = {
@@ -36,8 +41,74 @@ type Db = {
   payments: Payment[];
   closed_bills: Record<string, ReturnType<typeof previewBill>>;
   settings: AppSettings;
-  ids: { room: number; rate: number; product: number; guest: number; reservation: number; stay: number; charge: number; payment: number };
+  ids: { room: number; rate: number; product: number; guest: number; reservation: number; stay: number; charge: number; payment: number; stock_movement?: number };
+  stock?: ProductStock[];
+  stock_movements?: StockMovement[];
+  price_rules?: PriceRule[];
+  price_overrides?: Record<string, PriceOverride>;
+  /** charge id → product id of shop sales that counted stock (void returns the unit once). */
+  stock_sales?: Record<string, number>;
 };
+
+/** Stock and promotions (reception-only data) with their defaults for older mock databases. */
+function extras(db: Db) {
+  db.stock ??= [];
+  db.stock_movements ??= [];
+  db.price_rules ??= [];
+  db.price_overrides ??= {};
+  db.stock_sales ??= {};
+  db.ids.stock_movement ??= 0;
+  return {
+    stock: db.stock,
+    movements: db.stock_movements,
+    rules: db.price_rules,
+    overrides: db.price_overrides,
+    sales: db.stock_sales,
+  };
+}
+
+function pushMovement(db: Db, movement: Omit<StockMovement, "id" | "created_at">) {
+  extras(db);
+  db.ids.stock_movement = (db.ids.stock_movement ?? 0) + 1;
+  db.stock_movements!.push({ ...movement, id: db.ids.stock_movement, created_at: nowIso() });
+}
+
+function recordSale(db: Db, productId: number, chargeId: number) {
+  const { stock, sales } = extras(db);
+  const row = stock.find((item) => item.product_id === productId);
+  if (!row) return;
+  row.quantity -= 1;
+  row.updated_at = nowIso();
+  sales[String(chargeId)] = productId;
+  pushMovement(db, { product_id: productId, delta: -1, quantity_after: row.quantity, reason: "sale", username: "demo", note: null });
+}
+
+function recordVoid(db: Db, chargeId: number) {
+  const { stock, sales } = extras(db);
+  const productId = sales[String(chargeId)];
+  if (productId === undefined) return;
+  delete sales[String(chargeId)];
+  const row = stock.find((item) => item.product_id === productId);
+  if (!row) return;
+  row.quantity += 1;
+  row.updated_at = nowIso();
+  pushMovement(db, { product_id: productId, delta: 1, quantity_after: row.quantity, reason: "void", username: "demo", note: null });
+}
+
+function snapshotPrice(db: Db, stayId: number, plan: RatePlan, at: Date) {
+  const { rules, overrides } = extras(db);
+  const rule = matchingRule(rules, plan.id, at);
+  if (!rule) {
+    delete overrides[String(stayId)];
+    return;
+  }
+  overrides[String(stayId)] = {
+    plan_id: plan.id,
+    base_amount_cents: rule.base_amount_cents,
+    extra_hour_cents: rule.extra_hour_cents ?? plan.extra_hour_cents,
+    rule_name: rule.name,
+  };
+}
 
 const KEY = "nightdesk.mock.v6";
 
@@ -226,6 +297,7 @@ function stayBill(db: Db, stay: Stay) {
     nightPlan: night,
     manualLines: manual,
     taxPercent: db.settings.tax_percent,
+    priceOverride: db.price_overrides?.[String(stay.id)] ?? null,
   });
 }
 
@@ -256,6 +328,7 @@ function mockAnalytics(db: Db, args: Record<string, unknown>): AnalyticsSummary 
   const checkInHours = Array.from({ length: 24 }, (_, hour) => ({ hour, count: 0 }));
   let reservationArrivals = 0, reservationCancellations = 0, noShows = 0;
   let total = 0, closed = 0, lodging = 0, extraTotal = 0, discount = 0, tax = 0, stayMinutes = 0;
+  const closedHours = Array.from({ length: 24 }, (_, hour) => ({ hour, count: 0, revenue_cents: 0 }));
   for (const stay of db.stays) {
     const room = roomById.get(stay.room_id);
     if (!room) continue;
@@ -279,6 +352,8 @@ function mockAnalytics(db: Db, args: Record<string, unknown>): AnalyticsSummary 
     closed += 1;
     day.revenue_cents += bill.total_cents;
     day.closed_accounts += 1;
+    closedHours[new Date(stay.check_out_at).getHours()].count += 1;
+    closedHours[new Date(stay.check_out_at).getHours()].revenue_cents += bill.total_cents;
     stayMinutes += Math.max(0, Math.trunc((+new Date(stay.check_out_at) - +new Date(stay.check_in_at)) / 60000));
     tax += bill.tax_cents;
     for (const line of bill.lines) {
@@ -328,7 +403,22 @@ function mockAnalytics(db: Db, args: Record<string, unknown>): AnalyticsSummary 
     by_room_type: [...byType.values()].sort((a, b) => b.revenue_cents - a.revenue_cents),
     by_room: [...byRoom.values()].sort((a, b) => b.revenue_cents - a.revenue_cents),
     top_extras: [...extras.values()].sort((a, b) => b.revenue_cents - a.revenue_cents).slice(0, 10),
+    closed_hours: closedHours,
+    ...mockVoided(db, dayByDate, roomById),
   };
+}
+
+function mockVoided(db: Db, days: Map<string, unknown>, rooms: Map<number, Room>) {
+  let voided_count = 0;
+  let voided_cents = 0;
+  for (const charge of db.charges) {
+    if (!charge.deleted_at || charge.kind !== "surcharge" || !days.has(localDay(charge.deleted_at))) continue;
+    const stay = db.stays.find((item) => item.id === charge.stay_id);
+    if (!stay || !rooms.has(stay.room_id)) continue;
+    voided_count += 1;
+    voided_cents += charge.amount_cents;
+  }
+  return { voided_count, voided_cents };
 }
 
 function hashPin(pin: string) {
@@ -528,6 +618,7 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
         notes: null,
       };
       db.stays.push(stay);
+      snapshotPrice(db, stay.id, rate, new Date(stay.check_in_at));
       room.status = "occupied";
       return stay;
     }
@@ -548,6 +639,7 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
       }
       stay.converted_to_overnight = true;
       stay.overnight_rate_plan_id = overnight.id;
+      snapshotPrice(db, stay.id, overnight, new Date());
       stay.expected_checkout_at = theoreticalNightEnd(
         new Date(stay.check_in_at),
         overnight.night_cutoff_hour,
@@ -625,6 +717,7 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
         created_at: nowIso(),
       };
       db.charges.push(charge);
+      recordSale(db, product.id, charge.id);
       return charge;
     }
     case "delete_charge":
@@ -635,6 +728,7 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
         if (stay.status !== "open") fail("conflict", "No se pueden modificar cargos de una cuenta cerrada");
         if (charge.kind === "surcharge" || charge.kind === "discount") {
           charge.deleted_at = nowIso();
+          recordVoid(db, charge.id);
         }
       }
       return null;
@@ -816,6 +910,76 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
     case "sync_pull_now":
       window.dispatchEvent(new Event("sync:catalog-updated"));
       return;
+    case "list_product_stock":
+      return extras(db).stock;
+    case "update_product_stock": {
+      const payload = args.payload as UpdateStockPayload;
+      const { stock } = extras(db);
+      db.products.find((item) => item.id === payload.product_id) ?? fail("not_found", "Producto no encontrado");
+      if (payload.min_quantity != null && (!Number.isInteger(payload.min_quantity) || payload.min_quantity < 0 || payload.min_quantity > 100_000)) {
+        fail("El aviso de stock bajo va de 0 a 100.000 unidades");
+      }
+      const note = payload.note?.trim() || null;
+      if (note && note.length > 200) fail("La nota puede tener hasta 200 caracteres");
+      const current = stock.find((item) => item.product_id === payload.product_id);
+      if (payload.mode === "untrack") {
+        db.stock = stock.filter((item) => item.product_id !== payload.product_id);
+        return null;
+      }
+      let after: number;
+      let reason: "restock" | "count";
+      if (payload.mode === "add") {
+        if (!Number.isInteger(payload.quantity) || payload.quantity < 1 || payload.quantity > 100_000) fail("Ingresá cuántas unidades llegaron (1 a 100.000)");
+        after = (current?.quantity ?? 0) + payload.quantity;
+        reason = "restock";
+      } else if (payload.mode === "set") {
+        if (!Number.isInteger(payload.quantity) || payload.quantity < 0 || payload.quantity > 100_000) fail("Ingresá el conteo físico (0 a 100.000)");
+        after = payload.quantity;
+        reason = "count";
+      } else {
+        fail("Movimiento de stock inválido");
+      }
+      const delta = after - (current?.quantity ?? 0);
+      const row = current ?? { product_id: payload.product_id, quantity: 0, min_quantity: 0, updated_at: nowIso() };
+      row.quantity = after;
+      row.min_quantity = payload.min_quantity ?? row.min_quantity;
+      row.updated_at = nowIso();
+      if (!current) stock.push(row);
+      pushMovement(db, { product_id: payload.product_id, delta, quantity_after: after, reason, username: "demo", note });
+      return row;
+    }
+    case "list_stock_movements":
+      return extras(db).movements
+        .filter((item) => item.product_id === Number(args.product_id))
+        .sort((a, b) => b.id - a.id)
+        .slice(0, 30);
+    case "list_price_rules":
+      return extras(db).rules;
+    case "save_price_rules": {
+      const rules = (args.rules as PriceRule[]).map((rule) => ({
+        ...rule,
+        id: rule.id?.trim() || crypto.randomUUID(),
+        name: rule.name.trim(),
+        days: [...new Set(rule.days)].sort((a, b) => a - b),
+        dates: [...new Set(rule.dates.map((date) => date.trim()))].sort(),
+      }));
+      const problem = validateRules(rules, db.rates);
+      if (problem) fail(problem);
+      db.price_rules = rules;
+      return rules;
+    }
+    case "current_prices": {
+      const { rules } = extras(db);
+      return db.rates.filter((rate) => rate.active).map((rate) => {
+        const rule = matchingRule(rules, rate.id, new Date());
+        return {
+          rate_plan_id: rate.id,
+          base_amount_cents: rule?.base_amount_cents ?? rate.base_amount_cents,
+          extra_hour_cents: rule ? rule.extra_hour_cents ?? rate.extra_hour_cents : rate.extra_hour_cents,
+          rule_name: rule?.name ?? null,
+        };
+      });
+    }
     case "app_update_check":
       return null;
     case "app_update_install":

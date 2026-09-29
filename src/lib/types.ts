@@ -271,6 +271,11 @@ export type AnalyticsSummary = {
   by_room: { room_number: string; room_type: string; revenue_cents: number; closed_accounts: number }[];
   /** Additional-charge descriptions; a charge is not necessarily a catalog product. */
   top_extras: { description: string; count: number; revenue_cents: number }[];
+  /** Closed accounts and revenue by local checkout hour (24 entries). */
+  closed_hours: { hour: number; count: number; revenue_cents: number }[];
+  /** Consumos borrados de cuentas abiertas en el período (por fecha de borrado). */
+  voided_count: number;
+  voided_cents: number;
 };
 
 export type DeviceMode = "reception" | "remote";
@@ -337,4 +342,57 @@ export type AppUpdateProgress = {
   stage: "downloading" | "installing";
   downloaded: number;
   total: number | null;
+};
+
+/** Espejo de `ProductStock` (models.rs). Un producto sin fila no lleva control de stock. */
+export type ProductStock = {
+  product_id: number;
+  quantity: number;
+  min_quantity: number;
+  updated_at: string;
+};
+
+export type StockMovementReason = "sale" | "void" | "restock" | "count";
+
+/** Espejo de `StockMovement` (models.rs). */
+export type StockMovement = {
+  id: number;
+  product_id: number;
+  delta: number;
+  quantity_after: number;
+  reason: StockMovementReason;
+  username: string | null;
+  note: string | null;
+  created_at: string;
+};
+
+export type UpdateStockPayload = {
+  product_id: number;
+  /** add = llegó mercadería · set = conteo físico · untrack = dejar de controlar */
+  mode: "add" | "set" | "untrack";
+  quantity: number;
+  min_quantity?: number | null;
+  note?: string | null;
+};
+
+/** Espejo de `PriceRule` (models.rs). days: 1 = lunes … 7 = domingo; dates: YYYY-MM-DD. */
+export type PriceRule = {
+  id: string;
+  name: string;
+  rate_plan_id: number;
+  days: number[];
+  dates: string[];
+  from_hour: number;
+  to_hour: number;
+  base_amount_cents: number;
+  extra_hour_cents: number | null;
+  active: boolean;
+};
+
+/** Espejo de `EffectivePrice` (models.rs): precio de una tarifa si el ingreso fuera ahora. */
+export type EffectivePrice = {
+  rate_plan_id: number;
+  base_amount_cents: number;
+  extra_hour_cents: number;
+  rule_name: string | null;
 };

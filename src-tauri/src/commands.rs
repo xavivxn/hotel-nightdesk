@@ -311,10 +311,10 @@ pub fn add_charge(state: State<AppState>, session_token: Option<String>, payload
 
 #[tauri::command]
 pub fn add_product_charge(state: State<AppState>, session_token: Option<String>, payload: AddProductChargePayload) -> AppResult<Charge> {
-    crate::auth::require(&state, session_token.as_deref(), false)?;
+    let user = crate::auth::require(&state, session_token.as_deref(), false)?;
     let charge = {
         let mut conn = conn(&state);
-        service::add_product_charge(&mut conn, payload)?
+        service::add_product_charge_by(&mut conn, payload, &user.username)?
     };
     wake_push(&state);
     Ok(charge)
@@ -719,4 +719,46 @@ pub async fn app_update_install(
     on_progress: tauri::ipc::Channel<AppUpdateProgress>,
 ) -> AppResult<()> {
     crate::updater::install(&app, on_progress).await
+}
+
+#[tauri::command]
+pub fn list_product_stock(state: State<AppState>, session_token: Option<String>) -> AppResult<Vec<ProductStock>> {
+    crate::auth::require(&state, session_token.as_deref(), false)?;
+    let conn = conn(&state);
+    crate::stock::list(&conn)
+}
+
+#[tauri::command]
+pub fn update_product_stock(state: State<AppState>, session_token: Option<String>, payload: UpdateStockPayload) -> AppResult<Option<ProductStock>> {
+    let user = crate::auth::require(&state, session_token.as_deref(), true)?;
+    let mut conn = conn(&state);
+    crate::stock::update(&mut conn, &user.username, payload)
+}
+
+#[tauri::command]
+pub fn list_stock_movements(state: State<AppState>, session_token: Option<String>, product_id: i64) -> AppResult<Vec<StockMovement>> {
+    crate::auth::require(&state, session_token.as_deref(), true)?;
+    let conn = conn(&state);
+    crate::stock::movements(&conn, product_id, 30)
+}
+
+#[tauri::command]
+pub fn list_price_rules(state: State<AppState>, session_token: Option<String>) -> AppResult<Vec<PriceRule>> {
+    crate::auth::require(&state, session_token.as_deref(), false)?;
+    let conn = conn(&state);
+    crate::pricing::load(&conn)
+}
+
+#[tauri::command]
+pub fn save_price_rules(state: State<AppState>, session_token: Option<String>, rules: Vec<PriceRule>) -> AppResult<Vec<PriceRule>> {
+    crate::auth::require(&state, session_token.as_deref(), true)?;
+    let conn = conn(&state);
+    crate::pricing::save(&conn, rules)
+}
+
+#[tauri::command]
+pub fn current_prices(state: State<AppState>, session_token: Option<String>) -> AppResult<Vec<EffectivePrice>> {
+    crate::auth::require(&state, session_token.as_deref(), false)?;
+    let conn = conn(&state);
+    crate::pricing::effective_prices(&conn, chrono::Local::now())
 }

@@ -3,6 +3,7 @@ import {
   BedDouble,
   ChartNoAxesCombined,
   CalendarClock,
+  ClipboardList,
   History,
   LayoutGrid,
   Moon,
@@ -26,6 +27,7 @@ import { useEffect, useState } from "react";
 
 const links = [
   { to: "/", label: "Tablero", icon: LayoutGrid },
+  { to: "/resumen", label: "Resumen", icon: ClipboardList },
   { to: "/reservas", label: "Reservas", icon: CalendarClock },
   { to: "/habitaciones", label: "Habitaciones", icon: BedDouble },
   { to: "/historial", label: "Historial", icon: History },

@@ -342,6 +342,7 @@ async function remoteAnalyticsSummary(args: Record<string, unknown>): Promise<An
   let discount = 0;
   let tax = 0;
   let durationMinutes = 0;
+  const closedHours = Array.from({ length: 24 }, (_, hour) => ({ hour, count: 0, revenue_cents: 0 }));
   for (const stay of closed) {
     const uid = String(stay.uid);
     const lines = chargesByStay.get(uid) ?? [];
@@ -392,6 +393,9 @@ async function remoteAnalyticsSummary(args: Record<string, unknown>): Promise<An
     total = addMoney(total, stayTotal);
     day.revenue_cents = addMoney(day.revenue_cents, stayTotal);
     day.closed_accounts += 1;
+    const closedHour = closedHours[businessHour(String(stay.check_out_at))];
+    closedHour.count += 1;
+    closedHour.revenue_cents = addMoney(closedHour.revenue_cents, stayTotal);
     type.revenue_cents = addMoney(type.revenue_cents, stayTotal);
     type.closed_accounts += 1;
     roomItem.revenue_cents = addMoney(roomItem.revenue_cents, stayTotal);
@@ -424,6 +428,37 @@ async function remoteAnalyticsSummary(args: Record<string, unknown>): Promise<An
       day.check_ins += 1;
       checkInHours[businessHour(checkInAt)].count += 1;
     }
+  }
+
+  // Charges removed from open accounts, attributed to the day they were removed.
+  const voidedRows = await pagedRows(async (start, end) => await sb().from("charges")
+    .select("uid,stay_uid,amount_cents,deleted_at")
+    .not("deleted_at", "is", null)
+    .in("kind", ["surcharge", "product"])
+    .gte("deleted_at", broadStart)
+    .lt("deleted_at", broadEnd)
+    .order("uid")
+    .range(start, end));
+  const voidedInRange = voidedRows.filter((row) => dailyByDate.has(businessDate(String(row.deleted_at))));
+  const voidedRoomByStay = new Map<string, string>();
+  if (roomType !== null) {
+    const stayUids = [...new Set(voidedInRange.map((row) => String(row.stay_uid)))];
+    for (let index = 0; index < stayUids.length; index += 80) {
+      const batch = stayUids.slice(index, index + 80);
+      const stays = await pagedRows(async (start, end) => await sb().from("stays")
+        .select("uid,room_uid")
+        .in("uid", batch)
+        .order("uid")
+        .range(start, end));
+      for (const stay of stays) voidedRoomByStay.set(String(stay.uid), String(stay.room_uid));
+    }
+  }
+  let voidedCount = 0;
+  let voidedCents = 0;
+  for (const row of voidedInRange) {
+    if (roomType !== null && !includeRoom(roomByUid.get(voidedRoomByStay.get(String(row.stay_uid)) ?? ""))) continue;
+    voidedCount += 1;
+    voidedCents = addMoney(voidedCents, checkedMoney(row.amount_cents));
   }
 
   // Reservation outcomes are attributed to the scheduled arrival date. The
@@ -471,6 +506,9 @@ async function remoteAnalyticsSummary(args: Record<string, unknown>): Promise<An
     by_room_type: [...byType.values()].sort((a, b) => b.revenue_cents - a.revenue_cents),
     by_room: [...byRoom.values()].sort((a, b) => b.revenue_cents - a.revenue_cents || a.room_number.localeCompare(b.room_number)),
     top_extras: [...topExtras.values()].sort((a, b) => b.revenue_cents - a.revenue_cents || a.description.localeCompare(b.description)).slice(0, 10),
+    closed_hours: closedHours,
+    voided_count: voidedCount,
+    voided_cents: voidedCents,
   };
 }
 

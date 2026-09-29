@@ -1,7 +1,7 @@
 import { api } from "@/lib/api";
 import { formatMoney } from "@/lib/format";
 import { PRODUCT_CATEGORIES, type ProductCategory } from "@/lib/products";
-import type { Charge, Product } from "@/lib/types";
+import type { Charge, Product, ProductStock } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useEffect, useMemo, useState } from "react";
 
@@ -19,14 +19,22 @@ export function RoomShop({
   onBusyChange?: (busy: boolean) => void;
 }) {
   const [products, setProducts] = useState<Product[]>([]);
+  const [stock, setStock] = useState<Map<number, ProductStock>>(new Map());
   const [category, setCategory] = useState<ProductCategory>("bebidas");
   const [busyId, setBusyId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  async function loadStock() {
+    const rows = await api.listProductStock();
+    setStock(new Map(rows.map((row) => [row.product_id, row])));
+  }
 
   useEffect(() => {
     api.listProducts(true)
       .then(setProducts)
       .catch((e) => setError(String(e)));
+    // Stock is informative here: a failure must not hide the shop.
+    loadStock().catch(() => undefined);
   }, []);
 
   const counts = useMemo(() => {
@@ -47,6 +55,7 @@ export function RoomShop({
     try {
       await api.addProductCharge({ stay_id: stayId, product_id: product.id });
       await onChanged();
+      await loadStock().catch(() => undefined);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -80,6 +89,7 @@ export function RoomShop({
       <div className="grid min-h-0 flex-1 grid-cols-2 content-start gap-2 overflow-y-auto pr-1 scrollbar-thin sm:grid-cols-3">
         {visible.map((product) => {
           const qty = counts.get(product.name) ?? 0;
+          const left = stock.get(product.id);
           return (
             <button
               key={product.id}
@@ -99,8 +109,19 @@ export function RoomShop({
                   </span>
                 ) : null}
               </div>
-              <span className="mt-1 block font-mono text-xs tabular-nums text-[var(--muted)]">
+              <span className="mt-1 flex items-center justify-between gap-2 font-mono text-xs tabular-nums text-[var(--muted)]">
                 {formatMoney(product.price_cents, currency)}
+                {left ? (
+                  <span
+                    className={cn(
+                      left.quantity <= 0
+                        ? "font-semibold text-[var(--danger)]"
+                        : left.quantity <= left.min_quantity && "font-semibold text-[var(--warn)]",
+                    )}
+                  >
+                    {left.quantity <= 0 ? "Sin stock" : `Quedan ${left.quantity}`}
+                  </span>
+                ) : null}
               </span>
             </button>
           );

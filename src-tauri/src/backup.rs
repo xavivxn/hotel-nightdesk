@@ -18,7 +18,6 @@ use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use tauri::AppHandle;
@@ -26,6 +25,8 @@ use tauri::AppHandle;
 const LOCAL_KEEP: usize = 7;
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const SCHEDULE_HOUR: u32 = 4;
+/// Wait before retrying a failed scheduled backup, so a broken disk does not retry every minute.
+const RETRY_AFTER: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
@@ -84,7 +85,7 @@ pub fn start(app: AppHandle, db_path: PathBuf, data_dir: PathBuf) -> AppResult<B
 }
 
 fn worker_loop(app: AppHandle, db_path: PathBuf, data_dir: PathBuf, rx: mpsc::Receiver<BackupWake>) {
-    let last_tick = Arc::new(Mutex::new(Utc::now().date_naive()));
+    let mut retry_after: Option<std::time::Instant> = None;
     loop {
         match rx.recv_timeout(Duration::from_secs(60)) {
             Ok(BackupWake::Drain) => {
@@ -96,7 +97,7 @@ fn worker_loop(app: AppHandle, db_path: PathBuf, data_dir: PathBuf, rx: mpsc::Re
                 let _ = drain_once(&db_path, &data_dir);
             }
             Err(RecvTimeoutError::Timeout) => {
-                maybe_daily(&db_path, &data_dir, &last_tick);
+                maybe_daily(&db_path, &data_dir, &mut retry_after);
                 let _ = drain_once(&db_path, &data_dir);
             }
             Err(RecvTimeoutError::Disconnected) => break,
@@ -105,34 +106,47 @@ fn worker_loop(app: AppHandle, db_path: PathBuf, data_dir: PathBuf, rx: mpsc::Re
     }
 }
 
-fn maybe_daily(db_path: &Path, data_dir: &Path, last_tick: &Mutex<chrono::NaiveDate>) {
-    let now = Local::now();
-    if now.hour() < SCHEDULE_HOUR {
+/// Runs the scheduled backup when it is due. The state lives in `backup_queue`, not in memory,
+/// so opening the app after 04:00 (or after a day without backup) backs up right away.
+fn maybe_daily(db_path: &Path, data_dir: &Path, retry_after: &mut Option<std::time::Instant>) {
+    if retry_after.is_some_and(|at| std::time::Instant::now() < at) {
         return;
     }
-    let today = Utc::now().date_naive();
-    let mut guard = last_tick.lock().unwrap_or_else(|e| e.into_inner());
-    if *guard == today {
+    let last = match Connection::open(db_path).map_err(AppError::from).and_then(|conn| last_local_backup(&conn)) {
+        Ok(last) => last,
+        Err(_) => return,
+    };
+    if !daily_due(Local::now(), last) {
         return;
     }
-    if let Ok(conn) = Connection::open(db_path) {
-        if day_has_local(&conn, &today.to_string()).unwrap_or(true) {
-            *guard = today;
-            return;
-        }
-    }
-    if run_backup_now(db_path, data_dir).is_ok() {
-        *guard = today;
-    }
+    *retry_after = match run_backup_now(db_path, data_dir) {
+        Ok(_) => None,
+        Err(_) => Some(std::time::Instant::now() + RETRY_AFTER),
+    };
 }
 
-fn day_has_local(conn: &Connection, day_prefix: &str) -> AppResult<bool> {
-    let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM backup_queue WHERE created_at LIKE ?1 || '%'",
-        [day_prefix],
-        |r| r.get(0),
-    )?;
-    Ok(count > 0)
+/// One backup per local day from 04:00; a backup older than 24 h is overdue at any hour.
+fn daily_due(now: chrono::DateTime<Local>, last: Option<chrono::DateTime<Local>>) -> bool {
+    let Some(last) = last else {
+        return true;
+    };
+    if now.signed_duration_since(last) >= chrono::Duration::hours(24) {
+        return true;
+    }
+    now.hour() >= SCHEDULE_HOUR && last.date_naive() < now.date_naive()
+}
+
+fn last_local_backup(conn: &Connection) -> AppResult<Option<chrono::DateTime<Local>>> {
+    let raw: Option<String> = conn
+        .query_row(
+            "SELECT created_at FROM backup_queue ORDER BY created_at DESC LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(raw
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(&value).ok())
+        .map(|value| value.with_timezone(&Local)))
 }
 
 pub fn status(conn: &Connection, data_dir: &Path) -> AppResult<BackupStatus> {
@@ -705,6 +719,39 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("nightdesk-backup-{nanos}"));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    fn local(y: i32, m: u32, d: u32, h: u32) -> chrono::DateTime<Local> {
+        use chrono::TimeZone;
+        Local.with_ymd_and_hms(y, m, d, h, 0, 0).unwrap()
+    }
+
+    #[test]
+    fn daily_backup_is_due_once_per_local_day() {
+        // Never backed up: right away.
+        assert!(daily_due(local(2026, 9, 29, 1), None));
+        // Last one yesterday night: due from 04:00, not before.
+        assert!(!daily_due(local(2026, 9, 29, 3), Some(local(2026, 9, 28, 22))));
+        assert!(daily_due(local(2026, 9, 29, 4), Some(local(2026, 9, 28, 22))));
+        // Already done today: not again.
+        assert!(!daily_due(local(2026, 9, 29, 23), Some(local(2026, 9, 29, 5))));
+        // App opened after days off: overdue at any hour.
+        assert!(daily_due(local(2026, 9, 29, 1), Some(local(2026, 9, 24, 21))));
+    }
+
+    #[test]
+    fn last_backup_is_read_from_the_queue() {
+        let dir = temp_dir();
+        let db_path = dir.join("nightdesk.db");
+        let conn = db::open(&db_path).unwrap();
+        assert!(last_local_backup(&conn).unwrap().is_none());
+        drop(conn);
+        run_backup_now(&db_path, &dir).unwrap();
+        let conn = Connection::open(&db_path).unwrap();
+        let last = last_local_backup(&conn).unwrap().expect("backup recorded");
+        // A backup made just now covers today at any hour.
+        assert!(!daily_due(Local::now(), Some(last)));
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

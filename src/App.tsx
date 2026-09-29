@@ -5,6 +5,7 @@ import { TitleBar } from "@/components/layout/TitleBar";
 import { BoardPage } from "@/pages/BoardPage";
 import { HistoryPage } from "@/pages/HistoryPage";
 import { AnalyticsPage } from "@/pages/AnalyticsPage";
+import { SummaryPage } from "@/pages/SummaryPage";
 import { ReservationsPage } from "@/pages/ReservationsPage";
 import { RoomsPage } from "@/pages/RoomsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
@@ -279,6 +280,7 @@ export default function App() {
               <Route path="/" element={<BoardPage settings={settings} deviceMode={deviceMode} />} />
               <Route path="/reservas" element={<ReservationsPage />} />
               <Route path="/historial" element={<HistoryPage settings={settings} />} />
+              <Route path="/resumen" element={admin ? <SummaryPage settings={settings} deviceMode={deviceMode} /> : <Navigate to="/" replace />} />
               <Route path="/analisis" element={admin ? <AnalyticsPage deviceMode={deviceMode} /> : <Navigate to="/" replace />} />
               <Route path="/habitaciones" element={admin ? <RoomsPage settings={settings} /> : <Navigate to="/" replace />} />
               <Route path="/catalogo" element={admin ? <CatalogPage settings={settings} /> : <Navigate to="/" replace />} />
