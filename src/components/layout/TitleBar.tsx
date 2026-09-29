@@ -1,6 +1,5 @@
 import { Heart, Minus, Square, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { UpdateButton } from "@/components/layout/UpdateButton";
 
 function isTauri() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -36,7 +35,6 @@ export function TitleBar() {
           <span className="text-[var(--muted)]">· Sistema de Recepción</span>
         </p>
       </div>
-      <UpdateButton />
       <button
         type="button"
         aria-label="Minimizar"

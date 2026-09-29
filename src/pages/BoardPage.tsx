@@ -1,6 +1,7 @@
 import { BedDouble, BrushCleaning, CalendarClock, Check, X } from "lucide-react";
 import { RoomCard, RoomStatusLegend } from "@/components/board/RoomCard";
 import { RoomDrawer } from "@/components/board/RoomDrawer";
+import { UpdateButton } from "@/components/layout/UpdateButton";
 import { FlipStat } from "@/components/ui/FlipStat";
 import { api } from "@/lib/api";
 import { playStatusPulse, runViewTransition } from "@/lib/board-motion";
@@ -123,9 +124,12 @@ export function BoardPage({
             </p>
           )}
         </div>
-        <p className="occupancy-compact">
-          {occupied} de {board.length} ocupadas
-        </p>
+        <div className="flex items-center gap-4">
+          <UpdateButton />
+          <p className="occupancy-compact">
+            {occupied} de {board.length} ocupadas
+          </p>
+        </div>
       </header>
       <div className="board-stats" aria-label="Resumen de habitaciones">
         {stats.map(({ status, label, hint, icon: Icon }, i) => (

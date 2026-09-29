@@ -1,25 +1,22 @@
 import { Download, LoaderCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
-import { Dialog } from "@/components/ui/Dialog";
 import { api } from "@/lib/api";
 import { toApiError } from "@/lib/errors";
 import type { AppUpdateInfo, AppUpdateProgress } from "@/lib/types";
 
-/** Deja arrancar sync y respaldos antes de la primera consulta. */
-const FIRST_CHECK_MS = 20_000;
+/** Short wait so sync and backups start first. */
+const FIRST_CHECK_MS = 5_000;
 const CHECK_EVERY_MS = 4 * 60 * 60 * 1000;
 
 type Phase = "idle" | "downloading" | "installing" | "error";
 
-function formatMb(bytes: number) {
-  return `${(bytes / 1024 / 1024).toLocaleString("es-AR", { maximumFractionDigits: 1 })} MB`;
-}
-
-/** Botón de la barra de título: aparece solo cuando hay una versión nueva publicada. */
+/**
+ * Board header button. Hidden until a newer version is published in the `updates` bucket;
+ * one click downloads, verifies and installs it, and the app reopens by itself.
+ */
 export function UpdateButton() {
   const [update, setUpdate] = useState<AppUpdateInfo | null>(null);
-  const [open, setOpen] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [progress, setProgress] = useState<AppUpdateProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -63,93 +60,38 @@ export function UpdateButton() {
     }
   }
 
-  function close() {
-    if (busy) return;
-    setOpen(false);
-    if (phase === "error") setPhase("idle");
-  }
-
   if (!update) return null;
 
   const percent =
     progress?.total && progress.total > 0
       ? Math.min(100, Math.round((progress.downloaded / progress.total) * 100))
       : null;
+  const label =
+    phase === "installing"
+      ? "Instalando…"
+      : phase === "downloading"
+        ? `Descargando${percent !== null ? ` ${percent} %` : "…"}`
+        : phase === "error"
+          ? "Reintentar actualización"
+          : "Actualizar";
 
   return (
-    <>
-      <button
-        type="button"
-        data-tauri-drag-region="false"
-        title={`Versión ${update.version} disponible`}
-        onClick={() => setOpen(true)}
-        className="flex h-full shrink-0 cursor-pointer items-center gap-2 border-l border-[var(--line)] bg-[var(--accent-soft)] px-4 text-[12px] font-semibold text-[var(--accent)] hover:bg-[var(--surface-2)]"
+    <div className="flex flex-col items-end gap-1" aria-live="polite">
+      <Button
+        onClick={install}
+        disabled={busy}
+        title={`Versión ${update.current_version} → ${update.version}. La app se cierra, se actualiza y vuelve a abrir sola.`}
       >
-        <Download size={14} aria-hidden="true" />
-        Actualizar
-        <span className="font-mono text-[11px] font-medium opacity-80">{update.version}</span>
-      </button>
-
-      <Dialog
-        open={open}
-        title="Actualizar la app"
-        subtitle={`Versión ${update.current_version} → ${update.version}`}
-        onClose={close}
-        dismissible={!busy}
-      >
+        {busy ? <LoaderCircle size={16} aria-hidden="true" className="motion-safe:animate-spin" /> : <Download size={16} aria-hidden="true" />}
+        {label}
         {phase === "idle" || phase === "error" ? (
-          <div className="space-y-4 text-sm">
-            <p>
-              La app se va a cerrar, instalar la versión nueva y volver a abrir sola. Tarda alrededor de un
-              minuto y los datos de recepción no se tocan.
-            </p>
-            <p className="text-[var(--muted)]">Hacelo cuando no estés cobrando ni haciendo un check-in.</p>
-            {update.notes ? (
-              <div className="rounded-lg border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3">
-                <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">Novedades</p>
-                <p className="whitespace-pre-line">{update.notes}</p>
-              </div>
-            ) : null}
-            {error ? (
-              <p role="alert" className="rounded-lg bg-[var(--danger-soft)] px-4 py-3 text-[var(--danger)]">
-                No se pudo actualizar: {error}
-              </p>
-            ) : null}
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="secondary" onClick={close}>
-                Más tarde
-              </Button>
-              <Button onClick={install}>
-                <Download size={16} aria-hidden="true" />
-                {phase === "error" ? "Reintentar" : "Actualizar ahora"}
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-3 text-sm" aria-live="polite">
-            <div className="flex items-center gap-2 font-semibold">
-              <LoaderCircle size={16} aria-hidden="true" className="motion-safe:animate-spin" />
-              {phase === "installing" ? "Instalando…" : "Descargando…"}
-              {phase === "downloading" ? (
-                <span className="ml-auto font-mono font-medium text-[var(--muted)]">
-                  {percent !== null ? `${percent} %` : progress ? formatMb(progress.downloaded) : ""}
-                </span>
-              ) : null}
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-[var(--surface-2)]">
-              <div
-                className="h-full rounded-full bg-[var(--accent)] transition-[width] duration-200"
-                style={{ width: `${phase === "installing" ? 100 : (percent ?? 0)}%` }}
-              />
-            </div>
-            <p className="text-[var(--muted)]">
-              {phase === "installing"
-                ? "La app se va a cerrar y volver a abrir sola. No apagues la PC."
-                : "No cierres la app mientras descarga."}
-            </p>
-          </div>
-        )}
-      </Dialog>
-    </>
+          <span className="font-mono text-xs font-medium opacity-80">{update.version}</span>
+        ) : null}
+      </Button>
+      {phase === "installing" ? (
+        <p className="text-xs text-[var(--muted)]">La app se cierra y vuelve a abrir sola.</p>
+      ) : null}
+      {error ? <p role="alert" className="max-w-xs text-right text-xs text-[var(--danger)]">No se pudo actualizar: {error}</p> : null}
+    </div>
   );
 }

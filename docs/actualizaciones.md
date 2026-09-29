@@ -1,22 +1,23 @@
 # Actualizaciones desde la app
 
-La app de Windows se actualiza sola desde el botón **Actualizar** de la barra de título (`tauri-plugin-updater`). Descarga el instalador, verifica la firma, cierra la app, instala en modo pasivo y la vuelve a abrir. Los datos de `%APPDATA%\com.nightdesk.hotel\` no se tocan.
+La app de Windows se actualiza sola desde el botón **Actualizar** del encabezado del Tablero (`tauri-plugin-updater`). Descarga el instalador, verifica la firma, cierra la app, instala en modo pasivo y la vuelve a abrir. Los datos de `%APPDATA%\com.nightdesk.hotel\` no se tocan.
 
 Esta guía es el procedimiento operativo: primer build con versionado e instalaciones a mano, y cada update posterior al bucket `updates`.
 
 ## Cómo funciona
 
-- La app consulta `updates/windows/latest.json` en Supabase Storage 20 s después de abrir, cada 4 h y cuando vuelve internet.
+- La app consulta `updates/windows/latest.json` en Supabase Storage 5 s después de abrir, cada 4 h y cuando vuelve internet.
 - Se autentica con la cuenta del dispositivo (la misma de sync y respaldos). El bucket `updates` es **privado**: el instalador lleva embebidas esas credenciales y, si está en `embedded_device.local.json`, las de administración remota (`remote_email`, `remote_password`, `remote_auth_version`). Para rotar esa cuenta: subí `remote_auth_version`, compilá y publicá; las PCs que actualizan reemplazan la credencial guardada.
-- Si la versión publicada es **mayor** que la instalada, aparece **Actualizar X.Y.Z**. Al confirmar: descarga con progreso, verifica la firma, NSIS en modo pasivo, la app se reabre.
+- Si la versión publicada es **mayor** que la instalada, aparece **Actualizar X.Y.Z** al lado del título «Tablero de habitaciones». Con un clic: descarga con progreso en el mismo botón, verifica la firma, NSIS en modo pasivo (sin preguntas ni permisos de administrador), la app se reabre.
+- Las migraciones de SQLite corren al abrir, como en cualquier instalación.
 - Sin internet o sin credenciales de dispositivo el botón no aparece y la recepción sigue igual.
 
 | Pieza | Dónde |
 |-------|--------|
 | Consulta e instalación | `src-tauri/src/updater.rs` |
 | Comandos IPC | `app_update_check`, `app_update_install` |
-| Botón | `src/components/layout/UpdateButton.tsx` |
-| Clave pública | `src-tauri/tauri.conf.json` → `plugins.updater.pubkey` |
+| Botón | `src/components/layout/UpdateButton.tsx` (en el encabezado de `BoardPage.tsx`) |
+| Clave pública y modo pasivo | `src-tauri/tauri.conf.json` → `plugins.updater` |
 | Subir versión al build | `scripts/bump-version.mjs` (lo llama `npm run build:installer:windows`) |
 | Bucket | Storage → `updates` (migración ya aplicada) |
 
@@ -135,9 +136,9 @@ Subí `updates/windows/latest.json` **reemplazando** el anterior:
 
 ### B4. Comprobar en una PC que ya tiene 0.1.8 (o la última instalada)
 
-1. Abrí la app (con internet y dispositivo configurado). A los ~20 s, o al volver la red, aparece **Actualizar X.Y.Z**.
-2. **Más tarde** cierra el diálogo y deja el botón.
-3. **Actualizar ahora**: descarga, cierra, barra del instalador, la app se reabre sola.
+1. Abrí la app (con internet y dispositivo configurado). A los ~5 s, o al volver la red, aparece **Actualizar X.Y.Z** en el encabezado del Tablero.
+2. Un clic muestra «Descargando N %» en el mismo botón; la app se cierra, aparece la barra del instalador y la app se vuelve a abrir sola.
+3. Si algo falla, el botón pasa a «Reintentar actualización» y muestra el motivo debajo.
 4. Tablero e historial iguales; la app sigue abriéndose al iniciar sesión en Windows.
 
 Si el botón tarda: caché de Storage (hasta 1 h) o el equipo no tiene credenciales de dispositivo.
