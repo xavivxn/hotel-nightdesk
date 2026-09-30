@@ -37,12 +37,14 @@ export function StayCart({
   stayId,
   currency,
   charges,
+  readOnly = false,
   onChanged,
   onBusyChange,
 }: {
   stayId: number;
   currency: string;
   charges: Charge[];
+  readOnly?: boolean;
   onChanged: () => Promise<void> | void;
   onBusyChange?: (busy: boolean) => void;
 }) {
@@ -128,38 +130,44 @@ export function StayCart({
                     · {formatMoney(lineTotal, currency)}
                   </span>
                 </span>
-                <div className="flex shrink-0 items-center gap-0.5">
-                  <button
-                    type="button"
-                    aria-label="Restar"
-                    disabled={busy}
-                    onClick={() => decrement(group)}
-                    className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--ink)] hover:bg-[var(--surface-2)] disabled:opacity-50"
-                  >
-                    <Minus className="h-3.5 w-3.5" strokeWidth={2.5} />
-                  </button>
-                  <span className="min-w-[1.5rem] text-center font-mono text-sm font-semibold tabular-nums">
-                    {group.ids.length}
+                {readOnly ? (
+                  <span className="shrink-0 font-mono text-sm font-semibold tabular-nums">
+                    ×{group.ids.length}
                   </span>
-                  <button
-                    type="button"
-                    aria-label="Sumar"
-                    disabled={busy}
-                    onClick={() => increment(group)}
-                    className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--ink)] hover:bg-[var(--surface-2)] disabled:opacity-50"
-                  >
-                    <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="Quitar"
-                    disabled={busy}
-                    onClick={() => removeGroup(group)}
-                    className="ml-1 flex h-7 w-7 items-center justify-center rounded-lg text-[var(--danger)] hover:bg-[var(--danger-soft)] disabled:opacity-50"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
+                ) : (
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    <button
+                      type="button"
+                      aria-label="Restar"
+                      disabled={busy}
+                      onClick={() => decrement(group)}
+                      className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--ink)] hover:bg-[var(--surface-2)] disabled:opacity-50"
+                    >
+                      <Minus className="h-3.5 w-3.5" strokeWidth={2.5} />
+                    </button>
+                    <span className="min-w-[1.5rem] text-center font-mono text-sm font-semibold tabular-nums">
+                      {group.ids.length}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label="Sumar"
+                      disabled={busy}
+                      onClick={() => increment(group)}
+                      className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--ink)] hover:bg-[var(--surface-2)] disabled:opacity-50"
+                    >
+                      <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Quitar"
+                      disabled={busy}
+                      onClick={() => removeGroup(group)}
+                      className="ml-1 flex h-7 w-7 items-center justify-center rounded-lg text-[var(--danger)] hover:bg-[var(--danger-soft)] disabled:opacity-50"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
               </li>
             );
           })}

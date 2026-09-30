@@ -19,9 +19,9 @@ pub enum ErrorCode {
 pub enum AppError {
     #[error("{message}")]
     App { code: ErrorCode, message: String },
-    #[error(transparent)]
+    #[error("No se pudo guardar en este equipo")]
     Sqlite(#[from] rusqlite::Error),
-    #[error(transparent)]
+    #[error("No se pudo guardar en este equipo")]
     Io(#[from] std::io::Error),
 }
 
@@ -122,5 +122,18 @@ mod tests {
         assert!(serde_json::to_string(&printer).unwrap().contains("\"code\":\"printer\""));
         assert_eq!(storage.code(), ErrorCode::Storage);
         assert_eq!(printer.code(), ErrorCode::Printer);
+    }
+
+    #[test]
+    fn sqlite_and_io_hide_engine_details() {
+        let sqlite = AppError::from(rusqlite::Error::InvalidQuery);
+        let io = AppError::from(std::io::Error::other("disk"));
+        let sqlite_json = serde_json::to_string(&sqlite).unwrap();
+        let io_json = serde_json::to_string(&io).unwrap();
+        assert!(sqlite_json.contains("No se pudo guardar en este equipo"));
+        assert!(io_json.contains("No se pudo guardar en este equipo"));
+        assert!(!sqlite_json.to_lowercase().contains("sqlite"));
+        assert!(!sqlite_json.to_lowercase().contains("rusqlite"));
+        assert!(!io_json.contains("disk"));
     }
 }

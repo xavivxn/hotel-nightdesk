@@ -34,7 +34,7 @@ export function BootSplash({
         <div className="boot-rail" aria-hidden="true">
           <span className="boot-rail-fill" />
         </div>
-        <p className="boot-meta">SQLite · PIN · tablero</p>
+        <p className="boot-meta">PIN · tablero</p>
       </div>
     </div>
   );

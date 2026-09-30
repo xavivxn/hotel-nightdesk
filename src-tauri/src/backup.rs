@@ -373,7 +373,7 @@ fn encrypt_file(src: &Path, dest: &Path, key: &[u8; 32]) -> AppResult<[u8; 12]> 
         enc.write_all(&plain)?;
         enc.finish()?;
     }
-    let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| AppError::storage("Clave AES inválida"))?;
+    let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| AppError::storage("Clave de cifrado inválida"))?;
     let mut nonce_bytes = [0u8; 12];
     rand::thread_rng().fill_bytes(&mut nonce_bytes);
     let nonce = Nonce::from_slice(&nonce_bytes);
@@ -390,7 +390,7 @@ fn decrypt_file(src: &Path, dest: &Path, key: &[u8; 32], nonce_hex: &str) -> App
     if nonce_raw.len() != 12 {
         return Err(AppError::storage("Nonce inválido"));
     }
-    let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| AppError::storage("Clave AES inválida"))?;
+    let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| AppError::storage("Clave de cifrado inválida"))?;
     let nonce = Nonce::from_slice(&nonce_raw);
     let compressed = cipher
         .decrypt(nonce, ciphertext.as_ref())

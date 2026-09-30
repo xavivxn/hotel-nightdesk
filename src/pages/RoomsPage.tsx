@@ -13,7 +13,7 @@ import {
   requireTrimmed,
   statusLabel,
 } from "@/lib/format";
-import type { AppSettings, RateKind, RatePlan, Room } from "@/lib/types";
+import type { AppSettings, DeviceMode, RateKind, RatePlan, Room } from "@/lib/types";
 import { useEffect, useRef, useState } from "react";
 
 type RoomDraft = {
@@ -64,7 +64,8 @@ function rateDraft(rate?: RatePlan): RateDraft {
   };
 }
 
-export function RoomsPage({ settings }: { settings: AppSettings }) {
+export function RoomsPage({ settings, deviceMode = "reception" }: { settings: AppSettings; deviceMode?: DeviceMode }) {
+  const reception = deviceMode === "reception";
   const [rooms, setRooms] = useState<Room[]>([]);
   const [rates, setRates] = useState<RatePlan[]>([]);
   const [roomForm, setRoomForm] = useState<RoomDraft | null>(null);
@@ -118,16 +119,16 @@ export function RoomsPage({ settings }: { settings: AppSettings }) {
                   <p className="text-xs text-[var(--muted)]">Piso {room.floor} · {statusLabel(room.status)}</p>
                 </div>
                 <div className="flex gap-2">
-                  {room.status === "dirty" ? (
+                  {reception && room.status === "dirty" ? (
                     <Button size="sm" variant="secondary" onClick={async () => { await api.setRoomStatus(room.id, "available"); await load(); }}>
                       Limpia
                     </Button>
                   ) : null}
-                  {room.status === "blocked" ? (
+                  {reception && room.status === "blocked" ? (
                     <Button size="sm" variant="secondary" onClick={async () => { await api.setRoomStatus(room.id, "available"); await load(); }}>
                       Desbloquear
                     </Button>
-                  ) : room.status === "available" ? (
+                  ) : reception && room.status === "available" ? (
                     <Button size="sm" variant="ghost" onClick={async () => { await api.setRoomStatus(room.id, "blocked"); await load(); }}>
                       Bloquear
                     </Button>

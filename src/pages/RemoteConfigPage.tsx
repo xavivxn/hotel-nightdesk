@@ -60,9 +60,9 @@ export function RemoteConfigPage({ onConfigured }: { onConfigured: () => void })
         <form className="login-card w-full space-y-4" onSubmit={(e) => void handleSubmit(e)}>
           <div>
             <p className="page-kicker">Administración remota</p>
-            <h1 className="page-title">Conectar Supabase</h1>
+            <h1 className="page-title">Conectar administración</h1>
             <p className="mt-2 text-sm text-[var(--muted)]">
-              URL y clave anónima se guardan en este equipo. No van al repositorio ni a ajustes visibles.
+              URL y clave de acceso se guardan en este equipo. No van al repositorio ni a ajustes visibles.
             </p>
           </div>
           <Field label="URL del proyecto">
@@ -72,10 +72,10 @@ export function RemoteConfigPage({ onConfigured }: { onConfigured: () => void })
               autoFocus
               value={projectUrl}
               onChange={(e) => setProjectUrl(e.target.value)}
-              placeholder="https://xxxx.supabase.co"
+              placeholder="https://…"
             />
           </Field>
-          <Field label="Clave anónima (anon)">
+          <Field label="Clave de acceso">
             <PasswordInput
               ref={keyRef}
               required

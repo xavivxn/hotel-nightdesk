@@ -24,7 +24,7 @@ pub fn prepare(conn: &Connection, actor: &Actor, entity: &str, mut payload: Valu
     authorize(actor, Operation::SaveSettings)?;
     let op = operation.or_else(|| payload["operation_id"].as_str().map(str::to_owned))
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    uuid::Uuid::parse_str(&op).map_err(|_| AppError::msg("operation_id debe ser UUID"))?;
+    uuid::Uuid::parse_str(&op).map_err(|_| AppError::msg("El identificador de la operación no es válido"))?;
     if entity == "settings" {
         let mut values = serde_json::Map::new();
         let mut versions = serde_json::Map::new();
@@ -252,7 +252,7 @@ pub fn prepare_delete(
         return Err(AppError::msg("expected_version inválida"));
     }
     let op = operation.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    uuid::Uuid::parse_str(&op).map_err(|_| AppError::msg("operation_id debe ser UUID"))?;
+    uuid::Uuid::parse_str(&op).map_err(|_| AppError::msg("El identificador de la operación no es válido"))?;
     let uid: String = conn
         .query_row("SELECT uid FROM users WHERE id=?1", [user_id], |row| row.get(0))
         .optional()?

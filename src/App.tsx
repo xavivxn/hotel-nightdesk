@@ -301,12 +301,12 @@ export default function App() {
               }
             >
               <Route path="/" element={<BoardPage settings={settings} deviceMode={deviceMode} />} />
-              <Route path="/reservas" element={<ReservationsPage />} />
-              <Route path="/historial" element={<HistoryPage settings={settings} />} />
+              <Route path="/reservas" element={<ReservationsPage deviceMode={deviceMode} />} />
+              <Route path="/historial" element={<HistoryPage settings={settings} deviceMode={deviceMode} />} />
               <Route path="/resumen" element={admin ? <SummaryPage settings={settings} deviceMode={deviceMode} /> : <Navigate to="/" replace />} />
               <Route path="/analisis" element={admin ? <AnalyticsPage deviceMode={deviceMode} /> : <Navigate to="/" replace />} />
-              <Route path="/habitaciones" element={admin ? <RoomsPage settings={settings} /> : <Navigate to="/" replace />} />
-              <Route path="/catalogo" element={admin ? <CatalogPage settings={settings} /> : <Navigate to="/" replace />} />
+              <Route path="/habitaciones" element={admin ? <RoomsPage settings={settings} deviceMode={deviceMode} /> : <Navigate to="/" replace />} />
+              <Route path="/catalogo" element={admin ? <CatalogPage settings={settings} deviceMode={deviceMode} /> : <Navigate to="/" replace />} />
               <Route path="/usuarios" element={admin ? <UsersPage user={session.user} /> : <Navigate to="/" replace />} />
               <Route
                 path="/ajustes"

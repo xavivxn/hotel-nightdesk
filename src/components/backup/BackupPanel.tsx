@@ -158,8 +158,8 @@ export function BackupPanel({ deviceMode }: { deviceMode: DeviceMode }) {
           <h2 id="backup-heading" className="text-lg font-semibold tracking-tight">Respaldos y recuperación</h2>
           <p className="mt-1 text-sm text-[var(--muted)]">
             {local
-              ? "Esta PC conserva la base operativa. La copia local no espera a Supabase. La subida a Storage usa la configuración de sincronización."
-              : "Esta PC solo consulta las copias confirmadas en Supabase. El respaldo y la restauración se hacen en recepción."}
+              ? "Esta PC conserva la base operativa. La copia local no espera a administración. La subida remota usa la configuración de sincronización."
+              : "Esta PC solo consulta las copias remotas confirmadas. El respaldo y la restauración se hacen en recepción."}
           </p>
         </div>
         <Button variant="secondary" size="sm" onClick={() => void refresh()} disabled={loading || running}>
@@ -189,7 +189,7 @@ export function BackupPanel({ deviceMode }: { deviceMode: DeviceMode }) {
         <div className="rounded-lg border border-[var(--line)] bg-[var(--surface-2)] p-4">
           <div className="mb-2 flex items-center gap-2 text-sm font-semibold"><Cloud size={17} aria-hidden="true" /> Última copia remota confirmada</div>
           <p className="text-sm">{loading ? "Cargando…" : lastCopy(status?.last_remote_at)}</p>
-          <p className="mt-1 text-xs text-[var(--muted)]">Solo cuenta cuando Storage y el manifiesto confirman la copia.</p>
+          <p className="mt-1 text-xs text-[var(--muted)]">Solo cuenta cuando administración confirma la copia.</p>
         </div>
       </div>
 
@@ -233,14 +233,14 @@ export function BackupPanel({ deviceMode }: { deviceMode: DeviceMode }) {
       <Dialog open={guideOpen} title="Recuperar una copia" subtitle="Solo administración, en el equipo de recepción" onClose={() => setGuideOpen(false)}>
         <ol className="list-decimal space-y-3 pl-5 text-sm leading-relaxed">
           <li>Detené la operación y avisá al personal. No hagas ingresos, cierres ni cambios mientras se restaura.</li>
-          <li>Pedí al custodio la clave AES (64 caracteres hex). Importala en esta PC; no la guardes en el repositorio ni en la base.</li>
-          <li>Elegí una copia local o una confirmada en Storage. El sistema valida integridad y checksum antes de reemplazar la base.</li>
+          <li>Pedí al custodio la clave de cifrado (64 caracteres hex). Importala en esta PC; no la guardes en el repositorio ni en la base.</li>
+          <li>Elegí una copia local o una remota confirmada. El sistema valida integridad y checksum antes de reemplazar la base.</li>
           <li>Volvé a iniciar sesión. Comprobá habitaciones, cuentas, historial y tickets.</li>
-          <li>La sincronización se reinicia sin reenviar la outbox antigua.</li>
+          <li>La sincronización se reinicia sin reenviar la cola antigua.</li>
         </ol>
         <p className="mt-4 rounded-lg bg-[var(--warn-soft)] p-3 text-sm">
           {local
-            ? "No reemplaces manualmente el archivo SQLite mientras la aplicación está abierta."
+            ? "No reemplaces manualmente el archivo de la base mientras la aplicación está abierta."
             : "Para restaurar, usá el equipo de recepción con una cuenta administradora. Desde esta PC solo se consulta el estado."}
         </p>
         <Button variant="secondary" className="mt-4 w-full" onClick={() => setGuideOpen(false)}>Entendido</Button>
@@ -264,7 +264,7 @@ export function BackupPanel({ deviceMode }: { deviceMode: DeviceMode }) {
             void importKey();
           }}
         >
-          <Field label="Clave AES (hex)">
+          <Field label="Clave de cifrado (hex)">
             <PasswordInput
               required
               autoComplete="off"
@@ -308,7 +308,7 @@ export function BackupPanel({ deviceMode }: { deviceMode: DeviceMode }) {
                     <div>
                       <p className="font-mono text-sm tabular-nums">{formatDateTime(item.created_at)}</p>
                       <p className="mt-1 text-xs text-[var(--muted)]">
-                        {itemSource(item) === "remote" ? "Storage" : "Esta PC"} · {statusLabel(item.status)} · esquema {item.schema_version} · {item.size_bytes.toLocaleString("es-PY")} bytes
+                        {itemSource(item) === "remote" ? "Copia remota" : "Esta PC"} · {statusLabel(item.status)} · esquema {item.schema_version} · {item.size_bytes.toLocaleString("es-PY")} bytes
                       </p>
                       <p className="mt-1 font-mono text-[11px] text-[var(--muted)]">{item.backup_id}</p>
                     </div>
@@ -328,7 +328,7 @@ export function BackupPanel({ deviceMode }: { deviceMode: DeviceMode }) {
                       </div>
                     ) : (
                       <Button variant="danger" size="sm" disabled={Boolean(restoringId)} onClick={() => setConfirmId(item.backup_id)}>
-                        {itemSource(item) === "remote" ? "Restaurar desde Storage" : "Restaurar"}
+                        {itemSource(item) === "remote" ? "Restaurar copia remota" : "Restaurar"}
                       </Button>
                     )}
                   </div>

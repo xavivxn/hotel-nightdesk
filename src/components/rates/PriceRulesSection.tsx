@@ -58,6 +58,7 @@ export function PriceRulesSection({ rates, currency }: { rates: RatePlan[]; curr
   }, []);
 
   function open(rule: PriceRule | null) {
+    if (remote) return;
     setError(null);
     setDraft(draftFrom(rule, rates));
   }

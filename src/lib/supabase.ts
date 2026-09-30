@@ -92,7 +92,7 @@ export async function adoptEmbeddedSession(
 }
 
 function sb(): SupabaseClient {
-  if (!client) fail("forbidden", "Configurá la URL y la clave anónima de Supabase en este equipo");
+  if (!client) fail("forbidden", "Configurá la URL y la clave de acceso de administración en este equipo");
   return client;
 }
 
@@ -157,7 +157,7 @@ function mapProduct(row: Record<string, unknown>): Product {
 
 async function settingsFromKv(): Promise<AppSettings> {
   const { data, error } = await sb().from("business_settings").select("key,value,version");
-  if (error) fail("storage", error.message);
+  if (error) fail("storage", "No se pudieron consultar los datos sincronizados");
   settingsVersions = Object.fromEntries((data ?? []).map(r => [r.key, Number(r.version)]));
   for (const key of ["business_name","address","phone","tax_percent","currency_symbol","receipt_footer","require_guest_name"]) settingsVersions![key] ??= 0;
   const map = new Map((data ?? []).map((r) => [String((r as { key: string }).key), String((r as { value: string }).value)]));
@@ -238,7 +238,7 @@ async function pagedRows(
   const rows: Record<string, unknown>[] = [];
   for (let offset = 0; ; offset += ANALYTICS_PAGE_SIZE) {
     const { data, error } = await readPage(offset, offset + ANALYTICS_PAGE_SIZE - 1);
-    if (error) fail("storage", `No se pudieron consultar los datos sincronizados: ${error.message}`);
+    if (error) fail("storage", "No se pudieron consultar los datos sincronizados");
     const page = (data ?? []) as Record<string, unknown>[];
     rows.push(...page);
     if (page.length < ANALYTICS_PAGE_SIZE) return rows;
@@ -570,13 +570,13 @@ export async function supabaseInvoke<T>(name: string, args: Record<string, unkno
       return {
         contract_version: 1,
         app_version: "0.1.0",
-        schema_migrations: ["supabase"],
+        schema_migrations: ["remote"],
       } satisfies ContractInfo as T;
     case "backup_status": {
       if (!authSession || authSession.user.role !== "admin") fail("session_expired", "Iniciá sesión para consultar los respaldos");
       // I08 inserts the manifest only after Storage confirms the encrypted object.
       const { data, error } = await sb().from("backups").select("backuped_at").order("backuped_at", { ascending: false }).limit(1);
-      if (error) fail("storage", "No se pudo consultar el estado de respaldos en Supabase");
+      if (error) fail("storage", "No se pudo consultar el estado de respaldos");
       return {
         last_local_at: null,
         last_remote_at: data?.[0]?.backuped_at ?? null,
@@ -588,37 +588,37 @@ export async function supabaseInvoke<T>(name: string, args: Record<string, unkno
     }
     case "list_rooms": {
       const { data, error } = await sb().from("rooms").select("*").order("number");
-      if (error) fail("storage", error.message);
+      if (error) fail("storage", "No se pudieron consultar los datos sincronizados");
       return (data ?? []).map((r) => mapRoom(r as Record<string, unknown>)) as T;
     }
     case "list_rate_plans": {
       let q = sb().from("rate_plans").select("*").order("name");
       if (args.active_only) q = q.eq("active", true);
       const { data, error } = await q;
-      if (error) fail("storage", error.message);
+      if (error) fail("storage", "No se pudieron consultar los datos sincronizados");
       return (data ?? []).map((r) => mapRate(r as Record<string, unknown>)) as T;
     }
     case "list_products": {
       let q = sb().from("products").select("*").order("sort_order");
       if (args.active_only !== false) q = q.eq("active", true);
       const { data, error } = await q;
-      if (error) fail("storage", error.message);
+      if (error) fail("storage", "No se pudieron consultar los datos sincronizados");
       return (data ?? []).map((r) => mapProduct(r as Record<string, unknown>)) as T;
     }
     case "list_users": {
       if (!authSession || authSession.user.role !== "admin") fail("forbidden", "Esta operación requiere administración");
       const { data, error } = await sb().from("app_users").select("local_id,username,role,active,version").order("username");
-      if (error) fail("storage", error.message);
+      if (error) fail("storage", "No se pudieron consultar los datos sincronizados");
       return (data ?? []).map((r) => mapManagedUser(r as Record<string, unknown>)) as T;
     }
     case "list_board": {
       const { data: rooms, error: e1 } = await sb().from("rooms").select("*").order("number");
-      if (e1) fail("storage", e1.message);
+      if (e1) fail("storage", "No se pudieron consultar los datos sincronizados");
       const { data: stays, error: e2 } = await sb()
         .from("stays")
         .select("*, room:rooms(local_id, number, status), guest:guests(name), rate_plan:rate_plans!rate_plan_uid(local_id, name, kind)")
         .eq("status", "open");
-      if (e2) fail("storage", e2.message);
+      if (e2) fail("storage", "No se pudieron consultar los datos sincronizados");
       const byRoomUid = new Map((stays ?? []).map((s) => [String((s as { room_uid: string }).room_uid), s]));
       const board: BoardRoom[] = (rooms ?? []).map((raw) => {
         const row = raw as Record<string, unknown>;
@@ -674,7 +674,7 @@ export async function supabaseInvoke<T>(name: string, args: Record<string, unkno
         .from("reservations")
         .select("*, room:rooms(local_id, number), guest:guests(name, document, phone), rate_plan:rate_plans(local_id, name)")
         .order("expected_arrival_at");
-      if (error) fail("storage", error.message);
+      if (error) fail("storage", "No se pudieron consultar los datos sincronizados");
       return (data ?? []).map((r) => {
         const row = r as Record<string, unknown>;
         const guest = row.guest as { name?: string; document?: string; phone?: string } | null;
@@ -709,7 +709,7 @@ export async function supabaseInvoke<T>(name: string, args: Record<string, unkno
         q = q.gte("check_out_at", `${day}T00:00:00`).lte("check_out_at", `${day}T23:59:59.999Z`);
       }
       const { data, error } = await q;
-      if (error) fail("storage", error.message);
+      if (error) fail("storage", "No se pudieron consultar los datos sincronizados");
       return (data ?? []).map((r) => {
         const row = r as Record<string, unknown>;
         const guest = row.guest as { name?: string } | null;
@@ -747,7 +747,7 @@ export async function supabaseInvoke<T>(name: string, args: Record<string, unkno
         .select("*, room:rooms(local_id, number), guest:guests(name), rate_plan:rate_plans!rate_plan_uid(*)")
         .eq("local_id", stayId)
         .maybeSingle();
-      if (error) fail("storage", error.message);
+      if (error) fail("storage", "No se pudieron consultar los datos sincronizados");
       if (!stayRow) fail("not_found", "Estadía no encontrada");
       const row = stayRow as Record<string, unknown>;
       const guest = row.guest as { name?: string } | null;
@@ -859,7 +859,7 @@ export async function supabaseInvoke<T>(name: string, args: Record<string, unkno
         if (error.code === "42501") fail("forbidden", "Sin permiso para modificar el catálogo");
         if (error.message.includes("conflict:")) fail("conflict", "La ficha cambió; recargá antes de guardar");
         if (error.message.includes("validation:")) fail("validation", "No se pudo eliminar el usuario. Recargá la lista e intentá de nuevo.");
-        fail("storage", "Requiere conexión con administración. Revisá los datos y la migración I11.");
+        fail("storage", "Requiere conexión con administración. Revisá los datos e intentá de nuevo.");
       }
       return null as T;
     }
@@ -934,7 +934,7 @@ export async function supabaseInvoke<T>(name: string, args: Record<string, unkno
       if (error) {
         if (error.code==="42501") fail("forbidden","Sin permiso para modificar el catálogo");
         if (error.message.includes("conflict:")) fail("conflict","La ficha cambió; recargá antes de guardar");
-        fail("storage","Requiere conexión con administración. Revisá los datos y la migración I11.");
+        fail("storage","Requiere conexión con administración. Revisá los datos e intentá de nuevo.");
       }
       const row=(data as {row:Record<string,unknown>}).row;
       if (entity==="rooms") return mapRoom(row) as T;
@@ -946,7 +946,7 @@ export async function supabaseInvoke<T>(name: string, args: Record<string, unkno
       return await settingsFromKv() as T;
     }
     default:
-      fail("forbidden", `Comando no disponible en administración remota: ${name}`);
+      fail("forbidden", "Esta operación solo está disponible en recepción");
   }
 }
 

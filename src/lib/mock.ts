@@ -257,7 +257,7 @@ function fail(codeOrMessage: string, message?: string): never {
 
 function acceptReserved(payload: { operation_id?: string | null; expected_version?: number | null }) {
   if (payload.operation_id != null && payload.operation_id.trim() === "") {
-    fail("validation", "operation_id no puede estar vacío");
+    fail("validation", "El identificador de la operación no puede estar vacío");
   }
   if (payload.expected_version != null && payload.expected_version < 0) {
     fail("validation", "expected_version no puede ser negativo");
@@ -879,7 +879,7 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
     }
     case "remote_configure": {
       const payload = args.payload as { project_url: string; anon_key: string };
-      if (!payload.project_url?.trim() || !payload.anon_key?.trim()) fail("Ingresá la URL del proyecto y la clave anónima");
+      if (!payload.project_url?.trim() || !payload.anon_key?.trim()) fail("Ingresá la URL del proyecto y la clave de acceso");
       localStorage.setItem(
         "nightdesk.remote_config",
         JSON.stringify({ project_url: payload.project_url.trim(), anon_key: payload.anon_key.trim() }),

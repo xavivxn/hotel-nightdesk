@@ -74,12 +74,12 @@ export function SettingsPage({
   const reception = deviceMode === "reception";
   const tabs = [
     { id: "business" as const, label: "Negocio", icon: Building2 },
-    { id: "printer" as const, label: "Impresora", icon: Printer },
+    ...(reception ? [{ id: "printer" as const, label: "Impresora", icon: Printer }] : []),
     ...(reception ? [{ id: "sync" as const, label: "Sincronización", icon: RefreshCw }] : []),
     { id: "backup" as const, label: "Respaldos", icon: Cloud },
   ];
-  const active = section === "sync" && !reception ? "business" : section;
-  const canSave = active === "business" || active === "printer";
+  const active = !reception && (section === "sync" || section === "printer") ? "business" : section;
+  const canSave = active === "business" || (reception && active === "printer");
 
   useEffect(() => {
     if (!reception) return;
@@ -234,7 +234,7 @@ export function SettingsPage({
         </section>
       ) : null}
 
-      {active === "printer" ? (
+      {active === "printer" && reception ? (
         <div role="tabpanel" id="settings-panel-printer" aria-labelledby="settings-tab-printer" className="mt-6 space-y-4">
           <section className="card space-y-4 rounded-lg p-5">
             <div>
@@ -349,7 +349,7 @@ export function SettingsPage({
               <p className="mt-1 max-w-2xl text-sm text-[var(--muted)]">
                 {sync?.configured
                   ? "El envío y la bajada ya usan las credenciales de este equipo. No se vuelven a mostrar."
-                  : "Estas credenciales habilitan el worker y la subida de respaldos. Se guardan acá y no se vuelven a mostrar."}
+                  : "Estas credenciales habilitan la sincronización y la subida de respaldos. Se guardan acá y no se vuelven a mostrar."}
               </p>
             </div>
             <span className={cn("rounded-lg px-2.5 py-1 text-xs font-semibold", tone.className)}>{tone.label}</span>
@@ -419,10 +419,10 @@ export function SettingsPage({
                     ref={deviceUrlRef}
                     value={deviceForm.project_url}
                     onChange={(e) => setDeviceForm({ ...deviceForm, project_url: e.target.value })}
-                    placeholder="https://xxxx.supabase.co"
+                    placeholder="https://…"
                   />
                 </Field>
-                <Field label="Clave anónima">
+                <Field label="Clave de acceso">
                   <Input
                     ref={deviceKeyRef}
                     type="password"
@@ -476,7 +476,7 @@ export function SettingsPage({
                       setDeviceForm({ project_url: "", anon_key: "", device_email: "", device_password: "" });
                       setReplacingDevice(false);
                       setSync(await api.syncStatus());
-                      setNotice("Dispositivo configurado en este equipo. El worker y la subida de respaldos lo usan al abrir la app.");
+                      setNotice("Dispositivo configurado en este equipo. La sincronización y la subida de respaldos lo usan al abrir la app.");
                     } catch (e) {
                       setError(String(e));
                     } finally {

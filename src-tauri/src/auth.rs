@@ -136,7 +136,7 @@ fn attach_embedded_remote_session(state: &AppState, app: &AppHandle, mut session
     }
     let Some((project_url, anon_key)) = crate::credentials::load_remote(&data_dir)? else {
         revoke_token(state, &session.token);
-        return Err(AppError::storage("No se pudo conectar con administración. Revisá la URL y que Supabase esté en marcha."));
+        return Err(AppError::storage("No se pudo conectar con administración. Revisá la URL y la conexión."));
     };
     match crate::sync::client::SupabaseClient::password_grant_admin(
         &project_url,

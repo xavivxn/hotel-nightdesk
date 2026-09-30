@@ -69,7 +69,7 @@ pub fn accept_reserved_fields(
 ) -> AppResult<()> {
     if let Some(id) = operation_id {
         if id.trim().is_empty() {
-            return Err(AppError::msg("operation_id no puede estar vacío"));
+            return Err(AppError::msg("El identificador de la operación no puede estar vacío"));
         }
     }
     if let Some(version) = expected_version {
@@ -1363,7 +1363,7 @@ pub fn hash_password_with_operation(password: &str, operation_id: Option<&str>) 
         return Err(AppError::msg("La contraseña debe tener entre 1 y 128 bytes"));
     }
     let salt = if let Some(id) = operation_id {
-        let id=uuid::Uuid::parse_str(id).map_err(|_|AppError::msg("operation_id debe ser UUID"))?;
+        let id=uuid::Uuid::parse_str(id).map_err(|_|AppError::msg("El identificador de la operación no es válido"))?;
         SaltString::encode_b64(id.as_bytes()).map_err(|_|AppError::msg("Salt inválida"))?
     } else { SaltString::generate(&mut OsRng) };
     let hash = Argon2::default()

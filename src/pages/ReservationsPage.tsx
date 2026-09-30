@@ -3,10 +3,11 @@ import { Drawer } from "@/components/ui/Drawer";
 import { Field, Input, Select, reportInputIssue } from "@/components/ui/Field";
 import { api } from "@/lib/api";
 import { formatDateTime, localInputToRfc3339, parseIntegerField, statusLabel, toDateTimeLocal } from "@/lib/format";
-import type { RatePlan, Reservation, Room } from "@/lib/types";
+import type { DeviceMode, RatePlan, Reservation, Room } from "@/lib/types";
 import { useEffect, useRef, useState } from "react";
 
-export function ReservationsPage() {
+export function ReservationsPage({ deviceMode = "reception" }: { deviceMode?: DeviceMode }) {
+  const reception = deviceMode === "reception";
   const [items, setItems] = useState<Reservation[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [rates, setRates] = useState<RatePlan[]>([]);
@@ -50,7 +51,7 @@ export function ReservationsPage() {
           <p className="page-kicker">Agenda</p>
           <h1 className="page-title">Reservas</h1>
         </div>
-        <Button onClick={() => setOpen(true)}>Nueva reserva</Button>
+        {reception ? <Button onClick={() => setOpen(true)}>Nueva reserva</Button> : null}
       </header>
       {error ? <p className="mt-4 text-[var(--danger)]">{error}</p> : null}
       <div className="mt-6 overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--surface)]">
@@ -61,7 +62,7 @@ export function ReservationsPage() {
               <th className="px-4 py-3">Llegada</th>
               <th className="px-4 py-3">Noches</th>
               <th className="px-4 py-3">Estado</th>
-              <th className="px-4 py-3"></th>
+              {reception ? <th className="px-4 py-3"></th> : null}
             </tr>
           </thead>
           <tbody>
@@ -71,34 +72,38 @@ export function ReservationsPage() {
                 <td className="px-4 py-3">{formatDateTime(item.expected_arrival_at)}</td>
                 <td className="px-4 py-3">{item.expected_nights}</td>
                 <td className="px-4 py-3">{statusLabel(item.status)}</td>
-                <td className="px-4 py-3 text-right">
-                  {item.status === "hold" ? (
-                    <div className="flex justify-end gap-2">
-                      <Button size="sm" onClick={async () => { await api.checkInReservation(item.id); await load(); }}>
-                        Check-in
-                      </Button>
-                      <Button size="sm" variant="secondary" onClick={async () => { await api.setReservationStatus(item.id, "cancelled"); await load(); }}>
-                        Cancelar
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={async () => { await api.setReservationStatus(item.id, "no_show"); await load(); }}>
-                        No show
-                      </Button>
-                    </div>
-                  ) : null}
-                </td>
+                {reception ? (
+                  <td className="px-4 py-3 text-right">
+                    {item.status === "hold" ? (
+                      <div className="flex justify-end gap-2">
+                        <Button size="sm" onClick={async () => { await api.checkInReservation(item.id); await load(); }}>
+                          Check-in
+                        </Button>
+                        <Button size="sm" variant="secondary" onClick={async () => { await api.setReservationStatus(item.id, "cancelled"); await load(); }}>
+                          Cancelar
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={async () => { await api.setReservationStatus(item.id, "no_show"); await load(); }}>
+                          No show
+                        </Button>
+                      </div>
+                    ) : null}
+                  </td>
+                ) : null}
               </tr>
             ))}
             {items.length === 0 ? (
               <tr>
-                <td className="px-4 py-10 text-center text-[var(--muted)]" colSpan={5}>
-                  No hay reservas. Creá una para bloquear una habitación el día de llegada.
+                <td className="px-4 py-10 text-center text-[var(--muted)]" colSpan={reception ? 5 : 4}>
+                  {reception
+                    ? "No hay reservas. Creá una para bloquear una habitación el día de llegada."
+                    : "No hay reservas."}
                 </td>
               </tr>
             ) : null}
           </tbody>
         </table>
       </div>
-      <Drawer open={open} title="Nueva reserva" onClose={() => setOpen(false)}>
+      <Drawer open={reception && open} title="Nueva reserva" onClose={() => setOpen(false)}>
         <div className="space-y-4">
           <Field label="Habitación">
             <Select value={form.room_id} onChange={(e) => setForm({ ...form, room_id: Number(e.target.value) })}>

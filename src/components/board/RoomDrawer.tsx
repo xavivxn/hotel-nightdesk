@@ -33,12 +33,14 @@ export function RoomDrawer({
   item,
   rates,
   settings,
+  readOnly = false,
   onClose,
   onChanged,
 }: {
   item: BoardRoom | null;
   rates: RatePlan[];
   settings: AppSettings;
+  readOnly?: boolean;
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -48,6 +50,7 @@ export function RoomDrawer({
       <StayDrawer
         item={item}
         settings={settings}
+        readOnly={readOnly}
         onClose={onClose}
         onChanged={onChanged}
       />
@@ -55,11 +58,11 @@ export function RoomDrawer({
   }
   if (item.display_status === "reserved" && item.reservation) {
     return (
-      <ReservedDrawer item={item} settings={settings} onClose={onClose} onChanged={onChanged} />
+      <ReservedDrawer item={item} settings={settings} readOnly={readOnly} onClose={onClose} onChanged={onChanged} />
     );
   }
   return (
-    <CheckInDrawer item={item} rates={rates} settings={settings} onClose={onClose} onChanged={onChanged} />
+    <CheckInDrawer item={item} rates={rates} settings={settings} readOnly={readOnly} onClose={onClose} onChanged={onChanged} />
   );
 }
 
@@ -67,12 +70,14 @@ function CheckInDrawer({
   item,
   rates,
   settings,
+  readOnly,
   onClose,
   onChanged,
 }: {
   item: BoardRoom;
   rates: RatePlan[];
   settings: AppSettings;
+  readOnly: boolean;
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -157,19 +162,25 @@ function CheckInDrawer({
             <p className="font-semibold">{dirty ? "Pendiente de aseo" : "Fuera de servicio"}</p>
             <p className="mt-1 text-[var(--ink)]">
               {dirty
-                ? "Marcala como libre cuando esté limpia. Recién ahí se puede ingresar."
-                : "Esta habitación está bloqueada. Desbloqueala para volver a usarla."}
+                ? readOnly
+                  ? "Pendiente de aseo en recepción."
+                  : "Marcala como libre cuando esté limpia. Recién ahí se puede ingresar."
+                : readOnly
+                  ? "Esta habitación está bloqueada."
+                  : "Esta habitación está bloqueada. Desbloqueala para volver a usarla."}
             </p>
-            <Button
-              className="mt-3 w-full"
-              variant="secondary"
-              onClick={async () => {
-                await api.setRoomStatus(item.room.id, "available");
-                onChanged();
-              }}
-            >
-              {dirty ? "Marcar como libre" : "Desbloquear"}
-            </Button>
+            {readOnly ? null : (
+              <Button
+                className="mt-3 w-full"
+                variant="secondary"
+                onClick={async () => {
+                  await api.setRoomStatus(item.room.id, "available");
+                  onChanged();
+                }}
+              >
+                {dirty ? "Marcar como libre" : "Desbloquear"}
+              </Button>
+            )}
           </div>
         ) : null}
 
@@ -253,11 +264,15 @@ function CheckInDrawer({
         ) : null}
 
         {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
-        <Button className="w-full" size="lg" disabled={busy || !canCheckIn} onClick={submit}>
-          <LogIn size={18} />
-          {busy ? "Ingresando…" : `Ingresar a ${item.room.number}`}
-        </Button>
-        {item.display_status === "available" ? (
+        {readOnly ? (
+          <p className="text-sm text-[var(--muted)]">El ingreso se hace en recepción.</p>
+        ) : (
+          <Button className="w-full" size="lg" disabled={busy || !canCheckIn} onClick={submit}>
+            <LogIn size={18} />
+            {busy ? "Ingresando…" : `Ingresar a ${item.room.number}`}
+          </Button>
+        )}
+        {!readOnly && item.display_status === "available" ? (
           <button
             type="button"
             className="flex min-h-11 w-full items-center justify-center gap-2 text-sm text-[var(--muted)] hover:text-[var(--danger)]"
@@ -278,11 +293,13 @@ function CheckInDrawer({
 
 function ReservedDrawer({
   item,
+  readOnly,
   onClose,
   onChanged,
 }: {
   item: BoardRoom;
   settings: AppSettings;
+  readOnly: boolean;
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -295,20 +312,24 @@ function ReservedDrawer({
           {formatDateTime(res.expected_arrival_at)} · {res.expected_nights} noche(s) · {res.rate_plan_name}
         </p>
         {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
-        <Button
-          className="w-full"
-          onClick={async () => {
-            try {
-              await api.checkInReservation(res.id);
-              onChanged();
-              onClose();
-            } catch (e) {
-              setError(String(e));
-            }
-          }}
-        >
-          Hacer check-in
-        </Button>
+        {readOnly ? (
+          <p className="text-sm text-[var(--muted)]">El check-in se hace en recepción.</p>
+        ) : (
+          <Button
+            className="w-full"
+            onClick={async () => {
+              try {
+                await api.checkInReservation(res.id);
+                onChanged();
+                onClose();
+              } catch (e) {
+                setError(String(e));
+              }
+            }}
+          >
+            Hacer check-in
+          </Button>
+        )}
         <p className="text-sm text-[var(--muted)]">{res.rate_plan_name}</p>
       </div>
     </Dialog>
@@ -318,11 +339,13 @@ function ReservedDrawer({
 function StayDrawer({
   item,
   settings,
+  readOnly,
   onClose,
   onChanged,
 }: {
   item: BoardRoom;
   settings: AppSettings;
+  readOnly: boolean;
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -404,53 +427,61 @@ function StayDrawer({
       subtitle={subtitle}
       onClose={onClose}
     >
-      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden min-[800px]:grid-cols-[1.2fr_0.9fr]">
-        <div className="flex min-h-0 flex-col gap-4 overflow-hidden border-[var(--line)] p-6 min-[800px]:border-r">
-          <div className="shrink-0 space-y-3">
-            {overnight ? (
-              <p className="text-sm text-[var(--accent)]">Se está aplicando tarifa de dormida</p>
-            ) : null}
-            {!stay.converted_to_overnight && stay.rate_kind === "hourly" ? (
-              <div className="space-y-2">
-                <Button
-                  variant="secondary"
-                  className="w-full"
-                  onClick={async () => {
-                    setMutationBusy(true);
-                    setError(null);
-                    try {
-                      await api.convertToOvernight(stay.id);
-                      await refresh();
-                      onChanged();
-                    } catch (e) {
-                      setError(String(e));
-                    } finally {
-                      setMutationBusy(false);
-                    }
-                  }}
-                  disabled={mutationBusy || busy || !dormidaWindowOpen(now)}
-                >
-                  Convertir a dormida
-                </Button>
-                {!dormidaWindowOpen(now) ? (
-                  <p className="text-xs text-[var(--muted)]">{dormidaUnavailableMessage(now)}</p>
-                ) : null}
-              </div>
-            ) : null}
+      <div className={cn(
+        "grid min-h-0 flex-1 grid-cols-1 overflow-hidden",
+        !readOnly && "min-[800px]:grid-cols-[1.2fr_0.9fr]",
+      )}>
+        {readOnly ? null : (
+          <div className="flex min-h-0 flex-col gap-4 overflow-hidden border-[var(--line)] p-6 min-[800px]:border-r">
+            <div className="shrink-0 space-y-3">
+              {overnight ? (
+                <p className="text-sm text-[var(--accent)]">Se está aplicando tarifa de dormida</p>
+              ) : null}
+              {!stay.converted_to_overnight && stay.rate_kind === "hourly" ? (
+                <div className="space-y-2">
+                  <Button
+                    variant="secondary"
+                    className="w-full"
+                    onClick={async () => {
+                      setMutationBusy(true);
+                      setError(null);
+                      try {
+                        await api.convertToOvernight(stay.id);
+                        await refresh();
+                        onChanged();
+                      } catch (e) {
+                        setError(String(e));
+                      } finally {
+                        setMutationBusy(false);
+                      }
+                    }}
+                    disabled={mutationBusy || busy || !dormidaWindowOpen(now)}
+                  >
+                    Convertir a dormida
+                  </Button>
+                  {!dormidaWindowOpen(now) ? (
+                    <p className="text-xs text-[var(--muted)]">{dormidaUnavailableMessage(now)}</p>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+            <RoomShop
+              stayId={stay.id}
+              currency={settings.currency_symbol}
+              charges={charges}
+              onBusyChange={setMutationBusy}
+              onChanged={async () => {
+                await refresh();
+                onChanged();
+              }}
+            />
           </div>
-          <RoomShop
-            stayId={stay.id}
-            currency={settings.currency_symbol}
-            charges={charges}
-            onBusyChange={setMutationBusy}
-            onChanged={async () => {
-              await refresh();
-              onChanged();
-            }}
-          />
-        </div>
+        )}
         <div className="flex min-h-0 flex-col p-6">
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto scrollbar-thin">
+            {readOnly && overnight ? (
+              <p className="text-sm text-[var(--accent)]">Se está aplicando tarifa de dormida</p>
+            ) : null}
             <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">
               Cuenta
             </p>
@@ -470,13 +501,14 @@ function StayDrawer({
               stayId={stay.id}
               currency={settings.currency_symbol}
               charges={charges}
+              readOnly={readOnly}
               onBusyChange={setMutationBusy}
               onChanged={async () => {
                 await refresh();
                 onChanged();
               }}
             />
-            {admin ? (
+            {admin && !readOnly ? (
               <div className="grid grid-cols-[1fr_100px_auto] gap-2 border-t border-[var(--line)] pt-4">
                 <Input
                   ref={extraDescRef}
@@ -532,37 +564,43 @@ function StayDrawer({
             <p className="font-mono text-3xl font-semibold tabular-nums tracking-tight">
               {formatMoney(total, settings.currency_symbol)}
             </p>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={print} onChange={(e) => setPrint(e.target.checked)} />
-              Imprimir ticket al cerrar
-            </label>
-            {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
-            {printError ? <p className="text-sm text-[var(--warn)]">{printError}</p> : null}
-            <Button
-              className="w-full"
-              variant="ok"
-              size="lg"
-              disabled={busy || mutationBusy}
-              onClick={async () => {
-                setBusy(true);
-                setError(null);
-                try {
-                  const result = await api.checkOut({
-                    stay_id: stay.id,
-                    print,
-                  });
-                  setClosedStayId(result.stay.id);
-                  setBill(result.bill.total_cents);
-                  if (result.print_error) setPrintError(result.print_error);
-                } catch (e) {
-                  setError(String(e));
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            >
-              Cerrar cuenta
-            </Button>
+            {readOnly ? (
+              <p className="text-sm text-[var(--muted)]">La cuenta se cierra en recepción.</p>
+            ) : (
+              <>
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={print} onChange={(e) => setPrint(e.target.checked)} />
+                  Imprimir ticket al cerrar
+                </label>
+                {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
+                {printError ? <p className="text-sm text-[var(--warn)]">{printError}</p> : null}
+                <Button
+                  className="w-full"
+                  variant="ok"
+                  size="lg"
+                  disabled={busy || mutationBusy}
+                  onClick={async () => {
+                    setBusy(true);
+                    setError(null);
+                    try {
+                      const result = await api.checkOut({
+                        stay_id: stay.id,
+                        print,
+                      });
+                      setClosedStayId(result.stay.id);
+                      setBill(result.bill.total_cents);
+                      if (result.print_error) setPrintError(result.print_error);
+                    } catch (e) {
+                      setError(String(e));
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  Cerrar cuenta
+                </Button>
+              </>
+            )}
           </div>
         </div>
       </div>

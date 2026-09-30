@@ -3,7 +3,7 @@ import { Input } from "@/components/ui/Field";
 import { api } from "@/lib/api";
 import { formatDateTime, formatMoney } from "@/lib/format";
 import { RoleContext } from "@/lib/permissions";
-import type { AppSettings, HistoryStay } from "@/lib/types";
+import type { AppSettings, DeviceMode, HistoryStay } from "@/lib/types";
 import { useContext, useEffect, useState } from "react";
 
 function todayInput() {
@@ -12,8 +12,9 @@ function todayInput() {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-export function HistoryPage({ settings }: { settings: AppSettings }) {
+export function HistoryPage({ settings, deviceMode = "reception" }: { settings: AppSettings; deviceMode?: DeviceMode }) {
   const admin = useContext(RoleContext) === "admin";
+  const reception = deviceMode === "reception";
   const [date, setDate] = useState(todayInput);
   const [items, setItems] = useState<HistoryStay[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -48,12 +49,14 @@ export function HistoryPage({ settings }: { settings: AppSettings }) {
             </div>
           ) : null}
           <Input type="date" className="w-44" value={date} onChange={(e) => setDate(e.target.value)} />
-          <Button disabled={exporting || !date || loading} onClick={async () => {
-            setExporting(true); setNotice(null); setError(null);
-            try { const path = await api.exportDailyPdf(date); setNotice(`PDF guardado: ${path}`); }
-            catch (e) { setError(String(e)); }
-            finally { setExporting(false); }
-          }}>{exporting ? "Generando PDF…" : "Exportar PDF diario"}</Button>
+          {reception ? (
+            <Button disabled={exporting || !date || loading} onClick={async () => {
+              setExporting(true); setNotice(null); setError(null);
+              try { const path = await api.exportDailyPdf(date); setNotice(`PDF guardado: ${path}`); }
+              catch (e) { setError(String(e)); }
+              finally { setExporting(false); }
+            }}>{exporting ? "Generando PDF…" : "Exportar PDF diario"}</Button>
+          ) : null}
         </div>
       </header>
       {error ? <p className="mt-4 text-[var(--danger)]">{error}</p> : null}
@@ -66,7 +69,7 @@ export function HistoryPage({ settings }: { settings: AppSettings }) {
               <th className="px-4 py-3">Salida</th>
               <th className="px-4 py-3">Cuenta</th>
               <th className="px-4 py-3 text-right">Total</th>
-              <th className="px-4 py-3"></th>
+              {reception ? <th className="px-4 py-3"></th> : null}
             </tr>
           </thead>
           <tbody>
@@ -78,28 +81,30 @@ export function HistoryPage({ settings }: { settings: AppSettings }) {
                 <td className="px-4 py-3 text-right font-mono font-medium tabular-nums">
                   {formatMoney(item.total_cents, settings.currency_symbol)}
                 </td>
-                <td className="px-4 py-3 text-right">
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    disabled={printing !== null}
-                    onClick={async () => {
-                      setNotice(null); setError(null); setPrinting(item.stay.id);
-                      try {
-                        const printError = await api.reprintReceipt(item.stay.id);
-                        setNotice(printError ? `Cuenta cerrada. ${printError}` : "Ticket enviado a la cola de recepción. Verificá la salida en papel.");
-                      } catch (e) { setError(String(e)); }
-                      finally { setPrinting(null); }
-                    }}
-                  >
-                    {printing === item.stay.id ? "Enviando…" : "Reimprimir"}
-                  </Button>
-                </td>
+                {reception ? (
+                  <td className="px-4 py-3 text-right">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={printing !== null}
+                      onClick={async () => {
+                        setNotice(null); setError(null); setPrinting(item.stay.id);
+                        try {
+                          const printError = await api.reprintReceipt(item.stay.id);
+                          setNotice(printError ? `Cuenta cerrada. ${printError}` : "Ticket enviado a la cola de recepción. Verificá la salida en papel.");
+                        } catch (e) { setError(String(e)); }
+                        finally { setPrinting(null); }
+                      }}
+                    >
+                      {printing === item.stay.id ? "Enviando…" : "Reimprimir"}
+                    </Button>
+                  </td>
+                ) : null}
               </tr>
             ))}
             {items.length === 0 ? (
               <tr>
-                <td className="px-4 py-10 text-center text-[var(--muted)]" colSpan={5}>
+                <td className="px-4 py-10 text-center text-[var(--muted)]" colSpan={reception ? 5 : 4}>
                   {loading ? "Cargando cuentas…" : "No hay estadías cerradas en esta fecha."}
                 </td>
               </tr>

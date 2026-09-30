@@ -331,7 +331,35 @@ fn offline() -> AppError {
 }
 
 fn connect_failed() -> AppError {
-    AppError::storage("No se pudo conectar con administración. Revisá la URL y que Supabase esté en marcha.")
+    AppError::storage("No se pudo conectar con administración. Revisá la URL y la conexión.")
+}
+
+fn leaks_engine(msg: &str) -> bool {
+    let lower = msg.to_ascii_lowercase();
+    [
+        "supabase",
+        "postgres",
+        "postgrest",
+        "pgrst",
+        "sqlite",
+        "rusqlite",
+        "tauri",
+        "jwt",
+        "rls",
+        "relation ",
+        "column ",
+        "permission denied",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+fn operator_http_message(msg: &str, fallback: &str) -> String {
+    if msg.is_empty() || leaks_engine(msg) {
+        fallback.to_string()
+    } else {
+        msg.to_string()
+    }
 }
 
 pub fn validate_base(url: &str) -> AppResult<String> {
@@ -346,7 +374,7 @@ pub fn validate_base(url: &str) -> AppResult<String> {
 fn parse_auth_reply(reply: reqwest::blocking::Response, forbidden: &str) -> AppResult<Session> {
     let status = reply.status();
     let body: Value = reply.json().map_err(|_| {
-        AppError::storage("Administración no respondió con una sesión válida. Revisá la URL y la clave anónima.")
+        AppError::storage("Administración no respondió con una sesión válida. Revisá la URL y la clave de acceso.")
     })?;
     if !status.is_success() {
         if status.as_u16() == 401 || status.as_u16() == 403 {
@@ -356,8 +384,11 @@ fn parse_auth_reply(reply: reqwest::blocking::Response, forbidden: &str) -> AppR
             .as_str()
             .or_else(|| body["msg"].as_str())
             .or_else(|| body["message"].as_str())
-            .unwrap_or("Administración rechazó el acceso del dispositivo");
-        return Err(AppError::storage(detail));
+            .unwrap_or("");
+        return Err(AppError::storage(operator_http_message(
+            detail,
+            "Administración rechazó el acceso del dispositivo",
+        )));
     }
     let access = body["access_token"]
         .as_str()
@@ -366,10 +397,10 @@ fn parse_auth_reply(reply: reqwest::blocking::Response, forbidden: &str) -> AppR
     let claims = decode_jwt_claims(access)?;
     let device_id = claims["app_metadata"]["device_id"]
         .as_str()
-        .ok_or_else(|| AppError::forbidden("El dispositivo no tiene device_id en la sesión"))?
+        .ok_or_else(|| AppError::forbidden("Este dispositivo no tiene identificador en la sesión"))?
         .to_string();
     uuid::Uuid::parse_str(&device_id)
-        .map_err(|_| AppError::forbidden("El dispositivo no tiene device_id en la sesión"))?;
+        .map_err(|_| AppError::forbidden("Este dispositivo no tiene identificador en la sesión"))?;
     let expires_at = claims["exp"]
         .as_i64()
         .and_then(|exp| Utc.timestamp_opt(exp, 0).single())
@@ -390,7 +421,7 @@ fn parse_auth_reply(reply: reqwest::blocking::Response, forbidden: &str) -> AppR
 fn parse_admin_grant(reply: reqwest::blocking::Response) -> AppResult<AdminGrant> {
     let status = reply.status();
     let body: Value = reply.json().map_err(|_| {
-        AppError::storage("Administración no respondió con una sesión válida. Revisá la URL y la clave anónima.")
+        AppError::storage("Administración no respondió con una sesión válida. Revisá la URL y la clave de acceso.")
     })?;
     if !status.is_success() {
         if status.as_u16() == 401 || status.as_u16() == 403 {
@@ -435,20 +466,12 @@ pub fn map_http(status: u16, body: &Value) -> AppError {
         return AppError::forbidden("Sin permiso para sincronizar");
     }
     if msg.starts_with("validation:") || code == "P0001" {
-        return AppError::msg(if msg.is_empty() {
-            "Administración rechazó los datos".into()
-        } else {
-            msg
-        });
+        return AppError::msg(operator_http_message(&msg, "Administración rechazó los datos"));
     }
     if status >= 500 {
         return offline();
     }
-    if msg.is_empty() {
-        AppError::msg("Administración rechazó los datos")
-    } else {
-        AppError::msg(msg)
-    }
+    AppError::msg(operator_http_message(&msg, "Administración rechazó los datos"))
 }
 
 pub fn decode_jwt_claims(token: &str) -> AppResult<Value> {
@@ -603,6 +626,10 @@ mod tests {
         assert_eq!(
             map_http(503, &json!({"message":"boom"})).code(),
             ErrorCode::Storage
+        );
+        assert_eq!(
+            map_http(400, &json!({"message":"relation rooms does not exist"})).to_string(),
+            "Administración rechazó los datos"
         );
     }
 

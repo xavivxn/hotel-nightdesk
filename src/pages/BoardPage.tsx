@@ -120,7 +120,7 @@ export function BoardPage({
           <h1 className="page-title">Tablero de habitaciones</h1>
           {deviceMode === "remote" && (
             <p className="text-sm text-[var(--muted)]">
-              Solo lectura · {liveNote ?? "en vivo vía Supabase"}
+              Solo lectura · {liveNote ?? "en vivo"}
             </p>
           )}
         </div>
@@ -198,6 +198,7 @@ export function BoardPage({
         item={selected}
         rates={rates}
         settings={settings}
+        readOnly={deviceMode === "remote"}
         onClose={() => setSelected(null)}
         onChanged={load}
       />
