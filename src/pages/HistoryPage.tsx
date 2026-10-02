@@ -67,6 +67,8 @@ export function HistoryPage({ settings, deviceMode = "reception" }: { settings: 
             <tr>
               <th className="px-4 py-3">Habitación</th>
               <th className="px-4 py-3">Salida</th>
+              <th className="px-4 py-3">Check-in por</th>
+              <th className="px-4 py-3">Cobró</th>
               <th className="px-4 py-3">Cuenta</th>
               <th className="px-4 py-3 text-right">Total</th>
               {reception ? <th className="px-4 py-3"></th> : null}
@@ -77,6 +79,8 @@ export function HistoryPage({ settings, deviceMode = "reception" }: { settings: 
               <tr key={item.stay.id} className="border-t border-[var(--line)]">
                 <td className="px-4 py-3 font-mono font-semibold tabular-nums">{item.stay.room_number}</td>
                 <td className="px-4 py-3">{item.stay.check_out_at ? formatDateTime(item.stay.check_out_at) : "—"}</td>
+                <td className="px-4 py-3">{item.stay.checked_in_by ?? "—"}</td>
+                <td className="px-4 py-3">{item.stay.checked_out_by ?? "—"}</td>
                 <td className="px-4 py-3 text-[var(--muted)]">Cerrada</td>
                 <td className="px-4 py-3 text-right font-mono font-medium tabular-nums">
                   {formatMoney(item.total_cents, settings.currency_symbol)}
@@ -104,7 +108,7 @@ export function HistoryPage({ settings, deviceMode = "reception" }: { settings: 
             ))}
             {items.length === 0 ? (
               <tr>
-                <td className="px-4 py-10 text-center text-[var(--muted)]" colSpan={reception ? 5 : 4}>
+                <td className="px-4 py-10 text-center text-[var(--muted)]" colSpan={reception ? 7 : 6}>
                   {loading ? "Cargando cuentas…" : "No hay estadías cerradas en esta fecha."}
                 </td>
               </tr>

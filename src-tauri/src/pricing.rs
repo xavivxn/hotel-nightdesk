@@ -240,6 +240,7 @@ mod tests {
             night_cutoff_hour: 10,
             active: true,
             version: 1,
+            room_category: "normal".into(),
         }
     }
 

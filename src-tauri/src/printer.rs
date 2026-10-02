@@ -93,12 +93,24 @@ pub fn print_bytes(
     app_data: &Path,
     label: &str,
 ) -> AppResult<Option<String>> {
+    print_copies(bytes, settings, app_data, label, 1)
+}
+
+pub fn print_copies(
+    bytes: &[u8],
+    settings: &AppSettings,
+    app_data: &Path,
+    label: &str,
+    copies: u32,
+) -> AppResult<Option<String>> {
     archive_ticket(bytes, app_data, label)?;
     if !settings.printer_enabled {
         return Ok(Some("Impresora desactivada. Ticket archivado; no enviado a papel.".into()));
     }
-    if let Err(e) = send_to_printer(bytes, settings) {
-        return Ok(Some(e));
+    for _ in 0..copies.max(1) {
+        if let Err(e) = send_to_printer(bytes, settings) {
+            return Ok(Some(e));
+        }
     }
     Ok(None)
 }
@@ -484,6 +496,8 @@ mod tests {
             converted_to_overnight: false,
             overnight_rate_plan_id: None,
             notes: None,
+            checked_in_by: None,
+            checked_out_by: None,
         }
     }
 

@@ -118,24 +118,27 @@ export function formatDurationLabel(checkIn: Date, now: Date) {
   return `${hours}h ${minutes.toString().padStart(2, "0")}m`;
 }
 
+/** Two started 30 min blocks make a full hour at the hour price; a lone block is the adicional. */
 function billHourly(rate: RatePlan, checkIn: Date, now: Date): LineItem[] {
   const elapsed = elapsedMinutes(checkIn, now);
   const grace = Math.max(0, rate.grace_minutes);
-  const includedMinutes = Math.max(1, rate.included_hours) * 60;
-  const extraMinutes = Math.max(0, elapsed - includedMinutes - grace);
-  const extraBlocks = Math.min(500, Math.ceil(extraMinutes / 30));
+  const includedHours = Math.max(1, rate.included_hours);
+  const extraMinutes = Math.max(0, elapsed - includedHours * 60 - grace);
+  const blocks = Math.min(500, Math.ceil(extraMinutes / 30));
+  const addedHours = Math.floor(blocks / 2);
+  const hourPrice = Math.trunc(rate.base_amount_cents / includedHours);
   const lines: LineItem[] = [
     {
       kind: "stay",
-      description: `${rate.name} (1 h)`,
-      amount_cents: rate.base_amount_cents,
+      description: `${rate.name} (${includedHours + addedHours} h)`,
+      amount_cents: rate.base_amount_cents + addedHours * hourPrice,
     },
   ];
-  if (extraBlocks > 0) {
+  if (blocks % 2 === 1) {
     lines.push({
       kind: "extra_hour",
-      description: extraBlocks === 1 ? "Adicional 30 min" : `Extra 30 min x${extraBlocks}`,
-      amount_cents: extraBlocks * rate.extra_hour_cents,
+      description: "Adicional 30 min",
+      amount_cents: rate.extra_hour_cents,
     });
   }
   return lines;

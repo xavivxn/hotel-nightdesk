@@ -39,8 +39,11 @@ Si cambia la fórmula:
 | `overnight` | Pernocte (misma lógica que noche) |
 
 - `grace_minutes` aplica a horas extra.
+- Hourly: tras las horas incluidas + gracia, cada 30 min iniciados es un bloque. Dos bloques = una hora completa al precio de la hora (`base / included_hours`); un bloque suelto = línea `extra_hour` "Adicional 30 min" (`extra_hour_cents`). 2:30 → 2 h + adicional; 2:40 → 3 h.
+- Cada `RatePlan` tiene `room_category` (`normal` / `jacuzzi`, de `models::room_category(room_type)`). Check-in y reservas rechazan una tarifa de otra categoría; la sustitución por dormida busca primero el plan de la categoría de la habitación.
 - Hourly que cruza `night_cutoff_hour` **reemplaza** el total hourly por el plan `overnight` (fallback: `night`). No sumar ambas.
 - `convert_to_overnight` (`converted_to_overnight = true`) fuerza esa misma sustitución. Requiere un plan `overnight` o `night` activo.
+- Checkout imprime 2 copias (`CHECKOUT_RECEIPT_COPIES`); `reprint_receipt` imprime 1.
 
 ## Cargos manuales
 

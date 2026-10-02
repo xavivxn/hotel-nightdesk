@@ -11,9 +11,10 @@ import {
   parseMoneyInteger,
   rateKindLabel,
   requireTrimmed,
+  roomCategoryLabel,
   statusLabel,
 } from "@/lib/format";
-import type { AppSettings, DeviceMode, RateKind, RatePlan, Room } from "@/lib/types";
+import type { AppSettings, DeviceMode, RateKind, RatePlan, Room, RoomCategory } from "@/lib/types";
 import { useEffect, useRef, useState } from "react";
 
 type RoomDraft = {
@@ -36,7 +37,10 @@ type RateDraft = {
   night_cutoff_hour: string;
   active: boolean;
   version: number;
+  room_category: RoomCategory;
 };
+
+const ROOM_CATEGORIES: RoomCategory[] = ["normal", "jacuzzi"];
 
 function roomDraft(room?: Room): RoomDraft {
   return {
@@ -61,6 +65,7 @@ function rateDraft(rate?: RatePlan): RateDraft {
     night_cutoff_hour: String(rate?.night_cutoff_hour ?? 10),
     active: rate?.active ?? true,
     version: rate?.version ?? 1,
+    room_category: rate?.room_category ?? "normal",
   };
 }
 
@@ -141,18 +146,30 @@ export function RoomsPage({ settings, deviceMode = "reception" }: { settings: Ap
         </section>
         <section className="card rounded-lg p-4">
           <h2 className="mb-3 text-lg font-semibold tracking-tight">Tarifas</h2>
-          <div className="space-y-2">
-            {rates.map((rate) => (
-              <button key={rate.id} className="flex w-full items-center justify-between rounded-lg bg-[var(--surface-2)] px-3 py-3 text-left" onClick={() => setRateForm(rateDraft(rate))}>
-                <div>
-                  <p className="font-semibold">{rate.name}</p>
-                  <p className="text-xs text-[var(--muted)]">
-                    {rateKindLabel(rate.kind)} · <span className="font-mono tabular-nums">{formatMoney(rate.base_amount_cents, settings.currency_symbol)}</span>
-                    {rate.active ? "" : " · inactiva"}
-                  </p>
+          <div className="space-y-4">
+            {ROOM_CATEGORIES.map((category) => {
+              const group = rates.filter((rate) => rate.room_category === category);
+              if (group.length === 0) return null;
+              return (
+                <div key={category} className="space-y-2">
+                  <p className="page-kicker">Habitaciones {roomCategoryLabel(category).toLowerCase()}</p>
+                  {group.map((rate) => (
+                    <button key={rate.id} className="flex w-full items-center justify-between rounded-lg bg-[var(--surface-2)] px-3 py-3 text-left" onClick={() => setRateForm(rateDraft(rate))}>
+                      <div>
+                        <p className="font-semibold">{rate.name}</p>
+                        <p className="text-xs text-[var(--muted)]">
+                          {rateKindLabel(rate.kind)} · <span className="font-mono tabular-nums">{formatMoney(rate.base_amount_cents, settings.currency_symbol)}</span>
+                          {rate.kind === "hourly" ? (
+                            <> · Adicional 30 min <span className="font-mono tabular-nums">{formatMoney(rate.extra_hour_cents, settings.currency_symbol)}</span></>
+                          ) : null}
+                          {rate.active ? "" : " · inactiva"}
+                        </p>
+                      </div>
+                    </button>
+                  ))}
                 </div>
-              </button>
-            ))}
+              );
+            })}
           </div>
         </section>
       </div>
@@ -216,6 +233,13 @@ export function RoomsPage({ settings, deviceMode = "reception" }: { settings: Ap
                 <option value="hourly">Por hora</option>
                 <option value="night">Por noche</option>
                 <option value="overnight">Dormida</option>
+              </Select>
+            </Field>
+            <Field label="Habitaciones">
+              <Select value={rateForm.room_category} onChange={(e) => setRateForm({ ...rateForm, room_category: e.target.value as RoomCategory })}>
+                {ROOM_CATEGORIES.map((category) => (
+                  <option key={category} value={category}>{roomCategoryLabel(category)}</option>
+                ))}
               </Select>
             </Field>
             <Field label="Monto base (Gs.)">
@@ -306,6 +330,7 @@ export function RoomsPage({ settings, deviceMode = "reception" }: { settings: Ap
                 grace_minutes,
                 night_cutoff_hour,
                 active: rateForm.active,
+                room_category: rateForm.room_category,
                 expected_version: rateForm.id ? rateForm.version : null,
               });
               setRateForm(null);

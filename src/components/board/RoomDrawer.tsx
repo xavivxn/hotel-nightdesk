@@ -2,7 +2,7 @@ import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Ban, Bath, Clock3, LogIn } from "lucide-react";
 import { RoleContext } from "@/lib/permissions";
 import { api } from "@/lib/api";
-import { FIELD_EMPTY, formatDateTime, formatMoney, parseMoneyInteger, rateKindLabel, requireTrimmed } from "@/lib/format";
+import { FIELD_EMPTY, formatDateTime, formatMoney, parseMoneyInteger, rateKindLabel, requireTrimmed, roomCategory } from "@/lib/format";
 import { dormidaEnd, dormidaStartsAtMidnight, dormidaUnavailableMessage, dormidaWindowOpen } from "@/lib/billing";
 import type { AppSettings, BoardRoom, Charge, EffectivePrice, RatePlan } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
@@ -82,10 +82,11 @@ function CheckInDrawer({
   onChanged: () => void;
 }) {
   const now = useNow();
-  const activeRates = [...rates.filter((r) => r.active)].sort((a, b) => {
+  const category = roomCategory(item.room.room_type);
+  const activeRates = useMemo(() => rates.filter((r) => r.active && r.room_category === category).sort((a, b) => {
     const order = { hourly: 0, overnight: 1, night: 2 };
     return (order[a.kind] ?? 9) - (order[b.kind] ?? 9);
-  });
+  }), [rates, category]);
   const [rateId, setRateId] = useState(activeRates[0]?.id ?? 0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -105,7 +106,7 @@ function CheckInDrawer({
     ? !isDormidaKind(selected.kind) || dormidaWindowOpen(now, selected.night_cutoff_hour)
     : false;
   const canCheckIn = !blocked && !dirty && Boolean(selected) && dormidaOpen;
-  const isJacuzzi = /jacc?uz+i/.test(item.room.room_type.trim().toLowerCase());
+  const isJacuzzi = category === "jacuzzi";
   const checkoutAt = selected?.kind === "hourly"
     ? new Date(Date.now() + 60 * 60 * 1000)
     : selected?.kind === "overnight" || selected?.kind === "night"
@@ -117,9 +118,9 @@ function CheckInDrawer({
 
   useEffect(() => {
     if (!selected || !isDormidaKind(selected.kind) || dormidaWindowOpen(now, selected.night_cutoff_hour)) return;
-    const hourly = rates.find((rate) => rate.active && rate.kind === "hourly");
+    const hourly = activeRates.find((rate) => rate.kind === "hourly");
     if (hourly) setRateId(hourly.id);
-  }, [now, rates, selected]);
+  }, [now, activeRates, selected]);
 
   async function submit() {
     setBusy(true);

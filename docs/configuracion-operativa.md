@@ -48,13 +48,18 @@ El navegador utiliza una base de demostración separada en localStorage. La corr
 
 Estos valores proceden de `seed_if_empty` en `src-tauri/src/db.rs`. Se documentan para reproducir la configuración de desarrollo; los importes y reglas comerciales reales no figuran en la información recibida.
 
-| Plan inicial | Importe base (Gs.) | Extra por hora (Gs.) | Horas incluidas en el campo | Tolerancia (min) | Hora de corte |
-|---|---:|---:|---:|---:|---:|
-| 3 horas (`hourly`) | 80.000 | 20.000 | 3 | 10 | 12 |
-| Noche (`night`) | 150.000 | 25.000 | 24 | 15 | 12 |
-| Pernocte (`overnight`) | 120.000 | 20.000 | 12 | 15 | 12 |
+| Plan inicial | Habitaciones | Importe base (Gs.) | Adicional 30 min (Gs.) | Horas incluidas | Tolerancia (min) | Hora de corte |
+|---|---|---:|---:|---:|---:|---:|
+| 1 hora (`hourly`) | Normal | 45.000 | 15.000 | 1 | 5 | 10 |
+| Dormida (`overnight`) | Normal | 120.000 | 15.000 | 12 | 5 | 10 |
+| 1 hora Jacuzzi (`hourly`) | Con jacuzzi | 45.000 | 15.000 | 1 | 5 | 10 |
+| Dormida Jacuzzi (`overnight`) | Con jacuzzi | 120.000 | 15.000 | 12 | 5 | 10 |
 
-La hora de corte representa las 12:00 en el comportamiento actual basado en la hora local. No equivale a una regla comercial confirmada. El sistema maneja conversión a pernocte y extras; esas reglas deben cargarse de acuerdo con el tarifario real y validarse en N02/I01. No se encontró una tarifa inicial separada para jacuzzi ni una vinculación automática entre tipo de habitación y plan: hoy se selecciona el plan al ingresar.
+Las tarifas jacuzzi arrancan como copia de las normales (decisión de la reunión del 30/09/2026); el administrador ajusta los precios desde «Habitaciones y tarifas». Detalle completo en [cambios-reunion-30-septiembre.md](cambios-reunion-30-septiembre.md).
+
+**Cobro por hora:** pasadas las horas incluidas y la tolerancia, cada hora completa se cobra al precio de la hora y 30 minutos sueltos se cobran como «Adicional 30 min». 2:30 → 2 h + adicional; 2:40 → 3 h; 3:00 → 3 h.
+
+**Tarifa según habitación:** cada tarifa es «Normal» o «Con jacuzzi». Una habitación es jacuzzi si su tipo contiene «jacuzzi». El check-in y las reservas solo ofrecen y aceptan tarifas de la categoría de la habitación; el pase a dormida usa la dormida de esa misma categoría.
 
 | Regla operativa | Registro y alcance |
 |---|---|
@@ -62,7 +67,8 @@ La hora de corte representa las 12:00 en el comportamiento actual basado en la h
 | Cierre y limpieza | Cerrar deja la habitación sucia; luego recepción la marca limpia/disponible. |
 | Reservas | En espera, ingreso realizado, cancelada o no presentada; el tablero señala la reserva de llegada del día. |
 | Consumos y ajustes | Cargos, recargos y descuentos sobre la cuenta; conservar trazabilidad de correcciones. |
-| Histórico | El cierre persiste importes, IVA y tipo aplicado; cambiar tarifas no recalcula cuentas cerradas. Reimpresión física sigue en N05. |
+| Histórico | El cierre persiste importes, IVA y tipo aplicado; cambiar tarifas no recalcula cuentas cerradas. Cada estadía registra el usuario que hizo el check-in y el que cobró, visibles en Historial. |
+| Tickets | Al cobrar se imprimen 2 copias fijas; «Reimprimir» desde Historial imprime 1. |
 | Datos de huésped | Nombre, documento y teléfono disponibles en el código. Exigir nombre está desactivado por defecto; obligatoriedad y conservación reales no están documentadas. |
 | Impuesto | `tax_percent = 10` es un valor inicial del programa, no una política comercial validada para el motel. |
 

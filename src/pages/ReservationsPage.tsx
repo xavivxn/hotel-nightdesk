@@ -2,9 +2,14 @@ import { Button } from "@/components/ui/Button";
 import { Drawer } from "@/components/ui/Drawer";
 import { Field, Input, Select, reportInputIssue } from "@/components/ui/Field";
 import { api } from "@/lib/api";
-import { formatDateTime, localInputToRfc3339, parseIntegerField, statusLabel, toDateTimeLocal } from "@/lib/format";
+import { formatDateTime, localInputToRfc3339, parseIntegerField, roomCategory, statusLabel, toDateTimeLocal } from "@/lib/format";
 import type { DeviceMode, RatePlan, Reservation, Room } from "@/lib/types";
 import { useEffect, useRef, useState } from "react";
+
+function ratesForRoom(rates: RatePlan[], room: Room | undefined) {
+  const category = room ? roomCategory(room.room_type) : "normal";
+  return rates.filter((rate) => rate.room_category === category);
+}
 
 export function ReservationsPage({ deviceMode = "reception" }: { deviceMode?: DeviceMode }) {
   const reception = deviceMode === "reception";
@@ -33,11 +38,25 @@ export function ReservationsPage({ deviceMode = "reception" }: { deviceMode?: De
     setItems(reservations);
     setRooms(roomList);
     setRates(rateList);
-    setForm((current) => ({
-      ...current,
-      room_id: current.room_id || roomList[0]?.id || 0,
-      rate_plan_id: current.rate_plan_id || rateList.find((r) => r.kind === "night")?.id || rateList[0]?.id || 0,
-    }));
+    setForm((current) => {
+      const room_id = current.room_id || roomList[0]?.id || 0;
+      const options = ratesForRoom(rateList, roomList.find((room) => room.id === room_id));
+      const keep = options.some((rate) => rate.id === current.rate_plan_id);
+      return {
+        ...current,
+        room_id,
+        rate_plan_id: keep ? current.rate_plan_id : options.find((r) => r.kind === "night")?.id || options[0]?.id || 0,
+      };
+    });
+  }
+
+  const roomRates = ratesForRoom(rates, rooms.find((room) => room.id === form.room_id));
+
+  function selectRoom(roomId: number) {
+    const options = ratesForRoom(rates, rooms.find((room) => room.id === roomId));
+    const kind = rates.find((rate) => rate.id === form.rate_plan_id)?.kind;
+    const rate = options.find((r) => r.kind === kind) ?? options[0];
+    setForm({ ...form, room_id: roomId, rate_plan_id: rate?.id ?? 0 });
   }
 
   useEffect(() => {
@@ -106,7 +125,7 @@ export function ReservationsPage({ deviceMode = "reception" }: { deviceMode?: De
       <Drawer open={reception && open} title="Nueva reserva" onClose={() => setOpen(false)}>
         <div className="space-y-4">
           <Field label="Habitación">
-            <Select value={form.room_id} onChange={(e) => setForm({ ...form, room_id: Number(e.target.value) })}>
+            <Select value={form.room_id} onChange={(e) => selectRoom(Number(e.target.value))}>
               {rooms.map((room) => (
                 <option key={room.id} value={room.id}>
                   {room.number} · {room.room_type}
@@ -116,7 +135,7 @@ export function ReservationsPage({ deviceMode = "reception" }: { deviceMode?: De
           </Field>
           <Field label="Tarifa">
             <Select value={form.rate_plan_id} onChange={(e) => setForm({ ...form, rate_plan_id: Number(e.target.value) })}>
-              {rates.map((rate) => (
+              {roomRates.map((rate) => (
                 <option key={rate.id} value={rate.id}>
                   {rate.name}
                 </option>

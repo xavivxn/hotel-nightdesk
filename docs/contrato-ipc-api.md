@@ -183,7 +183,7 @@ Campos reservados en todos: `operation_id?: string`, `expected_version?: number`
 
 **add_charge** (admin) / **add_product_charge** → `Charge`. `conflict` sobre estadía cerrada.
 
-**save_room** / **save_rate_plan** / **save_product** (admin): `id` ausente crea, presente actualiza. `Room`, `RatePlan` y `Product` exponen `version`. Si `expected_version` no coincide con `version`, `conflict`. Con sync habilitado (`sync_configure_device` hecho): write-through a Supabase vía `catalog_write` y aplicación local de la fila + `catalog_audit`; sin conexión → `storage` y SQLite intacto. Sin sync: escritura local + auditoría local (`015_catalog_audit`).
+**save_room** / **save_rate_plan** / **save_product** (admin): `id` ausente crea, presente actualiza. `Room`, `RatePlan` y `Product` exponen `version`. `RatePlan` / `save_rate_plan` llevan `room_category` (`normal` | `jacuzzi`). `Stay` expone `checked_in_by` / `checked_out_by` (usuario de la sesión que hizo check-in y checkout; lo pone el backend, no el payload). Si `expected_version` no coincide con `version`, `conflict`. Con sync habilitado (`sync_configure_device` hecho): write-through a Supabase vía `catalog_write` y aplicación local de la fila + `catalog_audit`; sin conexión → `storage` y SQLite intacto. Sin sync: escritura local + auditoría local (`015_catalog_audit`).
 
 **set_product_active** (admin):
 

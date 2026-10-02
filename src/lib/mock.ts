@@ -3,6 +3,7 @@ import { matchingRule, validateRules } from "./price-rules";
 import { mockAuth } from "./mock-auth";
 import { buildSeedProducts } from "./products";
 import { fail as throwApi } from "./errors";
+import { roomCategory } from "./format";
 import type {
   DailyReport,
   AnalyticsSummary,
@@ -157,6 +158,7 @@ function seed(): Db {
       night_cutoff_hour: 10,
       active: true,
       version: 1,
+      room_category: "normal",
     },
     {
       id: 2,
@@ -169,8 +171,10 @@ function seed(): Db {
       night_cutoff_hour: 10,
       active: true,
       version: 1,
+      room_category: "normal",
     },
   ];
+  rates.push(...jacuzziCopies(rates, 3));
   return {
     rooms,
     rates,
@@ -198,8 +202,30 @@ function seed(): Db {
       pin_hash: "",
       has_pin: false,
     },
-    ids: { room: 23, rate: 3, product: 41, guest: 0, reservation: 0, stay: 0, charge: 0, payment: 0 },
+    ids: { room: 23, rate: 4, product: 41, guest: 0, reservation: 0, stay: 0, charge: 0, payment: 0 },
   };
+}
+
+function jacuzziCopies(rates: RatePlan[], firstId: number): RatePlan[] {
+  return (["hourly", "overnight"] as const).flatMap((kind, index) => {
+    const source = rates.find((rate) => rate.kind === kind && rate.room_category === "normal");
+    return source
+      ? [{ ...source, id: firstId + index, name: `${source.name} Jacuzzi`, active: true, version: 1, room_category: "jacuzzi" as const }]
+      : [];
+  });
+}
+
+function rateFitsRoom(rate: RatePlan, room: Room) {
+  if (rate.room_category === roomCategory(room.room_type)) return;
+  const kind = rate.room_category === "jacuzzi" ? "con jacuzzi" : "sin jacuzzi";
+  fail(`La tarifa «${rate.name}» es para habitaciones ${kind}; elegí la tarifa de la habitación ${room.number}`);
+}
+
+function planForRoom(db: Db, kind: RatePlan["kind"], roomId: number) {
+  const room = db.rooms.find((r) => r.id === roomId);
+  const category = room ? roomCategory(room.room_type) : "normal";
+  const active = db.rates.filter((r) => r.kind === kind && r.active);
+  return active.find((r) => r.room_category === category) ?? active[0];
 }
 
 function normalizeRoomConfiguration(db: Db): Db {
@@ -234,7 +260,12 @@ function load(): Db {
     db.closed_bills ??= {};
     db.products ??= buildSeedProducts().map((product) => ({ ...product, version: 1 }));
     db.rooms = (db.rooms ?? []).map((room) => ({ ...room, version: room.version ?? 1 }));
-    db.rates = (db.rates ?? []).map((rate) => ({ ...rate, version: rate.version ?? 1 }));
+    db.rates = (db.rates ?? []).map((rate) => ({ ...rate, version: rate.version ?? 1, room_category: rate.room_category ?? "normal" }));
+    if (!db.rates.some((rate) => rate.room_category === "jacuzzi")) {
+      const copies = jacuzziCopies(db.rates, Math.max(db.ids?.rate ?? 0, ...db.rates.map((rate) => rate.id)) + 1);
+      db.rates.push(...copies);
+      if (db.ids) db.ids.rate = Math.max(db.ids.rate, ...db.rates.map((rate) => rate.id));
+    }
     db.products = db.products.map((product) => ({ ...product, version: product.version ?? 1 }));
     db.ids ??= { room: 23, rate: 3, product: db.products.reduce((max, item) => Math.max(max, item.id), 0), guest: 0, reservation: 0, stay: 0, charge: 0, payment: 0 };
     db.ids.product ??= db.products.reduce((max, item) => Math.max(max, item.id), 0);
@@ -282,8 +313,8 @@ function stayBill(db: Db, stay: Stay) {
   const rate = db.rates.find((r) => r.id === stay.rate_plan_id) ?? fail("Tarifa no encontrada");
   const overnight = stay.overnight_rate_plan_id
     ? db.rates.find((r) => r.id === stay.overnight_rate_plan_id)
-    : db.rates.find((r) => r.kind === "overnight" && r.active);
-  const night = db.rates.find((r) => r.kind === "night" && r.active);
+    : planForRoom(db, "overnight", stay.room_id);
+  const night = planForRoom(db, "night", stay.room_id);
   const manual = db.charges
     .filter((c) => c.stay_id === stay.id && (c.kind === "surcharge" || c.kind === "discount") && !c.deleted_at)
     .map((c) => ({ kind: c.kind, description: c.description, amount_cents: c.amount_cents }));
@@ -544,7 +575,11 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
         grace_minutes: Math.max(0, Math.trunc(Number(payload.grace_minutes))),
         night_cutoff_hour: Math.min(23, Math.max(0, Math.trunc(Number(payload.night_cutoff_hour)))),
         active: payload.active,
+        room_category: payload.room_category ?? "normal",
       };
+      if (!["normal", "jacuzzi"].includes(normalized.room_category)) {
+        fail("Elegí si la tarifa es para habitaciones normales o con jacuzzi");
+      }
       if (payload.id) {
         const rate = db.rates.find((r) => r.id === payload.id) ?? fail("Tarifa no encontrada");
         if (payload.expected_version != null && payload.expected_version !== rate.version) {
@@ -571,6 +606,7 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
         fail("conflict", `La habitación ${room.number} tiene una reserva para hoy`);
       }
       const rate = db.rates.find((r) => r.id === payload.rate_plan_id) ?? fail("not_found", "Tarifa no encontrada");
+      rateFitsRoom(rate, room);
       if ((rate.kind === "overnight" || rate.kind === "night") && !dormidaWindowOpen(new Date(), rate.night_cutoff_hour)) {
         fail(dormidaUnavailableMessage(new Date(), rate.night_cutoff_hour));
       }
@@ -616,6 +652,8 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
         converted_to_overnight: false,
         overnight_rate_plan_id: null,
         notes: null,
+        checked_in_by: "demo",
+        checked_out_by: null,
       };
       db.stays.push(stay);
       snapshotPrice(db, stay.id, rate, new Date(stay.check_in_at));
@@ -632,7 +670,7 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
     }
     case "convert_to_overnight": {
       const stay = db.stays.find((s) => s.id === args.stay_id) ?? fail("Estadía no encontrada");
-      const overnight = db.rates.find((r) => r.kind === "overnight" && r.active) ?? db.rates.find((r) => r.kind === "night" && r.active);
+      const overnight = planForRoom(db, "overnight", stay.room_id) ?? planForRoom(db, "night", stay.room_id);
       if (!overnight) fail("No hay una tarifa de dormida activa");
       if (!dormidaWindowOpen(new Date(), overnight.night_cutoff_hour)) {
         fail(dormidaUnavailableMessage(new Date(), overnight.night_cutoff_hour));
@@ -740,6 +778,7 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
       const bill = stayBill(db, stay);
       stay.status = "closed";
       stay.check_out_at = nowIso();
+      stay.checked_out_by = "demo";
       const room = db.rooms.find((r) => r.id === stay.room_id)!;
       room.status = "dirty";
       db.closed_bills[String(stay.id)] = bill;
@@ -758,6 +797,7 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
       const room = db.rooms.find((r) => r.id === payload.room_id) ?? fail("not_found", "Habitación no encontrada");
       if (!room.active) fail("La habitación ya no está habilitada");
       const rate = db.rates.find((r) => r.id === payload.rate_plan_id) ?? fail("not_found", "Tarifa no encontrada");
+      rateFitsRoom(rate, room);
       if (payload.expected_nights < 1) fail("La reserva debe tener al menos una noche");
       const open = openStay(db, room.id);
       if (open && localDay(payload.expected_arrival_at) === localDay(open.check_in_at)) {

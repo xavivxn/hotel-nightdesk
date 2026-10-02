@@ -96,7 +96,17 @@ const MIGRATIONS: &[Migration] = &[
         id: "019_price_rules",
         sql: include_str!("../migrations/019_price_rules.sql"),
     },
+    Migration {
+        id: "020_jacuzzi_rates_and_stay_users",
+        sql: include_str!("../migrations/020_jacuzzi_rates_and_stay_users.sql"),
+    },
 ];
+
+/// Fixed uids of the jacuzzi plans, shared with `020_jacuzzi_rates_and_stay_users` and Supabase.
+const JACUZZI_HOURLY_UID: &str = "7a3c0f10-2026-4930-8000-000000000001";
+const JACUZZI_DORMIDA_UID: &str = "7a3c0f10-2026-4930-8000-000000000002";
+
+const RATE_PLAN_COLUMNS: &str = "id, name, kind, base_amount_cents, extra_hour_cents, included_hours, grace_minutes, night_cutoff_hour, active, version, room_category";
 
 pub fn open(db_path: &Path) -> AppResult<Connection> {
     let mut conn = Connection::open(db_path)?;
@@ -104,8 +114,28 @@ pub fn open(db_path: &Path) -> AppResult<Connection> {
     let backup = (!is_memory_path(db_path)).then_some(db_path);
     migrate(&mut conn, backup)?;
     seed_if_empty(&conn)?;
+    seed_jacuzzi_plans_if_missing(&conn)?;
     seed_products_if_empty(&conn)?;
     Ok(conn)
+}
+
+/// Jacuzzi plans start as copies of the normal hourly / dormida plans. Idempotent by uid, so a
+/// plan already pulled from Supabase (same fixed uid) is never duplicated.
+fn seed_jacuzzi_plans_if_missing(conn: &Connection) -> AppResult<()> {
+    for (uid, kind) in [(JACUZZI_HOURLY_UID, "hourly"), (JACUZZI_DORMIDA_UID, "overnight")] {
+        conn.execute(
+            "INSERT INTO rate_plans (uid, name, kind, base_amount_cents, extra_hour_cents, included_hours,
+                                     grace_minutes, night_cutoff_hour, active, room_category, updated_at)
+             SELECT ?1, name || ' Jacuzzi', kind, base_amount_cents, extra_hour_cents, included_hours,
+                    grace_minutes, night_cutoff_hour, 1, 'jacuzzi', ?3
+             FROM rate_plans
+             WHERE kind = ?2 AND room_category = 'normal'
+               AND NOT EXISTS (SELECT 1 FROM rate_plans WHERE uid = ?1)
+             ORDER BY active DESC, id LIMIT 1",
+            params![uid, kind, now_rfc3339()],
+        )?;
+    }
+    Ok(())
 }
 
 fn is_memory_path(db_path: &Path) -> bool {
@@ -486,8 +516,7 @@ pub fn get_room(conn: &Connection, id: i64) -> AppResult<Room> {
 
 pub fn get_rate_plan(conn: &Connection, id: i64) -> AppResult<RatePlan> {
     conn.query_row(
-        "SELECT id, name, kind, base_amount_cents, extra_hour_cents, included_hours, grace_minutes, night_cutoff_hour, active, version
-         FROM rate_plans WHERE id = ?1",
+        &format!("SELECT {RATE_PLAN_COLUMNS} FROM rate_plans WHERE id = ?1"),
         [id],
         map_rate_plan,
     )
@@ -508,27 +537,28 @@ fn map_rate_plan(row: &rusqlite::Row<'_>) -> rusqlite::Result<RatePlan> {
         night_cutoff_hour: row.get(7)?,
         active: active != 0,
         version: row.get(9)?,
+        room_category: row.get(10)?,
     })
 }
 
 pub fn list_rate_plans(conn: &Connection, active_only: bool) -> AppResult<Vec<RatePlan>> {
-    let sql = if active_only {
-        "SELECT id, name, kind, base_amount_cents, extra_hour_cents, included_hours, grace_minutes, night_cutoff_hour, active, version
-         FROM rate_plans WHERE active = 1 ORDER BY kind, name"
-    } else {
-        "SELECT id, name, kind, base_amount_cents, extra_hour_cents, included_hours, grace_minutes, night_cutoff_hour, active, version
-         FROM rate_plans ORDER BY kind, name"
-    };
-    let mut stmt = conn.prepare(sql)?;
+    let filter = if active_only { "WHERE active = 1" } else { "" };
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {RATE_PLAN_COLUMNS} FROM rate_plans {filter} ORDER BY room_category DESC, kind, name"
+    ))?;
     let rows = stmt.query_map([], map_rate_plan)?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
-pub fn find_plan_by_kind(conn: &Connection, kind: RateKind) -> AppResult<Option<RatePlan>> {
+/// Active plan of `kind` for rooms of `category`. Falls back to another category so a missing
+/// jacuzzi plan never blocks a dormida.
+pub fn find_plan_by_kind(conn: &Connection, kind: RateKind, category: &str) -> AppResult<Option<RatePlan>> {
     conn.query_row(
-        "SELECT id, name, kind, base_amount_cents, extra_hour_cents, included_hours, grace_minutes, night_cutoff_hour, active, version
-         FROM rate_plans WHERE kind = ?1 AND active = 1 ORDER BY id LIMIT 1",
-        [kind.as_str()],
+        &format!(
+            "SELECT {RATE_PLAN_COLUMNS} FROM rate_plans WHERE kind = ?1 AND active = 1
+             ORDER BY room_category = ?2 DESC, id LIMIT 1"
+        ),
+        params![kind.as_str(), category],
         map_rate_plan,
     )
     .optional()
@@ -559,7 +589,7 @@ pub fn get_stay(conn: &Connection, id: i64) -> AppResult<Stay> {
         "SELECT s.id, s.room_id, r.number, s.guest_id, g.name, g.document, g.phone,
                 s.rate_plan_id, rp.name, rp.kind, s.reservation_id, s.check_in_at,
                 s.expected_checkout_at, s.check_out_at, s.status, s.converted_to_overnight,
-                s.overnight_rate_plan_id, s.notes
+                s.overnight_rate_plan_id, s.notes, s.checked_in_by, s.checked_out_by
          FROM stays s
          JOIN rooms r ON r.id = s.room_id
          JOIN guests g ON g.id = s.guest_id
@@ -593,6 +623,8 @@ fn map_stay(row: &rusqlite::Row<'_>) -> rusqlite::Result<Stay> {
         converted_to_overnight: converted != 0,
         overnight_rate_plan_id: row.get(16)?,
         notes: row.get(17)?,
+        checked_in_by: row.get(18)?,
+        checked_out_by: row.get(19)?,
     })
 }
 
@@ -601,7 +633,7 @@ pub fn open_stay_for_room(conn: &Connection, room_id: i64) -> AppResult<Option<S
         "SELECT s.id, s.room_id, r.number, s.guest_id, g.name, g.document, g.phone,
                 s.rate_plan_id, rp.name, rp.kind, s.reservation_id, s.check_in_at,
                 s.expected_checkout_at, s.check_out_at, s.status, s.converted_to_overnight,
-                s.overnight_rate_plan_id, s.notes
+                s.overnight_rate_plan_id, s.notes, s.checked_in_by, s.checked_out_by
          FROM stays s
          JOIN rooms r ON r.id = s.room_id
          JOIN guests g ON g.id = s.guest_id
@@ -803,7 +835,7 @@ pub fn payload_for_stay(conn: &Connection, id: i64) -> AppResult<serde_json::Val
         "SELECT s.id, s.uid, r.uid, g.uid, rp.uid, res.uid, s.check_in_at, s.expected_checkout_at,
                 s.check_out_at, s.status, s.converted_to_overnight, orp.uid, s.notes,
                 s.closed_applied_kind, s.closed_tax_percent, s.closed_duration_label,
-                s.closed_total_cents, s.closed_line_count
+                s.closed_total_cents, s.closed_line_count, s.checked_in_by, s.checked_out_by
          FROM stays s
          JOIN rooms r ON r.id = s.room_id
          JOIN guests g ON g.id = s.guest_id
@@ -832,6 +864,8 @@ pub fn payload_for_stay(conn: &Connection, id: i64) -> AppResult<serde_json::Val
                 "closed_duration_label": row.get::<_, Option<String>>(15)?,
                 "closed_total_cents": row.get::<_, Option<i64>>(16)?,
                 "closed_line_count": row.get::<_, Option<i64>>(17)?,
+                "checked_in_by": row.get::<_, Option<String>>(18)?,
+                "checked_out_by": row.get::<_, Option<String>>(19)?,
             }))
         },
     )

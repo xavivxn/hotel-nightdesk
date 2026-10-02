@@ -163,3 +163,13 @@ export function rateKindLabel(kind: string) {
       return "Por hora";
   }
 }
+
+/** Mirror of `models::room_category` in Rust. */
+export function roomCategory(roomType: string): "normal" | "jacuzzi" {
+  const value = roomType.trim().toLowerCase();
+  return value.includes("jacuz") || value.includes("jaccuz") ? "jacuzzi" : "normal";
+}
+
+export function roomCategoryLabel(category: string) {
+  return category === "jacuzzi" ? "Con jacuzzi" : "Normal";
+}

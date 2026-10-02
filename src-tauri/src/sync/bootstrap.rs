@@ -57,7 +57,7 @@ fn dump_rooms(conn: &Connection) -> AppResult<Vec<Value>> {
 
 fn dump_rate_plans(conn: &Connection) -> AppResult<Vec<Value>> {
     let mut stmt = conn.prepare(
-        "SELECT id, uid, name, kind, base_amount_cents, extra_hour_cents, included_hours, grace_minutes, night_cutoff_hour, active, version
+        "SELECT id, uid, name, kind, base_amount_cents, extra_hour_cents, included_hours, grace_minutes, night_cutoff_hour, active, version, room_category
          FROM rate_plans ORDER BY id",
     )?;
     let rows = stmt.query_map([], |row| {
@@ -73,6 +73,7 @@ fn dump_rate_plans(conn: &Connection) -> AppResult<Vec<Value>> {
             "night_cutoff_hour": row.get::<_, i64>(8)?,
             "active": row.get::<_, i64>(9)? != 0,
             "version": row.get::<_, i64>(10)?,
+            "room_category": row.get::<_, String>(11)?,
         }))
     })?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)

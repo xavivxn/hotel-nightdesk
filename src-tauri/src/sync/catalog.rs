@@ -12,7 +12,7 @@ pub trait RemoteClient {
 pub fn columns(entity: &str) -> AppResult<&'static [&'static str]> {
     match entity {
         "rooms" => Ok(&["number","room_type","floor","notes","active"]),
-        "rate_plans" => Ok(&["name","kind","base_amount_cents","extra_hour_cents","included_hours","grace_minutes","night_cutoff_hour","active"]),
+        "rate_plans" => Ok(&["name","kind","base_amount_cents","extra_hour_cents","included_hours","grace_minutes","night_cutoff_hour","active","room_category"]),
         "products" => Ok(&["name","category","price_cents","active","sort_order"]),
         "app_users" => Ok(&["username","password_hash","role","active"]),
         _ => Err(AppError::msg("Entidad de catálogo inválida")),
@@ -118,7 +118,13 @@ fn apply_row(conn: &Connection, entity: &str, row: &Value, force: bool) -> AppRe
     names.extend(["uid","version","updated_at"]);
     let mut vals = Vec::new();
     for name in &names {
-        vals.push(sql_value(row.get(*name).ok_or_else(|| AppError::msg(format!("Respuesta incompleta: {name}")))?)?);
+        let value = match row.get(*name) {
+            Some(value) => sql_value(value)?,
+            // Servers older than the jacuzzi migration do not send the category yet.
+            None if entity == "rate_plans" && *name == "room_category" => SqlValue::Text(crate::models::ROOM_CATEGORY_NORMAL.into()),
+            None => return Err(AppError::msg(format!("Respuesta incompleta: {name}"))),
+        };
+        vals.push(value);
     }
     if let Some((id,_)) = current {
         vals.push(SqlValue::Integer(id));

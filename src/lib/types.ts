@@ -33,7 +33,10 @@ export type RatePlan = {
   night_cutoff_hour: number;
   active: boolean;
   version: number;
+  room_category: RoomCategory;
 };
+
+export type RoomCategory = "normal" | "jacuzzi";
 
 export type Product = {
   id: number;
@@ -64,6 +67,8 @@ export type Stay = {
   converted_to_overnight: boolean;
   overnight_rate_plan_id: number | null;
   notes: string | null;
+  checked_in_by: string | null;
+  checked_out_by: string | null;
 };
 
 export type Reservation = {
@@ -176,6 +181,7 @@ export type SaveRatePlanPayload = MutationMeta & {
   grace_minutes: number;
   night_cutoff_hour: number;
   active: boolean;
+  room_category: RoomCategory;
 };
 
 export type SaveProductPayload = MutationMeta & {

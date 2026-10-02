@@ -140,6 +140,14 @@ function mapRate(row: Record<string, unknown>): RatePlan {
     night_cutoff_hour: Number(row.night_cutoff_hour ?? 10),
     active: Boolean(row.active ?? true),
     version: Number(row.version ?? 1),
+    room_category: row.room_category === "jacuzzi" ? "jacuzzi" : "normal",
+  };
+}
+
+function stayUsers(row: Record<string, unknown>): Pick<Stay, "checked_in_by" | "checked_out_by"> {
+  return {
+    checked_in_by: (row.checked_in_by as string | null) ?? null,
+    checked_out_by: (row.checked_out_by as string | null) ?? null,
   };
 }
 
@@ -647,6 +655,7 @@ export async function supabaseInvoke<T>(name: string, args: Record<string, unkno
             converted_to_overnight: Boolean(stayRow.converted_to_overnight),
             overnight_rate_plan_id: null,
             notes: (stayRow.notes as string | null) ?? null,
+            ...stayUsers(stayRow),
           };
         }
         const display_status = stay
@@ -734,6 +743,7 @@ export async function supabaseInvoke<T>(name: string, args: Record<string, unkno
           converted_to_overnight: Boolean(row.converted_to_overnight),
           overnight_rate_plan_id: null,
           notes: null,
+          ...stayUsers(row),
         };
         return { stay, total_cents: 0, payment_method: null } satisfies HistoryStay;
       }) as T;
@@ -772,6 +782,7 @@ export async function supabaseInvoke<T>(name: string, args: Record<string, unkno
         converted_to_overnight: Boolean(row.converted_to_overnight),
         overnight_rate_plan_id: null,
         notes: null,
+        ...stayUsers(row),
       };
       const { data: charges } = await sb().from("charges").select("*").eq("stay_uid", row.uid).is("deleted_at", null);
       const chargeList: Charge[] = (charges ?? []).map((c) => {

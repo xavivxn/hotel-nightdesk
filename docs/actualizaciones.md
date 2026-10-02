@@ -12,14 +12,18 @@ Esta guía es el procedimiento operativo: primer build con versionado e instalac
 - Las migraciones de SQLite corren al abrir, como en cualquier instalación.
 - Sin internet o sin credenciales de dispositivo el botón no aparece y la recepción sigue igual.
 
-| Pieza | Dónde |
-|-------|--------|
-| Consulta e instalación | `src-tauri/src/updater.rs` |
-| Comandos IPC | `app_update_check`, `app_update_install` |
-| Botón | `src/components/layout/UpdateButton.tsx` (en el encabezado de `BoardPage.tsx`) |
-| Clave pública y modo pasivo | `src-tauri/tauri.conf.json` → `plugins.updater` |
-| Subir versión al build | `scripts/bump-version.mjs` (lo llama `npm run build:installer:windows`) |
-| Bucket | Storage → `updates` (migración ya aplicada) |
+
+| Pieza                       | Dónde                                                                          |
+| --------------------------- | ------------------------------------------------------------------------------ |
+| Consulta e instalación      | `src-tauri/src/updater.rs`                                                     |
+| Comandos IPC                | `app_update_check`, `app_update_install`                                       |
+| Botón                       | `src/components/layout/UpdateButton.tsx` (en el encabezado de `BoardPage.tsx`) |
+| Clave pública y modo pasivo | `src-tauri/tauri.conf.json` → `plugins.updater`                                |
+| Subir versión al build      | `scripts/bump-version.mjs` (lo llama `npm run build:installer:windows`)        |
+| Bucket                      | Storage → `updates` (migración ya aplicada)                                    |
+
+
+
 
 ## Versionado
 
@@ -36,9 +40,9 @@ Si el build falla **después** del bump (por ejemplo faltan las variables de fir
 ## Qué ya está hecho (no lo repitas)
 
 1. **Clave de firma.** Par generado en esta Mac, fuera del repo:
-   - privada: `~/.tauri/nightdesk.key`
-   - pública: `~/.tauri/nightdesk.key.pub`
-   - contraseña: `~/.tauri/nightdesk.key.password`
+  - privada: `~/.tauri/nightdesk.key`
+  - pública: `~/.tauri/nightdesk.key.pub`
+  - contraseña: `~/.tauri/nightdesk.key.password`
 2. **Pública en el repo.** Ya está en `src-tauri/tauri.conf.json` → `plugins.updater.pubkey`. No la reemplaces ni generes otra clave: las PCs que instalen un build firmado con esta clave rechazarían updates firmados con otra.
 3. **Bucket.** `updates` ya existe en el proyecto nightdesk, privado, lectura para dispositivo y admin. No vuelvas a aplicar la migración.
 
@@ -53,6 +57,8 @@ El instalador se arma en Windows. Esa PC necesita la **misma** privada.
 3. No corras `tauri signer generate` otra vez. Eso crea un par distinto y rompe la pública del repo.
 
 ---
+
+
 
 ## Parte A — Primer build con versionado (última instalación a mano)
 
@@ -87,6 +93,8 @@ Opcional: subí el instalador a Storage → `updates` → carpeta `windows` como
 
 ---
 
+
+
 ## Parte B — Cada update siguiente (botón Actualizar)
 
 Cuando haya un cambio que valga la pena entregar por el botón (el próximo bump será **0.1.9**, o el número que muestre el script).
@@ -107,6 +115,8 @@ Dashboard → **Storage** → bucket **updates** → carpeta **windows**:
 
 1. Subí el `.exe` como `nightdesk_X.Y.Z_x64-setup.exe` (sin espacios).
 2. Dejá los `.exe` viejos: sirven para reinstalar a mano.
+
+
 
 ### B3. Armar y subir `latest.json` (después del `.exe`)
 
@@ -145,6 +155,8 @@ Si el botón tarda: caché de Storage (hasta 1 h) o el equipo no tiene credencia
 
 ---
 
+
+
 ## Reglas
 
 - No se puede bajar de versión con el botón. Para volver atrás, publicá una versión **nueva** con el código anterior.
@@ -152,11 +164,16 @@ Si el botón tarda: caché de Storage (hasta 1 h) o el equipo no tiene credencia
 - No cambies `com.nightdesk.hotel` ni el `productName`: el instalador los usa para reemplazar la instalación existente.
 - Commiteá el bump de versión que dejó el script (queda en el working tree después del build). No subas `.exe`, `.sig` ni la clave privada.
 
+
+
 ## Si algo falla
 
-| Qué ves | Qué hacer |
-|---------|-----------|
-| El build termina sin `.sig` | Faltaban `TAURI_SIGNING_PRIVATE_KEY` / `_PASSWORD`. La versión ya subió; repetí el build (siguiente número). |
-| No aparece el botón | Versión publicada no es mayor; sin internet; sin cuenta de dispositivo; o `latest.json` se subió antes que el `.exe`. |
-| “No se pudo actualizar” / firma | Pública del instalado ≠ par que firmó este `.exe`, o pegaste mal el `.sig` en `latest.json`. |
-| Generaste otra clave por error | No la uses. Seguí con `~/.tauri/nightdesk.key` (el par cuya pública está en `tauri.conf.json`). |
+
+| Qué ves                         | Qué hacer                                                                                                             |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| El build termina sin `.sig`     | Faltaban `TAURI_SIGNING_PRIVATE_KEY` / `_PASSWORD`. La versión ya subió; repetí el build (siguiente número).          |
+| No aparece el botón             | Versión publicada no es mayor; sin internet; sin cuenta de dispositivo; o `latest.json` se subió antes que el `.exe`. |
+| “No se pudo actualizar” / firma | Pública del instalado ≠ par que firmó este `.exe`, o pegaste mal el `.sig` en `latest.json`.                          |
+| Generaste otra clave por error  | No la uses. Seguí con `~/.tauri/nightdesk.key` (el par cuya pública está en `tauri.conf.json`).                       |
+
+

@@ -134,15 +134,20 @@ pub fn contract_info(conn: &Connection) -> AppResult<ContractInfo> {
     })
 }
 
+fn stay_room_category(conn: &Connection, room_id: i64) -> AppResult<&'static str> {
+    Ok(crate::models::room_category(&db::get_room(conn, room_id)?.room_type))
+}
+
 pub fn build_preview(conn: &Connection, stay: &Stay) -> AppResult<BillPreview> {
     let settings = db::load_settings(conn)?;
     let rate = db::get_rate_plan(conn, stay.rate_plan_id)?;
+    let category = stay_room_category(conn, stay.room_id)?;
     let overnight = if let Some(id) = stay.overnight_rate_plan_id {
         db::get_rate_plan(conn, id).ok()
     } else {
-        db::find_plan_by_kind(conn, RateKind::Overnight)?
+        db::find_plan_by_kind(conn, RateKind::Overnight, category)?
     };
-    let night = db::find_plan_by_kind(conn, RateKind::Night)?;
+    let night = db::find_plan_by_kind(conn, RateKind::Night, category)?;
     let check_in = db::parse_dt(&stay.check_in_at)?;
     let now = stay
         .check_out_at
@@ -270,7 +275,7 @@ pub fn close_account(
     tx.execute(
         "UPDATE stays SET status = 'closed', check_out_at = ?1,
                 closed_applied_kind = ?2, closed_tax_percent = ?3, closed_duration_label = ?4,
-                closed_total_cents = ?5, closed_line_count = ?6
+                closed_total_cents = ?5, closed_line_count = ?6, checked_out_by = ?8
          WHERE id = ?7 AND status = 'open'",
         params![
             checkout_at,
@@ -287,7 +292,8 @@ pub fn close_account(
                 [stay.id],
                 |row| row.get::<_, i64>(0),
             )?,
-            stay.id
+            stay.id,
+            stay.checked_out_by
         ],
     )?;
     if tx.changes() != 1 {
@@ -476,13 +482,17 @@ pub fn save_rate_plan(
     if payload.name.trim().is_empty() {
         return Err(AppError::msg("El nombre de la tarifa es obligatorio"));
     }
+    if ![ROOM_CATEGORY_NORMAL, ROOM_CATEGORY_JACUZZI].contains(&payload.room_category.as_str()) {
+        return Err(AppError::msg("Elegí si la tarifa es para habitaciones normales o con jacuzzi"));
+    }
     let active = if payload.active { 1 } else { 0 };
     if let Some(id) = payload.id {
         let current = db::get_rate_plan(conn, id)?;
         assert_expected_version(current.version, &payload.expected_version)?;
         conn.execute(
             "UPDATE rate_plans SET name=?1, kind=?2, base_amount_cents=?3, extra_hour_cents=?4,
-             included_hours=?5, grace_minutes=?6, night_cutoff_hour=?7, active=?8, version = version + 1, updated_at=?9 WHERE id=?10",
+             included_hours=?5, grace_minutes=?6, night_cutoff_hour=?7, active=?8, room_category=?9,
+             version = version + 1, updated_at=?10 WHERE id=?11",
             params![
                 payload.name.trim(),
                 payload.kind.as_str(),
@@ -492,6 +502,7 @@ pub fn save_rate_plan(
                 payload.grace_minutes.max(0),
                 payload.night_cutoff_hour.clamp(0, 23),
                 active,
+                payload.room_category,
                 now_rfc3339(),
                 id
             ],
@@ -499,8 +510,8 @@ pub fn save_rate_plan(
         db::get_rate_plan(conn, id)
     } else {
         conn.execute(
-            "INSERT INTO rate_plans (name, kind, base_amount_cents, extra_hour_cents, included_hours, grace_minutes, night_cutoff_hour, active)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+            "INSERT INTO rate_plans (name, kind, base_amount_cents, extra_hour_cents, included_hours, grace_minutes, night_cutoff_hour, active, room_category)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
             params![
                 payload.name.trim(),
                 payload.kind.as_str(),
@@ -509,11 +520,23 @@ pub fn save_rate_plan(
                 payload.included_hours.max(1),
                 payload.grace_minutes.max(0),
                 payload.night_cutoff_hour.clamp(0, 23),
-                active
+                active,
+                payload.room_category
             ],
         )?;
         db::get_rate_plan(conn, conn.last_insert_rowid())
     }
+}
+
+fn ensure_rate_fits_room(rate: &RatePlan, room: &Room) -> AppResult<()> {
+    if rate.room_category == crate::models::room_category(&room.room_type) {
+        return Ok(());
+    }
+    let kind = if rate.room_category == crate::models::ROOM_CATEGORY_JACUZZI { "con jacuzzi" } else { "sin jacuzzi" };
+    Err(AppError::msg(format!(
+        "La tarifa «{}» es para habitaciones {kind}; elegí la tarifa de la habitación {}",
+        rate.name, room.number
+    )))
 }
 
 fn ensure_dormida_window(cutoff_hour: i64) -> AppResult<()> {
@@ -573,6 +596,7 @@ fn check_in_in_tx(conn: &Connection, payload: CheckInPayload, operation_id: &str
     if !rate.active {
         return Err(AppError::msg("La tarifa no está activa"));
     }
+    ensure_rate_fits_room(&rate, &room)?;
     if matches!(rate.kind, RateKind::Night | RateKind::Overnight) {
         ensure_dormida_window(rate.night_cutoff_hour)?;
     }
@@ -621,15 +645,16 @@ fn check_in_in_tx(conn: &Connection, payload: CheckInPayload, operation_id: &str
     };
 
     conn.execute(
-        "INSERT INTO stays (room_id, guest_id, rate_plan_id, reservation_id, check_in_at, expected_checkout_at, status, converted_to_overnight)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'open', 0)",
+        "INSERT INTO stays (room_id, guest_id, rate_plan_id, reservation_id, check_in_at, expected_checkout_at, status, converted_to_overnight, checked_in_by)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'open', 0, ?7)",
         params![
             room.id,
             guest_id,
             rate.id,
             reservation_id,
             check_in_utc.to_rfc3339(),
-            expected
+            expected,
+            payload.username
         ],
     )
     .map_err(|error| {
@@ -667,8 +692,9 @@ pub fn convert_to_overnight(conn: &mut Connection, stay_id: i64) -> AppResult<St
     if stay.status != "open" {
         return Err(AppError::conflict("La estadía ya está cerrada"));
     }
-    let overnight = db::find_plan_by_kind(conn, RateKind::Overnight)?
-        .or(db::find_plan_by_kind(conn, RateKind::Night)?)
+    let category = stay_room_category(conn, stay.room_id)?;
+    let overnight = db::find_plan_by_kind(conn, RateKind::Overnight, category)?
+        .or(db::find_plan_by_kind(conn, RateKind::Night, category)?)
         .ok_or_else(|| AppError::msg("No hay una tarifa de dormida activa"))?;
     ensure_dormida_window(overnight.night_cutoff_hour)?;
     let expected_checkout = db::parse_dt(&stay.check_in_at).ok().map(|check_in| {
@@ -1031,14 +1057,14 @@ pub fn delete_charge(conn: &mut Connection, actor: &Actor, charge_id: i64) -> Ap
 
 pub fn check_out(conn: &mut Connection, payload: &CheckOutPayload) -> AppResult<(Stay, BillPreview)> {
     accept_reserved_fields(&payload.operation_id, &payload.expected_version)?;
-    let stay = db::get_stay(conn, payload.stay_id)?;
+    let mut stay = db::get_stay(conn, payload.stay_id)?;
     if stay.status != "open" {
         return Err(AppError::conflict("La estadía ya está cerrada"));
     }
+    stay.checked_out_by = payload.username.clone();
     let bill = build_preview(conn, &stay)?;
     let checkout_at = now_rfc3339();
     close_account(conn, &stay, &bill, &checkout_at, payload.operation_id.clone())?;
-    let mut stay = stay;
     stay.status = "closed".into();
     stay.check_out_at = Some(checkout_at);
     Ok((stay, bill))
@@ -1102,7 +1128,8 @@ fn create_reservation_in_tx(
     if !room.active {
         return Err(AppError::msg("La habitación ya no está habilitada"));
     }
-    let _rate = db::get_rate_plan(conn, payload.rate_plan_id)?;
+    let rate = db::get_rate_plan(conn, payload.rate_plan_id)?;
+    ensure_rate_fits_room(&rate, &room)?;
     let _arrival = db::parse_dt(&payload.expected_arrival_at)?;
     if payload.expected_nights < 1 {
         return Err(AppError::msg("La reserva debe tener al menos una noche"));
@@ -1202,7 +1229,7 @@ pub fn set_reservation_status(
     Ok(reservation)
 }
 
-pub fn check_in_reservation(conn: &mut Connection, reservation_id: i64) -> AppResult<Stay> {
+pub fn check_in_reservation(conn: &mut Connection, reservation_id: i64, username: Option<String>) -> AppResult<Stay> {
     let reservation = db::get_reservation(conn, reservation_id)?;
     check_in_on(
         conn,
@@ -1216,6 +1243,7 @@ pub fn check_in_reservation(conn: &mut Connection, reservation_id: i64) -> AppRe
             reservation_id: Some(reservation.id),
             operation_id: Some(outbox::resolve_operation_id(&None)),
             expected_version: None,
+            username,
         },
     )
 }
@@ -1439,6 +1467,9 @@ mod tests {
         Ok((conn, stay))
     }
 
+    /// Rooms 01–04 are jacuzzi in the seed; the normal "1 hora" plan (id 1) needs a normal room.
+    const NORMAL_ROOM: i64 = 5;
+
     fn walk_in_payload(room_id: i64) -> CheckInPayload {
         CheckInPayload {
             room_id,
@@ -1450,6 +1481,7 @@ mod tests {
             reservation_id: None,
             operation_id: None,
             expected_version: None,
+            username: None,
         }
     }
 
@@ -1522,13 +1554,13 @@ mod tests {
         let guests_before: i64 =
             conn.query_row("SELECT COUNT(*) FROM guests", [], |row| row.get(0))?;
         let stays_before: i64 = conn.query_row("SELECT COUNT(*) FROM stays", [], |row| row.get(0))?;
-        let error = check_in_on_failing(&mut conn, walk_in_payload(1)).expect_err("injected");
+        let error = check_in_on_failing(&mut conn, walk_in_payload(NORMAL_ROOM)).expect_err("injected");
         assert!(error.to_string().contains("fallo inyectado"));
         let guests_after: i64 =
             conn.query_row("SELECT COUNT(*) FROM guests", [], |row| row.get(0))?;
         let stays_after: i64 = conn.query_row("SELECT COUNT(*) FROM stays", [], |row| row.get(0))?;
         let room_status: String =
-            conn.query_row("SELECT status FROM rooms WHERE id = 1", [], |row| row.get(0))?;
+            conn.query_row("SELECT status FROM rooms WHERE id = ?1", [NORMAL_ROOM], |row| row.get(0))?;
         assert_eq!(guests_after, guests_before);
         assert_eq!(stays_after, stays_before);
         assert_eq!(room_status, "available");
@@ -1546,7 +1578,7 @@ mod tests {
             guest_name: "Reserva TX".into(),
             document: None,
             phone: None,
-            room_id: 1,
+            room_id: NORMAL_ROOM,
             rate_plan_id: 1,
             expected_arrival_at: now_rfc3339(),
             expected_nights: 1,
@@ -1568,13 +1600,13 @@ mod tests {
     #[test]
     fn check_in_rejects_second_open_stay_for_same_room() -> AppResult<()> {
         let mut conn = db::open(Path::new(":memory:"))?;
-        check_in_on(&mut conn, walk_in_payload(1))?;
-        let error = check_in_on(&mut conn, walk_in_payload(1)).expect_err("occupied");
+        check_in_on(&mut conn, walk_in_payload(NORMAL_ROOM))?;
+        let error = check_in_on(&mut conn, walk_in_payload(NORMAL_ROOM)).expect_err("occupied");
         assert!(error.to_string().contains("ocupada"));
         assert_eq!(error.code(), ErrorCode::Conflict);
         let open: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM stays WHERE room_id = 1 AND status = 'open'",
-            [],
+            "SELECT COUNT(*) FROM stays WHERE room_id = ?1 AND status = 'open'",
+            [NORMAL_ROOM],
             |row| row.get(0),
         )?;
         assert_eq!(open, 1);
@@ -1603,7 +1635,7 @@ mod tests {
     #[test]
     fn local_flow_check_in_charge_preview_checkout_history() -> AppResult<()> {
         let mut conn = db::open(Path::new(":memory:"))?;
-        let stay = check_in_on(&mut conn, walk_in_payload(1))?;
+        let stay = check_in_on(&mut conn, walk_in_payload(NORMAL_ROOM))?;
         let product = db::list_products(&conn, true)?
             .into_iter()
             .next()
@@ -1625,9 +1657,11 @@ mod tests {
                 print: false,
                 operation_id: Some("op-checkout-1".into()),
                 expected_version: None,
+                username: Some("recepcion".into()),
             },
         )?;
         assert_eq!(closed.status, "closed");
+        assert_eq!(db::get_stay(&conn, stay.id)?.checked_out_by.as_deref(), Some("recepcion"));
         assert_eq!(bill.total_cents, preview.total_cents);
         let history = list_history(&conn, None)?;
         assert_eq!(history.len(), 1);
@@ -1640,7 +1674,7 @@ mod tests {
     #[test]
     fn reception_cannot_delete_charge_admin_can() -> AppResult<()> {
         let mut conn = db::open(Path::new(":memory:"))?;
-        let stay = check_in_on(&mut conn, walk_in_payload(1))?;
+        let stay = check_in_on(&mut conn, walk_in_payload(NORMAL_ROOM))?;
         let charge = add_charge(
             &mut conn,
             &admin_actor(),
@@ -1662,7 +1696,7 @@ mod tests {
     #[test]
     fn shop_sale_counts_stock_and_admin_void_returns_it() -> AppResult<()> {
         let mut conn = db::open(Path::new(":memory:"))?;
-        let stay = check_in_on(&mut conn, walk_in_payload(1))?;
+        let stay = check_in_on(&mut conn, walk_in_payload(NORMAL_ROOM))?;
         let product = db::list_products(&conn, true)?.into_iter().next().expect("seed products");
         crate::stock::update(
             &mut conn,
@@ -1700,7 +1734,7 @@ mod tests {
                 active: true,
             }],
         )?;
-        let stay = check_in_on(&mut conn, walk_in_payload(1))?;
+        let stay = check_in_on(&mut conn, walk_in_payload(NORMAL_ROOM))?;
         crate::pricing::save(&conn, vec![])?;
         let bill = preview_bill(&conn, stay.id)?;
         assert_eq!(bill.lines[0].amount_cents, plan.base_amount_cents - 10_000);
@@ -1711,7 +1745,7 @@ mod tests {
     #[test]
     fn empty_operation_id_is_rejected() -> AppResult<()> {
         let mut conn = db::open(Path::new(":memory:"))?;
-        let mut payload = walk_in_payload(1);
+        let mut payload = walk_in_payload(NORMAL_ROOM);
         payload.operation_id = Some("   ".into());
         let error = check_in_on(&mut conn, payload).expect_err("empty op id");
         assert_eq!(error.code(), ErrorCode::Validation);
@@ -1739,7 +1773,7 @@ mod tests {
     #[test]
     fn check_in_writes_outbox_for_guest_stay_and_room() -> AppResult<()> {
         let mut conn = db::open(Path::new(":memory:"))?;
-        let mut payload = walk_in_payload(1);
+        let mut payload = walk_in_payload(NORMAL_ROOM);
         payload.operation_id = Some("op-checkin-1".into());
         check_in_on(&mut conn, payload)?;
         let entities = outbox_entities(&conn, "op-checkin-1")?;
@@ -1751,7 +1785,7 @@ mod tests {
     #[test]
     fn checkout_outbox_shares_root_and_rolls_back_with_receipt_failure() -> AppResult<()> {
         let mut conn = db::open(Path::new(":memory:"))?;
-        let stay = check_in_on(&mut conn, walk_in_payload(1))?;
+        let stay = check_in_on(&mut conn, walk_in_payload(NORMAL_ROOM))?;
         let before = pending_outbox(&conn)?;
         conn.execute_batch(
             "CREATE TRIGGER fail_receipt BEFORE INSERT ON receipt_snapshots BEGIN SELECT RAISE(ABORT, 'injected'); END;",
@@ -1797,7 +1831,7 @@ mod tests {
     #[test]
     fn injected_check_in_failure_leaves_no_outbox_row() -> AppResult<()> {
         let mut conn = db::open(Path::new(":memory:"))?;
-        let mut payload = walk_in_payload(1);
+        let mut payload = walk_in_payload(NORMAL_ROOM);
         payload.operation_id = Some("op-checkin-fail".into());
         assert!(check_in_on_failing(&mut conn, payload).is_err());
         assert_eq!(pending_outbox(&conn)?, 0);
@@ -1807,10 +1841,10 @@ mod tests {
     #[test]
     fn repeating_operation_id_is_conflict_without_second_stay() -> AppResult<()> {
         let mut conn = db::open(Path::new(":memory:"))?;
-        let mut first = walk_in_payload(1);
+        let mut first = walk_in_payload(NORMAL_ROOM);
         first.operation_id = Some("op-same".into());
         check_in_on(&mut conn, first)?;
-        let mut second = walk_in_payload(2);
+        let mut second = walk_in_payload(NORMAL_ROOM + 1);
         second.operation_id = Some("op-same".into());
         let error = check_in_on(&mut conn, second).expect_err("duplicate op");
         assert_eq!(error.code(), ErrorCode::Conflict);
@@ -1824,7 +1858,7 @@ mod tests {
     #[test]
     fn delete_charge_is_logical_and_enqueues_delete() -> AppResult<()> {
         let mut conn = db::open(Path::new(":memory:"))?;
-        let stay = check_in_on(&mut conn, walk_in_payload(1))?;
+        let stay = check_in_on(&mut conn, walk_in_payload(NORMAL_ROOM))?;
         let charge = add_charge(
             &mut conn,
             &admin_actor(),
@@ -1853,6 +1887,21 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(ops, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn check_in_requires_rate_of_the_room_category() -> AppResult<()> {
+        let mut conn = db::open(Path::new(":memory:"))?;
+        let error = check_in_on(&mut conn, walk_in_payload(1)).expect_err("jacuzzi room");
+        assert!(error.to_string().contains("sin jacuzzi"));
+        let jacuzzi = db::find_plan_by_kind(&conn, RateKind::Hourly, ROOM_CATEGORY_JACUZZI)?.expect("seeded");
+        assert_eq!(jacuzzi.room_category, ROOM_CATEGORY_JACUZZI);
+        let mut payload = walk_in_payload(1);
+        payload.rate_plan_id = jacuzzi.id;
+        payload.username = Some("recepcion".into());
+        let stay = check_in_on(&mut conn, payload)?;
+        assert_eq!(stay.checked_in_by.as_deref(), Some("recepcion"));
         Ok(())
     }
 

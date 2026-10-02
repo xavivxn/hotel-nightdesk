@@ -8,6 +8,8 @@ use rusqlite::Connection;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager, State};
 
+const CHECKOUT_RECEIPT_COPIES: u32 = 2;
+
 fn conn(state: &AppState) -> std::sync::MutexGuard<'_, Connection> {
     state.db.lock().expect("db lock")
 }
@@ -139,8 +141,9 @@ pub async fn save_rate_plan(state: State<'_, AppState>, session_token: Option<St
 }
 
 #[tauri::command]
-pub fn check_in(state: State<AppState>, session_token: Option<String>, payload: CheckInPayload) -> AppResult<Stay> {
-    crate::auth::require(&state, session_token.as_deref(), false)?;
+pub fn check_in(state: State<AppState>, session_token: Option<String>, mut payload: CheckInPayload) -> AppResult<Stay> {
+    let user = crate::auth::require(&state, session_token.as_deref(), false)?;
+    payload.username = Some(user.username);
     let stay = {
         let mut conn = conn(&state);
         service::check_in_on(&mut conn, payload)?
@@ -336,9 +339,10 @@ pub fn check_out(
     state: State<AppState>,
     session_token: Option<String>,
     app: AppHandle,
-    payload: CheckOutPayload,
+    mut payload: CheckOutPayload,
 ) -> AppResult<CheckOutResult> {
-    crate::auth::require(&state, session_token.as_deref(), false)?;
+    let user = crate::auth::require(&state, session_token.as_deref(), false)?;
+    payload.username = Some(user.username);
     let (stay, bill) = {
         let mut conn = conn(&state);
         service::check_out(&mut conn, &payload)?
@@ -351,7 +355,7 @@ pub fn check_out(
             let settings = db::load_settings(&conn)?;
             let bytes = service::receipt_bytes(&conn, stay.id)?;
             let data_dir = app_data_dir(&app)?;
-            printer::print_bytes(&bytes, &settings, &data_dir, &format!("stay-{}", stay.id))
+            printer::print_copies(&bytes, &settings, &data_dir, &format!("stay-{}", stay.id), CHECKOUT_RECEIPT_COPIES)
         })();
         print_error = attempt.unwrap_or_else(|e| Some(e.to_string()));
     }
@@ -393,10 +397,10 @@ pub fn set_reservation_status(state: State<AppState>, session_token: Option<Stri
 
 #[tauri::command]
 pub fn check_in_reservation(state: State<AppState>, session_token: Option<String>, reservation_id: i64) -> AppResult<Stay> {
-    crate::auth::require(&state, session_token.as_deref(), false)?;
+    let user = crate::auth::require(&state, session_token.as_deref(), false)?;
     let stay = {
         let mut conn = conn(&state);
-        service::check_in_reservation(&mut conn, reservation_id)?
+        service::check_in_reservation(&mut conn, reservation_id, Some(user.username))?
     };
     wake_push(&state);
     Ok(stay)

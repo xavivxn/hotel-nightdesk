@@ -99,6 +99,23 @@ fn version_one() -> i64 {
     1
 }
 
+fn normal_category() -> String {
+    ROOM_CATEGORY_NORMAL.into()
+}
+
+pub const ROOM_CATEGORY_NORMAL: &str = "normal";
+pub const ROOM_CATEGORY_JACUZZI: &str = "jacuzzi";
+
+/// Rate category of a room: `jacuzzi` when its type names a jacuzzi, `normal` otherwise.
+pub fn room_category(room_type: &str) -> &'static str {
+    let value = room_type.to_lowercase();
+    if value.contains("jacuz") || value.contains("jaccuz") {
+        ROOM_CATEGORY_JACUZZI
+    } else {
+        ROOM_CATEGORY_NORMAL
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Room {
     pub id: i64,
@@ -125,6 +142,9 @@ pub struct RatePlan {
     pub active: bool,
     #[serde(default = "version_one")]
     pub version: i64,
+    /// `normal` or `jacuzzi`: rooms of that category use this plan.
+    #[serde(default = "normal_category")]
+    pub room_category: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -203,6 +223,11 @@ pub struct Stay {
     pub converted_to_overnight: bool,
     pub overnight_rate_plan_id: Option<i64>,
     pub notes: Option<String>,
+    /// Username that opened the stay (check-in) and the one that charged it (checkout).
+    #[serde(default)]
+    pub checked_in_by: Option<String>,
+    #[serde(default)]
+    pub checked_out_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -292,6 +317,9 @@ pub struct CheckInPayload {
     pub operation_id: Option<String>,
     #[serde(default)]
     pub expected_version: Option<i64>,
+    /// Set by the command from the session, never read from the UI.
+    #[serde(skip_deserializing, default)]
+    pub username: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -302,6 +330,9 @@ pub struct CheckOutPayload {
     pub operation_id: Option<String>,
     #[serde(default)]
     pub expected_version: Option<i64>,
+    /// Set by the command from the session, never read from the UI.
+    #[serde(skip_deserializing, default)]
+    pub username: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -328,6 +359,8 @@ pub struct SaveRatePlanPayload {
     pub grace_minutes: i64,
     pub night_cutoff_hour: i64,
     pub active: bool,
+    #[serde(default = "normal_category")]
+    pub room_category: String,
     #[serde(default)]
     pub operation_id: Option<String>,
     #[serde(default)]

@@ -285,7 +285,7 @@ mod tests {
             role: Role::Admin,
         };
         let mut closed_ids = Vec::new();
-        for room_id in 1..=10 {
+        for room_id in 5..=14 {
             let stay = service::check_in_on(
                 &mut conn,
                 CheckInPayload {
@@ -298,6 +298,7 @@ mod tests {
                     reservation_id: None,
                     operation_id: None,
                     expected_version: None,
+                    username: None,
                 },
             )
             .unwrap();
@@ -321,6 +322,7 @@ mod tests {
                     print: false,
                     operation_id: None,
                     expected_version: None,
+                    username: None,
                 },
             )
             .unwrap();
