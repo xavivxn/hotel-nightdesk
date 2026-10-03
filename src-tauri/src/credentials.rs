@@ -7,6 +7,16 @@ use crate::error::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+/// Distinct vault namespaces for the LAN identity and paired-station secret.
+pub(crate) fn read_lan_secret(dir: &Path, name: &str) -> AppResult<Option<Vec<u8>>> {
+    if !matches!(name, "lan-identity" | "lan-client") { return Err(AppError::msg("Credencial inválida")); }
+    read_device_secret(&dir.join(name))
+}
+pub(crate) fn write_lan_secret(dir: &Path, name: &str, bytes: &[u8]) -> AppResult<()> {
+    if !matches!(name, "lan-identity" | "lan-client") { return Err(AppError::msg("Credencial inválida")); }
+    write_device_secret(&dir.join(name), bytes)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct RemoteCreds {
     project_url: String,

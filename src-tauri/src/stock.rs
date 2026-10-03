@@ -134,7 +134,7 @@ pub fn update(conn: &mut Connection, username: &str, payload: UpdateStockPayload
     if note.is_some_and(|note| note.chars().count() > 200) {
         return Err(AppError::msg("La nota puede tener hasta 200 caracteres"));
     }
-    let tx = conn.transaction()?;
+    let tx = conn.savepoint()?;
     let current = get(&tx, payload.product_id)?;
     let before = current.as_ref().map_or(0, |stock| stock.quantity);
     let min_quantity = payload

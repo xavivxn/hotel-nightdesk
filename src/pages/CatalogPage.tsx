@@ -1,3 +1,4 @@
+import { useOperationalRefresh } from "@/lib/useOperationalRefresh";
 import { StockBadge, StockDialog, stockLevel } from "@/components/catalog/StockDialog";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
@@ -46,7 +47,7 @@ function inputPrice(value: number) {
 }
 
 export function CatalogPage({ settings, deviceMode = "reception" }: { settings: AppSettings; deviceMode?: DeviceMode }) {
-  const reception = deviceMode === "reception";
+  const reception = deviceMode !== "remote";
   const [products, setProducts] = useState<Product[]>([]);
   const [category, setCategory] = useState<"all" | ProductCategory>("all");
   const [status, setStatus] = useState<"all" | "active" | "inactive" | "low">("active");
@@ -58,6 +59,7 @@ export function CatalogPage({ settings, deviceMode = "reception" }: { settings: 
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  useOperationalRefresh(load);
   async function load() {
     const list = await api.listProducts(false);
     setProducts(list);

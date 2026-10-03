@@ -1,3 +1,5 @@
+import { useOperationalRefresh } from "@/lib/useOperationalRefresh";
+import type { AccountQuote } from "@/lib/types";
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Ban, Bath, Clock3, LogIn } from "lucide-react";
 import { RoleContext } from "@/lib/permissions";
@@ -7,7 +9,7 @@ import { dormidaEnd, dormidaStartsAtMidnight, dormidaUnavailableMessage, dormida
 import type { AppSettings, BoardRoom, Charge, EffectivePrice, RatePlan } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { Input, reportInputIssue } from "@/components/ui/Field";
+import { Input, Select, reportInputIssue } from "@/components/ui/Field";
 import { RoomShop } from "@/components/board/RoomShop";
 import { StayCart } from "@/components/board/StayCart";
 import { cn } from "@/lib/utils";
@@ -128,6 +130,7 @@ function CheckInDrawer({
     try {
       await api.checkIn({
         room_id: item.room.id,
+        expected_version: item.room.operational_version,
         guest_name: "",
         document: null,
         phone: null,
@@ -175,7 +178,7 @@ function CheckInDrawer({
                 className="mt-3 w-full"
                 variant="secondary"
                 onClick={async () => {
-                  await api.setRoomStatus(item.room.id, "available");
+                  await api.setRoomStatus(item.room.id, "available", item.room.operational_version);
                   onChanged();
                 }}
               >
@@ -278,7 +281,7 @@ function CheckInDrawer({
             type="button"
             className="flex min-h-11 w-full items-center justify-center gap-2 text-sm text-[var(--muted)] hover:text-[var(--danger)]"
             onClick={async () => {
-              await api.setRoomStatus(item.room.id, "blocked");
+              await api.setRoomStatus(item.room.id, "blocked", item.room.operational_version);
               onChanged();
               onClose();
             }}
@@ -320,7 +323,7 @@ function ReservedDrawer({
             className="w-full"
             onClick={async () => {
               try {
-                await api.checkInReservation(res.id);
+                await api.checkInReservation(res.id, res.operational_version);
                 onChanged();
                 onClose();
               } catch (e) {
@@ -352,6 +355,7 @@ function StayDrawer({
 }) {
   const stay = item.stay!;
   const now = useNow();
+  const [quote, setQuote] = useState<AccountQuote | null>(null);
   const [bill, setBill] = useState(item.estimated_total_cents);
   const [lines, setLines] = useState<{ kind: string; description: string; amount_cents: number }[]>([]);
   const [charges, setCharges] = useState<Charge[]>([]);
@@ -366,10 +370,14 @@ function StayDrawer({
   const [printError, setPrintError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [mutationBusy, setMutationBusy] = useState(false);
+  const [reprintTarget, setReprintTarget] = useState<"local" | "principal" | undefined>();
   const [closedStayId, setClosedStayId] = useState<number | null>(null);
 
   async function refresh() {
-    const [, preview, currentCharges] = await api.getStayDetail(stay.id);
+    const [[currentStay, detail, currentCharges], currentQuote] = await Promise.all([api.getStayDetail(stay.id), readOnly ? Promise.resolve(null) : api.accountQuote(stay.id)]);
+    const preview = currentQuote?.bill ?? detail;
+    setQuote(currentQuote);
+    if (currentStay.status === "closed") setClosedStayId(currentStay.id);
     setBill(preview.total_cents);
     setLines(preview.lines);
     setCharges(currentCharges.filter((c) => c.kind === "surcharge" || c.kind === "discount"));
@@ -384,6 +392,7 @@ function StayDrawer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stay.id, closedStayId]);
 
+  useOperationalRefresh(async () => { if (!closedStayId && !busy) await refresh(); });
   const total = bill ?? 0;
   const subtitle = useMemo(() => `desde ${formatDateTime(stay.check_in_at)}`, [stay]);
 
@@ -398,12 +407,13 @@ function StayDrawer({
           <p className="font-mono text-3xl font-semibold tabular-nums">{formatMoney(total, settings.currency_symbol)}</p>
           <p className="text-sm text-[var(--muted)]">La cuenta quedó cerrada y la habitación pasa a sucia. No se registra ningún pago.</p>
           {printError ? <p className="text-sm text-[var(--warn)]">Impresora: {printError}. Podés reintentar.</p> : null}
+          <Select aria-label="Destino de reimpresión" value={reprintTarget ?? ""} onChange={e => setReprintTarget(e.target.value as "local" | "principal" || undefined)}><option value="">Destino guardado de este puesto</option><option value="local">Impresora local</option><option value="principal">Impresora de la principal</option></Select>
           <Button
             className="w-full"
             variant="secondary"
             onClick={async () => {
               setBusy(true);
-              try { setPrintError(await api.reprintReceipt(closedStayId)); }
+              try { setPrintError(await api.reprintReceipt(closedStayId, reprintTarget)); }
               catch (e) { setPrintError(String(e)); }
               finally { setBusy(false); }
             }}
@@ -447,7 +457,7 @@ function StayDrawer({
                       setMutationBusy(true);
                       setError(null);
                       try {
-                        await api.convertToOvernight(stay.id);
+                        await api.convertToOvernight(stay.id, quote?.version);
                         await refresh();
                         onChanged();
                       } catch (e) {
@@ -579,7 +589,7 @@ function StayDrawer({
                   className="w-full"
                   variant="ok"
                   size="lg"
-                  disabled={busy || mutationBusy}
+                  disabled={busy || mutationBusy || !quote}
                   onClick={async () => {
                     setBusy(true);
                     setError(null);
@@ -587,12 +597,15 @@ function StayDrawer({
                       const result = await api.checkOut({
                         stay_id: stay.id,
                         print,
+                        quote_token: quote?.token,
+                        expected_version: quote?.version,
                       });
                       setClosedStayId(result.stay.id);
                       setBill(result.bill.total_cents);
                       if (result.print_error) setPrintError(result.print_error);
                     } catch (e) {
                       setError(String(e));
+                      await refresh().catch(() => undefined);
                     } finally {
                       setBusy(false);
                     }

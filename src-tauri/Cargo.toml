@@ -14,7 +14,7 @@ tauri-build = { version = "2", features = [] }
 serde_json = "1"
 
 [dependencies]
-tauri = { version = "2", features = ["image-png"] }
+tauri = { version = "2", features = ["image-png", "tray-icon"] }
 tauri-plugin-updater = "2"
 tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
@@ -28,13 +28,21 @@ argon2 = "0.5"
 rand_core = { version = "0.6", features = ["getrandom"] }
 uuid = { version = "1", features = ["v4", "v5"] }
 reqwest = { version = "0.13", features = ["blocking", "json"] }
-tokio = { version = "1", features = ["sync", "time", "macros"] }
+tokio = { version = "1", features = ["sync", "time", "macros", "net", "rt-multi-thread"] }
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
 base64 = "0.22"
 aes-gcm = "0.10"
 flate2 = "1"
 rand = "0.8"
+axum = { version = "0.8", features = ["ws"] }
+axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pemfile = "2"
+rcgen = "0.14"
+mdns-sd = "0.21"
+if-addrs = "0.15"
+chrono-tz = "0.10"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security_Credentials"] }

@@ -8,7 +8,6 @@ use rusqlite::Connection;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager, State};
 
-const CHECKOUT_RECEIPT_COPIES: u32 = 2;
 
 fn conn(state: &AppState) -> std::sync::MutexGuard<'_, Connection> {
     state.db.lock().expect("db lock")
@@ -115,17 +114,6 @@ pub async fn save_room(state: State<'_, AppState>, session_token: Option<String>
 }
 
 #[tauri::command]
-pub fn set_room_status(state: State<AppState>, session_token: Option<String>, room_id: i64, status: String) -> AppResult<Room> {
-    crate::auth::require(&state, session_token.as_deref(), false)?;
-    let room = {
-        let mut conn = conn(&state);
-        service::set_room_status(&mut conn, room_id, status)?
-    };
-    wake_push(&state);
-    Ok(room)
-}
-
-#[tauri::command]
 pub fn list_rate_plans(state: State<AppState>, session_token: Option<String>, active_only: Option<bool>) -> AppResult<Vec<RatePlan>> {
     crate::auth::require(&state, session_token.as_deref(), false)?;
     let conn = conn(&state);
@@ -138,18 +126,6 @@ pub async fn save_rate_plan(state: State<'_, AppState>, session_token: Option<St
     if let Some(id) = try_catalog(&state, &app, &actor_from(&user), "rate_plans", serde_json::to_value(&payload).unwrap(), None).await? { return db::get_rate_plan(&conn(&state), id); }
     let conn = conn(&state);
     crate::sync::catalog::local(&conn, &actor_from(&user), "rate_plans", |tx| service::save_rate_plan(tx, &actor_from(&user), payload))
-}
-
-#[tauri::command]
-pub fn check_in(state: State<AppState>, session_token: Option<String>, mut payload: CheckInPayload) -> AppResult<Stay> {
-    let user = crate::auth::require(&state, session_token.as_deref(), false)?;
-    payload.username = Some(user.username);
-    let stay = {
-        let mut conn = conn(&state);
-        service::check_in_on(&mut conn, payload)?
-    };
-    wake_push(&state);
-    Ok(stay)
 }
 
 #[tauri::command]
@@ -168,17 +144,6 @@ pub fn get_stay_detail(
     crate::auth::require(&state, session_token.as_deref(), false)?;
     let conn = conn(&state);
     service::get_stay_detail(&conn, stay_id)
-}
-
-#[tauri::command]
-pub fn convert_to_overnight(state: State<AppState>, session_token: Option<String>, stay_id: i64) -> AppResult<Stay> {
-    crate::auth::require(&state, session_token.as_deref(), false)?;
-    let stay = {
-        let mut conn = conn(&state);
-        service::convert_to_overnight(&mut conn, stay_id)?
-    };
-    wake_push(&state);
-    Ok(stay)
 }
 
 #[tauri::command]
@@ -302,108 +267,10 @@ pub async fn delete_user(
 }
 
 #[tauri::command]
-pub fn add_charge(state: State<AppState>, session_token: Option<String>, payload: AddChargePayload) -> AppResult<Charge> {
-    let user = crate::auth::require(&state, session_token.as_deref(), true)?;
-    let charge = {
-        let mut conn = conn(&state);
-        service::add_charge(&mut conn, &actor_from(&user), payload)?
-    };
-    wake_push(&state);
-    Ok(charge)
-}
-
-#[tauri::command]
-pub fn add_product_charge(state: State<AppState>, session_token: Option<String>, payload: AddProductChargePayload) -> AppResult<Charge> {
-    let user = crate::auth::require(&state, session_token.as_deref(), false)?;
-    let charge = {
-        let mut conn = conn(&state);
-        service::add_product_charge_by(&mut conn, payload, &user.username)?
-    };
-    wake_push(&state);
-    Ok(charge)
-}
-
-#[tauri::command]
-pub fn delete_charge(state: State<AppState>, session_token: Option<String>, charge_id: i64) -> AppResult<()> {
-    let user = crate::auth::require(&state, session_token.as_deref(), true)?;
-    {
-        let mut conn = conn(&state);
-        service::delete_charge(&mut conn, &actor_from(&user), charge_id)?;
-    }
-    wake_push(&state);
-    Ok(())
-}
-
-#[tauri::command]
-pub fn check_out(
-    state: State<AppState>,
-    session_token: Option<String>,
-    app: AppHandle,
-    mut payload: CheckOutPayload,
-) -> AppResult<CheckOutResult> {
-    let user = crate::auth::require(&state, session_token.as_deref(), false)?;
-    payload.username = Some(user.username);
-    let (stay, bill) = {
-        let mut conn = conn(&state);
-        service::check_out(&mut conn, &payload)?
-    };
-    wake_push(&state);
-    let mut print_error = None;
-    let conn = conn(&state);
-    if payload.print {
-        let attempt = (|| -> AppResult<Option<String>> {
-            let settings = db::load_settings(&conn)?;
-            let bytes = service::receipt_bytes(&conn, stay.id)?;
-            let data_dir = app_data_dir(&app)?;
-            printer::print_copies(&bytes, &settings, &data_dir, &format!("stay-{}", stay.id), CHECKOUT_RECEIPT_COPIES)
-        })();
-        print_error = attempt.unwrap_or_else(|e| Some(e.to_string()));
-    }
-    Ok(CheckOutResult {
-        stay,
-        bill,
-        print_error,
-    })
-}
-
-#[tauri::command]
 pub fn list_reservations(state: State<AppState>, session_token: Option<String>) -> AppResult<Vec<Reservation>> {
     crate::auth::require(&state, session_token.as_deref(), false)?;
     let conn = conn(&state);
     service::list_reservations(&conn)
-}
-
-#[tauri::command]
-pub fn create_reservation(state: State<AppState>, session_token: Option<String>, payload: CreateReservationPayload) -> AppResult<Reservation> {
-    crate::auth::require(&state, session_token.as_deref(), false)?;
-    let reservation = {
-        let mut conn = conn(&state);
-        service::create_reservation_on(&mut conn, payload)?
-    };
-    wake_push(&state);
-    Ok(reservation)
-}
-
-#[tauri::command]
-pub fn set_reservation_status(state: State<AppState>, session_token: Option<String>, reservation_id: i64, status: String) -> AppResult<Reservation> {
-    crate::auth::require(&state, session_token.as_deref(), false)?;
-    let reservation = {
-        let mut conn = conn(&state);
-        service::set_reservation_status(&mut conn, reservation_id, status)?
-    };
-    wake_push(&state);
-    Ok(reservation)
-}
-
-#[tauri::command]
-pub fn check_in_reservation(state: State<AppState>, session_token: Option<String>, reservation_id: i64) -> AppResult<Stay> {
-    let user = crate::auth::require(&state, session_token.as_deref(), false)?;
-    let stay = {
-        let mut conn = conn(&state);
-        service::check_in_reservation(&mut conn, reservation_id, Some(user.username))?
-    };
-    wake_push(&state);
-    Ok(stay)
 }
 
 #[tauri::command]
@@ -542,17 +409,29 @@ pub fn reprint_receipt(state: State<AppState>, session_token: Option<String>, ap
 
 #[tauri::command]
 pub fn device_mode_get(state: State<AppState>) -> AppResult<Option<String>> {
-    let conn = conn(&state);
-    service::device_mode_get(&conn)
+    Ok(state.device.lock().unwrap().mode.clone())
 }
 
 #[tauri::command]
 pub fn device_mode_set(state: State<AppState>, app: AppHandle, payload: DeviceModeSetPayload) -> AppResult<()> {
-    service::device_mode_set(&conn(&state), &payload.mode)?;
-    let data_dir = app_data_dir(&app)?;
-    let _ = crate::credentials::apply_embedded_defaults(&data_dir);
-    if crate::credentials::device_configured(&data_dir).unwrap_or(false) {
-        maybe_start_worker(&state, &app, &data_dir)?;
+    if !matches!(payload.mode.as_str(), "reception" | "reception_client" | "remote") { return Err(AppError::msg("Modo de equipo inválido")); }
+    let mut config=state.device.lock().unwrap();
+    if let Some(current)=&config.mode {
+        if current==&payload.mode { return Ok(()); }
+        return Err(AppError::forbidden("El equipo ya está configurado. No se puede reemplazar su base cambiando de modo"));
+    }
+    let mut next=config.clone(); next.mode=Some(payload.mode.clone());
+    let connection=crate::device::operational_connection(&state.data_dir,Some(&payload.mode))?;
+    if payload.mode!="reception_client" {
+        service::device_mode_set(&connection,&payload.mode)?;
+        next.printer=Some(db::load_settings(&connection)?);
+    }
+    crate::device::save(&state.data_dir,&next)?;
+    *conn(&state)=connection; *config=next; drop(config);
+    if payload.mode!="reception_client" {
+        let _=crate::credentials::apply_embedded_defaults(&state.data_dir);
+        if crate::credentials::device_configured(&state.data_dir).unwrap_or(false) { maybe_start_worker(&state,&app,&state.data_dir)?; }
+        maybe_start_backup(&state,&app)?;
     }
     Ok(())
 }
@@ -627,6 +506,7 @@ pub fn sync_pull_now(state: State<AppState>) -> AppResult<()> {
 
 #[tauri::command]
 pub fn sync_configure_device(state: State<AppState>, app: AppHandle, payload: SyncConfigureDevicePayload) -> AppResult<()> {
+    if state.device.lock().unwrap().mode.as_deref()!=Some("reception"){return Err(AppError::forbidden("La sincronización se configura en recepción principal"));}
     let data_dir = app_data_dir(&app)?;
     crate::credentials::save_device(
         &data_dir,
@@ -689,15 +569,25 @@ pub fn backup_restore(state: State<AppState>, session_token: Option<String>, app
     let data_dir = app_data_dir(&app)?;
     let db_path = data_dir.join("nightdesk.db");
     let source = payload.source.as_deref().unwrap_or("local");
-    // Release DB lock before restore swaps the file.
-    drop(conn(&state));
-    let mut auth = state.auth.lock().expect("auth lock");
+    if state.device.lock().unwrap().lan_enabled {
+        return Err(AppError::conflict("Pausá ambos puestos y detené la conexión en Puestos antes de restaurar"));
+    }
+    let _maintenance=crate::MAINTENANCE.blocking_write();
+    // All business requests and background DB cycles are quiescent. Preserve lock order DB → auth.
+    let mut slot=state.db.lock().expect("db lock");
+    let mut auth=state.auth.lock().expect("auth lock");
+    // Persist the generation BEFORE the restore, even if it later fails. An uncertain old
+    // request must never be replayed against a snapshot that might omit its original result.
+    {
+        let mut config=state.device.lock().unwrap();
+        let mut next=config.clone(); next.database_generation=uuid::Uuid::new_v4().to_string();
+        crate::device::save(&data_dir,&next)?; *config=next;
+    }
     crate::backup::restore_backup(&db_path, &data_dir, &payload.backup_id, source, &mut auth)?;
-    drop(auth);
-    // Re-open connection after restore.
-    let mut slot = state.db.lock().expect("db lock");
-    *slot = crate::db::open(&db_path)?;
-    drop(slot);
+    *slot=crate::db::open(&db_path)?;
+    state.lan.session_stations.lock().unwrap().clear();
+    *state.lan.epoch.lock().unwrap()=uuid::Uuid::new_v4().to_string();
+    drop(auth); drop(slot);
     wake_push(&state);
     Ok(())
 }
@@ -729,6 +619,9 @@ pub async fn app_update_install(
     app: AppHandle,
     on_progress: tauri::ipc::Channel<AppUpdateProgress>,
 ) -> AppResult<()> {
+    if app.state::<AppState>().device.lock().unwrap().lan_enabled {
+        return Err(AppError::conflict("Pausá ambos puestos y detené la conexión en Puestos antes de actualizar"));
+    }
     crate::updater::install(&app, on_progress).await
 }
 
@@ -737,13 +630,6 @@ pub fn list_product_stock(state: State<AppState>, session_token: Option<String>)
     crate::auth::require(&state, session_token.as_deref(), false)?;
     let conn = conn(&state);
     crate::stock::list(&conn)
-}
-
-#[tauri::command]
-pub fn update_product_stock(state: State<AppState>, session_token: Option<String>, payload: UpdateStockPayload) -> AppResult<Option<ProductStock>> {
-    let user = crate::auth::require(&state, session_token.as_deref(), true)?;
-    let mut conn = conn(&state);
-    crate::stock::update(&mut conn, &user.username, payload)
 }
 
 #[tauri::command]
@@ -758,13 +644,6 @@ pub fn list_price_rules(state: State<AppState>, session_token: Option<String>) -
     crate::auth::require(&state, session_token.as_deref(), false)?;
     let conn = conn(&state);
     crate::pricing::load(&conn)
-}
-
-#[tauri::command]
-pub fn save_price_rules(state: State<AppState>, session_token: Option<String>, rules: Vec<PriceRule>) -> AppResult<Vec<PriceRule>> {
-    crate::auth::require(&state, session_token.as_deref(), true)?;
-    let conn = conn(&state);
-    crate::pricing::save(&conn, rules)
 }
 
 #[tauri::command]

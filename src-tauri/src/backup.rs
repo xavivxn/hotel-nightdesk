@@ -269,6 +269,7 @@ pub fn list_backups(conn: &Connection, data_dir: &Path) -> AppResult<Vec<BackupL
 }
 
 pub fn run_backup_now(db_path: &Path, data_dir: &Path) -> AppResult<BackupRunResult> {
+    let _maintenance=crate::MAINTENANCE.blocking_read();
     let key = credentials::ensure_backup_key(data_dir)?;
     let dir = backups_dir(data_dir);
     fs::create_dir_all(&dir)?;
@@ -403,6 +404,7 @@ fn decrypt_file(src: &Path, dest: &Path, key: &[u8; 32], nonce_hex: &str) -> App
 }
 
 fn drain_once(db_path: &Path, data_dir: &Path) -> AppResult<()> {
+    let _maintenance=crate::MAINTENANCE.blocking_read();
     if !credentials::device_configured(data_dir)? {
         return Ok(());
     }

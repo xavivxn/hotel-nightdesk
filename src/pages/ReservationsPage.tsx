@@ -1,3 +1,4 @@
+import { useOperationalRefresh } from "@/lib/useOperationalRefresh";
 import { Button } from "@/components/ui/Button";
 import { Drawer } from "@/components/ui/Drawer";
 import { Field, Input, Select, reportInputIssue } from "@/components/ui/Field";
@@ -12,7 +13,7 @@ function ratesForRoom(rates: RatePlan[], room: Room | undefined) {
 }
 
 export function ReservationsPage({ deviceMode = "reception" }: { deviceMode?: DeviceMode }) {
-  const reception = deviceMode === "reception";
+  const reception = deviceMode !== "remote";
   const [items, setItems] = useState<Reservation[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [rates, setRates] = useState<RatePlan[]>([]);
@@ -29,6 +30,7 @@ export function ReservationsPage({ deviceMode = "reception" }: { deviceMode?: De
   });
   const nightsRef = useRef<HTMLInputElement>(null);
 
+  useOperationalRefresh(load);
   async function load() {
     const [reservations, roomList, rateList] = await Promise.all([
       api.listReservations(),
@@ -95,13 +97,13 @@ export function ReservationsPage({ deviceMode = "reception" }: { deviceMode?: De
                   <td className="px-4 py-3 text-right">
                     {item.status === "hold" ? (
                       <div className="flex justify-end gap-2">
-                        <Button size="sm" onClick={async () => { await api.checkInReservation(item.id); await load(); }}>
+                        <Button size="sm" onClick={async () => { await api.checkInReservation(item.id, item.operational_version); await load(); }}>
                           Check-in
                         </Button>
-                        <Button size="sm" variant="secondary" onClick={async () => { await api.setReservationStatus(item.id, "cancelled"); await load(); }}>
+                        <Button size="sm" variant="secondary" onClick={async () => { await api.setReservationStatus(item.id, "cancelled", item.operational_version); await load(); }}>
                           Cancelar
                         </Button>
-                        <Button size="sm" variant="ghost" onClick={async () => { await api.setReservationStatus(item.id, "no_show"); await load(); }}>
+                        <Button size="sm" variant="ghost" onClick={async () => { await api.setReservationStatus(item.id, "no_show", item.operational_version); await load(); }}>
                           No show
                         </Button>
                       </div>

@@ -43,9 +43,9 @@ pub fn list() -> Result<Vec<String>, String> {
         names.sort(); names.dedup(); Ok(names)
     }
 }
-pub fn send(bytes: &[u8], name: &str) -> Result<(), String> {
+pub fn send(bytes: &[u8], name: &str, paper_width: i64) -> Result<(), String> {
     if name.contains('\0') { return Err("Nombre de impresora inválido".into()); }
-    let bytes = rasterize(bytes).unwrap_or_else(|| bytes.to_vec());
+    let bytes = rasterize(bytes, paper_width).unwrap_or_else(|| bytes.to_vec());
     let name = wide(name);
     let title = wide("Ticket interno");
     let raw = wide("RAW");
@@ -75,10 +75,10 @@ const PAPER_80: i32 = 576;
 
 struct Line { text: Vec<u8>, align: u8, mag_w: u8, mag_h: u8 }
 
-fn rasterize(bytes: &[u8]) -> Option<Vec<u8>> {
+fn rasterize(bytes: &[u8], paper_width: i64) -> Option<Vec<u8>> {
     let lines = text_lines(bytes);
     if lines.iter().all(|line| line.text.is_empty()) { return None; }
-    let width = PAPER_80;
+    let width = if paper_width <= 58 { 384 } else { PAPER_80 };
     let mut height = 8i32;
     for line in &lines {
         height += line_height(line);

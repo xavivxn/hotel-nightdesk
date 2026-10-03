@@ -1,9 +1,39 @@
-# Contrato IPC / API (versión 2)
+# Contrato IPC / API (versión 3)
 
 Fecha: 20 de septiembre de 2026 (v2 / I11). Origen: 17/09/2026.
-Estado: contrato v2 vigente en IPC Tauri + `supabaseInvoke`. El transporte remoto es Supabase (N12/N07/I11), no HTTP `/api/v1` ni VPN. Semántica de `operation_id` / `expected_version` cerrada en I06 (outbox) e I11 (catálogo write-through).
+Estado: contrato v3 vigente en IPC Tauri + `supabaseInvoke`. El transporte remoto es Supabase (N12/N07/I11), no HTTP `/api/v1` ni VPN. Semántica de `operation_id` / `expected_version` cerrada en I06 (outbox) e I11 (catálogo write-through).
 
 Este documento es la fuente de verdad de payloads, errores y semántica. El transporte cambia; las reglas de negocio no. Arquitectura: [arquitectura-offline-supabase.md](arquitectura-offline-supabase.md).
+
+## Ampliación v3 / LAN v1 (03/10/2026)
+
+Este apartado prevalece sobre la descripción v2 de adaptadores y versiones reservadas. [Arquitectura y recuperación](recepciones-lan.md).
+
+`api.ts` usa `invoke("reception_invoke", { command, args, sessionToken })` para ambos puestos. La principal despacha por `backend.rs`; la adicional envía en Rust `POST /lan/v1/call` por HTTPS: `{ protocol_version: 1, contract_version: 3, command, args, session_token }`. Cabecera `x-nightdesk-station`: secreto del puesto vinculado. Respuesta `{ ok: true, value }` o `{ ok: false, error: { code, message } }`. Coincidencia exacta de versiones requerida. No hay dispatcher de archivos ni credenciales por LAN. `lan_control` se invoca exclusivamente en el equipo local.
+
+| Comando | Argumentos / respuesta | Permiso / remoto Supabase |
+|---|---|---|
+| `account_quote` | `stay_id` → `{ bill, version, token }` | sesión local / prohibido |
+| `check_out` | payload previo + `quote_token`, `expected_version`; UUID de operación en sobre | sesión local; valida factura en TX / prohibido |
+| `operation_result` | `operation_id`, generación de DB → resultado original o null | mismo usuario y puesto / prohibido |
+| `lan_revision` | → `{ epoch, revision }` | sesión local / prohibido |
+| `operator_activity` | `from`, `to` RFC3339, `user_uid?`; fin exclusivo, máximo 366 días | recepción: propia; admin: todas / lectura admin |
+| `printer_config_get/save` | `{settings, target: local o principal}`; preferencias por equipo | sesión local / prohibido |
+| `receipt_document` | `stay_id` → bytes históricos + documento congelado opcional | sesión local / prohibido |
+| `receipt_print` | `stay_id`, `job_id` UUID, `copies` 1–2, `target?` | sesión local / prohibido |
+| `receipt_print_host` | mismo trabajo, ejecutado por principal | sesión de puesto / prohibido |
+| `print_test` | `job_id` UUID; siempre prueba la impresora local | sesión local / prohibido |
+| `lan_control` | `action`, `args`; ver abajo | exclusivamente IPC local |
+
+Acciones de `lan_control`: `status`, `discover`, `pair`, `pair_status`, `reconnect`; administración de principal: `interfaces`, `configure`, `admin_info`, `pairing_open`, `approve`, `revoke`, `firewall`; recuperación adicional: `pending`, `retry`, `review_pending` (requiere administrador y nota). Emparejamiento: comparar certificado SHA-256 y código presencial; la principal activa la credencial únicamente después de aprobar; la adicional la conserva pendiente durante el asistente. Las acciones de archivo/actualización/restauración no forman parte del protocolo LAN.
+
+Mutaciones operativas llevan un UUID durable. `operation_results` vincula contenido + usuario UUID + puesto + resultado. Se confirma en la misma TX que `operational_audit`, datos y outbox. Repetirlo recupera resultado; cambiar contenido, usuario o puesto es conflicto. El cliente agrega generación de base e identidad del usuario; una restauración o reemplazo de usuario exige revisar solicitudes antiguas. No se acumulan nuevas escrituras offline.
+
+`expected_version` de operaciones sobre habitación/reserva/estadía compara `operational_version`, independiente de `version` del catálogo. `account_quote` incluye también líneas e importes para proteger saltos por tiempo. Versiones negativas/identificadores inválidos se rechazan. `quote_token` es obligatorio para cierre v3. Catálogo mantiene semántica v2 y write-through.
+
+`GET /lan/v1/events` usa WebSocket TLS, cabeceras de puesto y `Authorization: Bearer <sesión>`. Solo emite `{epoch, revision}` después de commit y latidos cada cinco segundos; cada mensaje exige recargar datos afectados. Cambio de época/reconexión exige recarga. No se interpreta el evento como resultado financiero.
+
+Nuevos errores: `host_unavailable`, `operation_pending`, `recovery_required`, `incompatible_version`. La pérdida de respuesta conserva la solicitud y bloquea nuevas mutaciones hasta resolverla. Una copia entregada al spooler o incierta nunca se reenvía sola; reimpresión expresa crea UUID nuevo. Cierre devuelve `print_error` mediante el puente tras intentar imprimir, sin revertir el resultado confirmado.
 
 ## Transporte
 
@@ -46,10 +76,10 @@ Impresión, reimpresión, `save_daily_pdf` y `list_printers` son solo `invoke` (
 
 ## Versión
 
-`CONTRACT_VERSION = 2`, expuesto por `contract_info`:
+`CONTRACT_VERSION = 3`, expuesto por `contract_info`:
 
 ```json
-{ "contract_version": 2, "app_version": "0.1.0", "schema_migrations": ["001_init", "002_products", "003_rooms_scope", "004_account_closure", "005_auth", "006_stay_integrity", "007_receipts", "008_ticket_header", "009_ticket_header_name", "010_jacuzzi_rooms", "011_jacuzzi_rooms_1_to_4", "012_love_nest_rates", "013_no_iva", "014_sync", "015_catalog_audit"] }
+{ "contract_version": 3, "app_version": "0.1.0", "schema_migrations": ["001_init", "002_products", "003_rooms_scope", "004_account_closure", "005_auth", "006_stay_integrity", "007_receipts", "008_ticket_header", "009_ticket_header_name", "010_jacuzzi_rooms", "011_jacuzzi_rooms_1_to_4", "012_love_nest_rates", "013_no_iva", "014_sync", "015_catalog_audit"] }
 ```
 
 v2 (I11.3): `catalog_versions` en ajustes; `set_product_active` acepta `operation_id` / `expected_version`; `hash_password` acepta `operation_id` opcional (salt determinística Argon2id para reintentos idempotentes); write-through documentado.

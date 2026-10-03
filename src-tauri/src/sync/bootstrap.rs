@@ -172,6 +172,21 @@ fn enqueue_history(conn: &mut Connection) -> AppResult<()> {
     )?;
     enqueue_table(conn, Entity::Stay, "SELECT id FROM stays ORDER BY id", db::payload_for_stay)?;
     enqueue_table(conn, Entity::Charge, "SELECT id FROM charges ORDER BY id", db::payload_for_charge)?;
+    let audit = {
+        let mut stmt=conn.prepare("SELECT uid,operation_id,actor_uid,username,station_id,command,entity_id,closed_total_cents,created_at FROM operational_audit ORDER BY created_at")?;
+        let rows=stmt.query_map([],|r|Ok(json!({"uid":r.get::<_,String>(0)?,"operation_id":r.get::<_,String>(1)?,"actor_uid":r.get::<_,String>(2)?,"username":r.get::<_,String>(3)?,"station_id":r.get::<_,String>(4)?,"command":r.get::<_,String>(5)?,"entity_id":r.get::<_,Option<i64>>(6)?,"closed_total_cents":r.get::<_,Option<i64>>(7)?,"created_at":r.get::<_,String>(8)?})))?.collect::<Result<Vec<_>,_>>()?;
+        rows
+    };
+    for chunk in audit.chunks(500) {
+        let tx=conn.transaction()?;
+        for row in chunk {
+            let uid=row["uid"].as_str().ok_or_else(||AppError::storage("Auditoría sin identidad"))?;
+            let root=outbox::bootstrap_operation_id(Entity::Audit.as_str(),uid);
+            outbox::enqueue_if_absent(&tx,&root,&[OutboxOp::upsert(Entity::Audit,uid.into(),row.clone())])?;
+        }
+        tx.commit()?;
+    }
+
     Ok(())
 }
 

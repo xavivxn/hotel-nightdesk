@@ -1,4 +1,5 @@
 import type {
+  AccountQuote, LanStatus, LanHost, PendingOperation, OperatorActivity,
   DailyReport,
   AnalyticsSummary,
   SessionInfo, SessionUser, LoginPayload, CreateUserPayload, ManagedUser,
@@ -48,6 +49,7 @@ function isTauri() {
 
 if (typeof window !== "undefined" && isTauri()) {
   void import("@tauri-apps/api/event").then(({ listen }) => {
+    void listen("reception:changed", () => { window.dispatchEvent(new Event("reception:changed")); });
     void listen("sync:catalog-updated", () => {
       window.dispatchEvent(new Event("sync:catalog-updated"));
     });
@@ -84,7 +86,15 @@ const LOCAL_ALWAYS = new Set([
   "sync_configure_device",
   "app_update_check",
   "app_update_install",
+  "lan_control",
 ]);
+
+const OPERATIONAL = new Set([
+  "check_in", "check_out", "add_charge", "add_product_charge", "delete_charge", "set_room_status",
+  "convert_to_overnight", "create_reservation", "set_reservation_status", "check_in_reservation",
+  "update_product_stock", "save_price_rules",
+]);
+const DIRECT_DEVICE = new Set(["auth_setup", "lan_control", "backup_run_now", "backup_list", "backup_import_key", "backup_restore"]);
 
 /** Local SQLite auth when the binary embeds the remote Supabase admin. */
 const AUTH_WHEN_EMBEDDED = new Set([
@@ -136,6 +146,16 @@ async function cmdRaw<T>(name: string, args?: Record<string, unknown>): Promise<
   try {
     if (isTauri()) {
       const { invoke } = await import("@tauri-apps/api/core");
+      const reception = cachedMode === "reception" || cachedMode === "reception_client";
+      if (reception && !DIRECT_DEVICE.has(name) && (!LOCAL_ALWAYS.has(name) || (cachedMode === "reception_client" && name === "sync_status"))) {
+        const payload = args?.payload as { operation_id?: string } | undefined;
+        const operationArgs = OPERATIONAL.has(name)
+          ? { ...args, operation_id: args?.operation_id ?? payload?.operation_id ?? crypto.randomUUID() }
+          : { ...args };
+        const value = await invoke<T>("reception_invoke", { command: name, args: operationArgs, sessionToken: requestToken });
+        if (OPERATIONAL.has(name)) window.dispatchEvent(new Event("reception:changed"));
+        return value;
+      }
       return await invoke<T>(name, toTauriArgs(requestArgs));
     }
     const { mockInvoke } = await import("./mock");
@@ -238,14 +258,14 @@ export const api = {
   listBoard: () => cmd<BoardRoom[]>("list_board"),
   listRooms: () => cmd<Room[]>("list_rooms"),
   saveRoom: (payload: SaveRoomPayload) => cmd<Room>("save_room", { payload: withOperationId(payload) }),
-  setRoomStatus: (room_id: number, status: string) => cmd<Room>("set_room_status", { room_id, status }),
+  setRoomStatus: (room_id: number, status: string, expected_version?: number) => cmd<Room>("set_room_status", { room_id, status, expected_version }),
   listRatePlans: (active_only = false) => cmd<RatePlan[]>("list_rate_plans", { active_only }),
   saveRatePlan: (payload: SaveRatePlanPayload) => cmd<RatePlan>("save_rate_plan", { payload: withOperationId(payload) }),
   checkIn: (payload: CheckInPayload) => cmd<Stay>("check_in", { payload: withOperationId(payload) }),
   previewBill: (stay_id: number) => cmd<BillPreview>("preview_bill", { stay_id }),
   getStayDetail: (stay_id: number) =>
     cmd<[Stay, BillPreview, Charge[], Payment[]]>("get_stay_detail", { stay_id }),
-  convertToOvernight: (stay_id: number) => cmd<Stay>("convert_to_overnight", { stay_id }),
+  convertToOvernight: (stay_id: number, expected_version?: number) => cmd<Stay>("convert_to_overnight", { stay_id, expected_version }),
   listProducts: (active_only = true) => cmd<Product[]>("list_products", { active_only }),
   saveProduct: (payload: SaveProductPayload) => cmd<Product>("save_product", { payload: withOperationId(payload) }),
   setProductActive: (product_id: number, active: boolean, expected_version?: number, operation_id = crypto.randomUUID()) =>
@@ -254,13 +274,21 @@ export const api = {
   addProductCharge: (payload: AddProductChargePayload) =>
     cmd<Charge>("add_product_charge", { payload: withOperationId(payload) }),
   deleteCharge: (charge_id: number) => cmd<void>("delete_charge", { charge_id }),
-  checkOut: (payload: CheckOutPayload) => cmd<CheckOutResult>("check_out", { payload: withOperationId(payload) }),
+  checkOut: async (payload: CheckOutPayload): Promise<CheckOutResult> => {
+    const operation = withOperationId({ ...payload, print: false });
+    const result = await cmd<CheckOutResult>("check_out", { payload: operation });
+    if (payload.print && isTauri() && (await getDeviceMode()) !== "remote") {
+      try { result.print_error = await cmd<string | null>("receipt_print", { stay_id: result.stay.id, copies: 2, job_id: operation.operation_id }); }
+      catch (error) { result.print_error = String(error); }
+    }
+    return result;
+  },
   listReservations: () => cmd<Reservation[]>("list_reservations"),
   createReservation: (payload: CreateReservationPayload) =>
     cmd<Reservation>("create_reservation", { payload: withOperationId(payload) }),
-  setReservationStatus: (reservation_id: number, status: string) =>
-    cmd<Reservation>("set_reservation_status", { reservation_id, status }),
-  checkInReservation: (reservation_id: number) => cmd<Stay>("check_in_reservation", { reservation_id }),
+  setReservationStatus: (reservation_id: number, status: string, expected_version?: number) =>
+    cmd<Reservation>("set_reservation_status", { reservation_id, status, expected_version }),
+  checkInReservation: (reservation_id: number, expected_version?: number) => cmd<Stay>("check_in_reservation", { reservation_id, expected_version }),
   listHistory: (date?: string) => cmd<HistoryStay[]>("list_history", { date }),
   dailyReport: (date: string) => cmd<DailyReport>("daily_report", { date }),
   analyticsSummary: (from: string, to: string, roomType?: string) =>
@@ -296,9 +324,22 @@ export const api = {
     cmd<AppSettings>("save_settings", { payload, new_pin, operation_id }),
   verifyPin: (pin: string) => cmd<boolean>("verify_pin", { pin }),
   pinRequired: () => cmd<boolean>("pin_required"),
-  printTest: () => cmd<string | null>("print_test"),
+  printTest: () => cmd<string | null>("print_test", { job_id: crypto.randomUUID() }),
   listPrinters: () => cmd<string[]>("list_printers"),
-  reprintReceipt: (stay_id: number) => cmd<string | null>("reprint_receipt", { stay_id }),
+  reprintReceipt: async (stay_id: number, target?: "local" | "principal") => {
+    if (!isTauri() || (await getDeviceMode()) === "remote") return cmd<string | null>("reprint_receipt", { stay_id });
+    return cmd<string | null>("receipt_print", { stay_id, target, copies: 1, job_id: crypto.randomUUID() });
+  },
+  accountQuote: (stay_id: number) => cmd<AccountQuote>("account_quote", { stay_id }),
+  lanStatus: () => cmd<LanStatus>("lan_control", { action: "status", args: {} }),
+  lanControl: <T = unknown>(action: string, args: Record<string, unknown> = {}) => cmd<T>("lan_control", { action, args }),
+  discoverReception: () => cmd<LanHost[]>("lan_control", { action: "discover", args: {} }),
+  pendingOperations: () => cmd<PendingOperation[]>("lan_control", { action: "pending", args: {} }),
+  retryOperation: (operation_id: string) => cmd<PendingOperation[]>("lan_control", { action: "retry", args: { operation_id } }),
+  receptionRevision: () => cmd<{ epoch: string; revision: number }>("lan_revision"),
+  printerConfig: () => cmd<{ settings: AppSettings; target: "local" | "principal" }>("printer_config_get"),
+  savePrinterConfig: (settings: AppSettings, target: "local" | "principal") => cmd<void>("printer_config_save", { settings, target }),
+  operatorActivity: (from: string, to: string, user_uid?: string) => cmd<OperatorActivity>("operator_activity", { from, to, user_uid }),
 
   deviceModeGet: () => refreshDeviceMode(),
   deviceModeSet: async (mode: DeviceMode) => {
@@ -347,7 +388,10 @@ export const api = {
   },
   subscribeOperational: async (onChange: () => void) => {
     const mode = await getDeviceMode();
-    if (mode !== "remote") return () => {};
+    if (mode !== "remote") {
+      window.addEventListener("reception:changed", onChange);
+      return () => window.removeEventListener("reception:changed", onChange);
+    }
     const { subscribeOperational } = await import("./supabase");
     return subscribeOperational(onChange);
   },

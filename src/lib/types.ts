@@ -12,6 +12,7 @@ export type CreateUserPayload = LoginPayload & { role: SessionUser["role"] };
 export type ManagedUser = SessionUser & { active: boolean; version: number };
 
 export type Room = {
+  operational_version?: number;
   id: number;
   number: string;
   room_type: string;
@@ -72,6 +73,7 @@ export type Stay = {
 };
 
 export type Reservation = {
+  operational_version?: number;
   id: number;
   guest_id: number;
   guest_name: string;
@@ -227,6 +229,7 @@ export type CheckInPayload = MutationMeta & {
 };
 
 export type CheckOutPayload = MutationMeta & {
+  quote_token?: string;
   stay_id: number;
   print: boolean;
 };
@@ -290,7 +293,7 @@ export type AnalyticsSummary = {
   voided_cents: number;
 };
 
-export type DeviceMode = "reception" | "remote";
+export type DeviceMode = "reception" | "reception_client" | "remote";
 
 export type RemoteConfigurePayload = {
   project_url: string;
@@ -407,4 +410,17 @@ export type EffectivePrice = {
   base_amount_cents: number;
   extra_hour_cents: number;
   rule_name: string | null;
+};
+
+export type AccountQuote = { bill: BillPreview; version: number; token: string };
+export type LanHost = { station_id: string; address: string; port: number; certificate: string; fingerprint: string; name: string };
+export type LanStatus = {
+  mode: DeviceMode | null; station_id: string; name: string; enabled: boolean; running: boolean; paired: boolean;
+  host_name: string | null; print_target: string; bind_address: string; port: number;
+  connection: { connected: boolean; last_seen_at: string | null; last_error: string | null; events_connected: boolean };
+};
+export type PendingOperation = { operation_id: string; command: string; created_at: string; username: string; can_retry: boolean };
+export type OperatorActivity = {
+  from: string; to: string; timezone: string; closed_accounts: number; closed_total_cents: number;
+  operations: { uid: string; actor_uid: string; username: string; station_id: string; command: string; entity_id: number | null; closed_total_cents: number | null; created_at: string }[];
 };

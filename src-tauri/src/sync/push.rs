@@ -318,6 +318,7 @@ mod tests {
             let (closed, _) = service::check_out(
                 &mut conn,
                 &CheckOutPayload {
+                    quote_token: None,
                     stay_id: stay.id,
                     print: false,
                     operation_id: None,

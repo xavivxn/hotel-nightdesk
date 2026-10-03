@@ -13,6 +13,7 @@ pub enum Entity {
     #[allow(dead_code)]
     Payment,
     Room,
+    Audit,
 }
 
 impl Entity {
@@ -24,6 +25,7 @@ impl Entity {
             Self::Charge => "charge",
             Self::Payment => "payment",
             Self::Room => "room",
+            Self::Audit => "operational_audit",
         }
     }
 }

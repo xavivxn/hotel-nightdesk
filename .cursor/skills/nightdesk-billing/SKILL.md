@@ -43,7 +43,7 @@ Si cambia la fórmula:
 - Cada `RatePlan` tiene `room_category` (`normal` / `jacuzzi`, de `models::room_category(room_type)`). Check-in y reservas rechazan una tarifa de otra categoría; la sustitución por dormida busca primero el plan de la categoría de la habitación.
 - Hourly que cruza `night_cutoff_hour` **reemplaza** el total hourly por el plan `overnight` (fallback: `night`). No sumar ambas.
 - `convert_to_overnight` (`converted_to_overnight = true`) fuerza esa misma sustitución. Requiere un plan `overnight` o `night` activo.
-- Checkout imprime 2 copias (`CHECKOUT_RECEIPT_COPIES`); `reprint_receipt` imprime 1.
+- Checkout solicita 2 copias (`api.checkOut` → `receipt_print`); reimpresión solicita 1 con UUID nuevo.
 
 ## Cargos manuales
 
@@ -68,3 +68,11 @@ Todo o nada. Stay cerrada: no `add_charge`.
 Si `payload.print`: `build_receipt` + `print_bytes` **después** del `COMMIT`. Error → `CheckOutResult.print_error` (warning). El cobro ya cerró.
 
 Tickets en `{app_data_dir}/tickets/` (`*.bin`, `last-ticket.bin`, `last-ticket.txt`). Reimpresión: `reprint_receipt`. Mock de browser no imprime de verdad.
+
+## Ampliación LAN aprobada (03/10/2026)
+
+Leer `docs/recepciones-lan.md` y contrato IPC v3 / LAN v1. Se autoriza Axum HTTPS + WebSocket + mDNS en el proceso principal. Modos: `reception`, `reception_client`, `remote`. La adicional no crea base operativa ni inicia workers cloud. `api.ts` sigue siendo el único puente UI.
+
+Operaciones locales y LAN usan `lan/ipc.rs` → `backend.rs` → `operations.rs` → servicios. Tipos compartidos en `models.rs`/`types.ts`; tipos de transporte/configuración en `lan`/`device`. No agregar adaptadores operativos paralelos en `commands.rs` que omitan el registro durable. Efectos, resultado, auditoría y outbox se confirman en una misma transacción inmediata; savepoints en servicios. Las versiones operativas están separadas del catálogo. Cierre exige quote vigente y guarda comprobante antes de imprimir; impresión por puesto en `printing.rs`, fuera del lock DB. Nuevos pagos/arqueos quedan fuera del alcance.
+
+Actualización/restauración de principal: pausa coordinada y LAN deshabilitada. Restaurar cambia generación fuera del snapshot para impedir replay de solicitudes antiguas. Credenciales del puesto en Credential Manager, nunca frontend. No habilitar VPN, servicio Windows, carpeta SQLite compartida ni escrituras aisladas reconciliables. Los ensayos automatizados no sustituyen el piloto físico de dos PCs/impresoras Windows.

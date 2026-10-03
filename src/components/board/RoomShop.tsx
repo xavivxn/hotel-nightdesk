@@ -1,3 +1,4 @@
+import { useOperationalRefresh } from "@/lib/useOperationalRefresh";
 import { api } from "@/lib/api";
 import { formatMoney } from "@/lib/format";
 import { PRODUCT_CATEGORIES, type ProductCategory } from "@/lib/products";
@@ -36,6 +37,8 @@ export function RoomShop({
     // Stock is informative here: a failure must not hide the shop.
     loadStock().catch(() => undefined);
   }, []);
+
+  useOperationalRefresh(async () => { setProducts(await api.listProducts(true)); await loadStock(); });
 
   const counts = useMemo(() => {
     const map = new Map<string, number>();

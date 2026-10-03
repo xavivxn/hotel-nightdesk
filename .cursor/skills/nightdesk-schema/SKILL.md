@@ -65,3 +65,11 @@ Status: `hold` (alta) → `checked_in` (al check-in) | `cancelled` | `no_show`.
 `kind`: `hourly` | `night` | `overnight`. Montos `*_cents`. `night_cutoff_hour` 0–23. `active` 0/1.
 
 Cargos: `stay` | `extra_hour` | `tax` (computados al cerrar) y `surcharge` | `discount` (manuales). Bajas de recargo/descuento: `deleted_at`, nunca `DELETE`. Pagos: `cash` | `card` | `transfer`.
+
+## Ampliación LAN aprobada (03/10/2026)
+
+Leer `docs/recepciones-lan.md` y contrato IPC v3 / LAN v1. Se autoriza Axum HTTPS + WebSocket + mDNS en el proceso principal. Modos: `reception`, `reception_client`, `remote`. La adicional no crea base operativa ni inicia workers cloud. `api.ts` sigue siendo el único puente UI.
+
+Operaciones locales y LAN usan `lan/ipc.rs` → `backend.rs` → `operations.rs` → servicios. Tipos compartidos en `models.rs`/`types.ts`; tipos de transporte/configuración en `lan`/`device`. No agregar adaptadores operativos paralelos en `commands.rs` que omitan el registro durable. Efectos, resultado, auditoría y outbox se confirman en una misma transacción inmediata; savepoints en servicios. Las versiones operativas están separadas del catálogo. Cierre exige quote vigente y guarda comprobante antes de imprimir; impresión por puesto en `printing.rs`, fuera del lock DB. Nuevos pagos/arqueos quedan fuera del alcance.
+
+Actualización/restauración de principal: pausa coordinada y LAN deshabilitada. Restaurar cambia generación fuera del snapshot para impedir replay de solicitudes antiguas. Credenciales del puesto en Credential Manager, nunca frontend. No habilitar VPN, servicio Windows, carpeta SQLite compartida ni escrituras aisladas reconciliables. Los ensayos automatizados no sustituyen el piloto físico de dos PCs/impresoras Windows.

@@ -1,3 +1,4 @@
+import { useOperationalRefresh } from "@/lib/useOperationalRefresh";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Field";
 import { api } from "@/lib/api";
@@ -14,7 +15,7 @@ function todayInput() {
 
 export function HistoryPage({ settings, deviceMode = "reception" }: { settings: AppSettings; deviceMode?: DeviceMode }) {
   const admin = useContext(RoleContext) === "admin";
-  const reception = deviceMode === "reception";
+  const reception = deviceMode !== "remote";
   const [date, setDate] = useState(todayInput);
   const [items, setItems] = useState<HistoryStay[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -31,6 +32,8 @@ export function HistoryPage({ settings, deviceMode = "reception" }: { settings: 
       .finally(() => { if (current) setLoading(false); });
     return () => { current = false; };
   }, [date]);
+
+  useOperationalRefresh(async () => { setItems(await api.listHistory(date)); });
 
   const total = items.reduce((sum, item) => sum + item.total_cents, 0);
 

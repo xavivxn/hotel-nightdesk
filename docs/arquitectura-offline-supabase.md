@@ -1,30 +1,38 @@
 # Operación local, administración remota y respaldos (Supabase)
 
-Fecha: 17 de septiembre de 2026.
+Fecha original: 17 de septiembre de 2026. Ampliación implementada: 03 de octubre de 2026.
 Estado: requisitos y arquitectura acordados. I12 y N12 documentados/aplicados; I06 (`014_sync`, outbox local), I07 (worker push/pull/Realtime) e I11 (write-through / `catalog_write` / auditoría) implementados. N07 modo remoto hecho. I05/I08/I08.3 hechos en código (snapshot, upload, restore local y desde Storage). Pendiente ops: cron de retención remota.
 
 Este documento sustituye el 17/09/2026 a [arquitectura-offline-vpn-backups.md](arquitectura-offline-vpn-backups.md). La operación del motel sigue sin depender de internet. Supabase se usa para que el admin consulte y edite catálogo a distancia, para replicar la operación en lectura y para el respaldo diario cifrado. No describe funciones ya terminadas ni modifica el presupuesto comercial.
 
 **Decisión 17/09/2026 (Iván y Naser):** se descarta WireGuard + API HTTP privada + servicio Windows (D08: handshake dependiente de router/CGNAT/intermediario). Supabase (Postgres + Auth + RLS + Realtime + Storage) los reemplaza. SQLite en recepción sigue siendo la única fuente operativa. No hay escritura remota directa sobre su archivo ni una segunda base editable.
 
+## Ampliación vigente: dos puestos locales
+
+La decisión del 03/10/2026 autoriza HTTPS + WebSocket dentro de la LAN, integrado en el mismo proceso de recepción. No reintroduce VPN ni servicio Windows. `reception_client` opera contra `reception` mediante comandos autenticados; SQLite permanece únicamente en la principal. Supabase conserva su función y recibe las acciones de ambos desde una sola outbox. La escucha viene deshabilitada y requiere vinculación presencial. [Implementación, seguridad, instalación y piloto](recepciones-lan.md).
+
+El contrato operativo es IPC v3 / LAN v1. La migración SQLite `021_local_reception` añade idempotencia durable, auditoría, versiones operativas, puestos y revisión global. `device.json` y `station.db` contienen configuración/recuperación por PC; la adicional no inicializa SQLite operativo. Impresión local por puesto y alternativa principal. Cierres e informes por usuario, sin registro de efectivo.
+
+Esta ampliación tiene precedencia sobre las referencias históricas a dos modos o una única impresora en las secciones siguientes.
+
 ## 1. Alcance
 
 - 23 habitaciones: 19 normales y 4 con jacuzzi.
-- Un solo binario de escritorio Windows. En el primer arranque se elige el rol del equipo: **Recepción** o **Administración remota**.
+- Un solo binario de escritorio Windows. En el primer arranque se elige el rol del equipo: **Recepción principal**, **Recepción adicional** o **Administración remota**.
 - Inicio de sesión individual con roles `admin` y `recepcion` en la app. En Supabase Auth: un usuario `admin` embebido en el instalador (peticiones del modo remoto) y un usuario `device` por PC de recepción. El cliente no recibe esas cuentas.
 - El admin remoto consulta tablero, historial y reservas en vivo (solo lectura) y modifica catálogo, ajustes del negocio y usuarios. Esta decisión reemplaza tanto el administrador de solo consulta como la escritura remota operativa de la propuesta VPN.
 - Recepción conserva habitaciones, estadías, consumos, cuentas e impresión **sin internet**.
-- Solo la PC de recepción tiene impresora. El modo remoto no dispara impresión ni PDF.
+- Cada recepción configura su impresora; la adicional puede elegir la de la principal. El modo remoto no dispara impresión.
 - Respaldo diario cifrado a un bucket privado de Supabase Storage, con reintentos si no hay conexión.
 - No se integra procesamiento de pagos ni facturación electrónica.
 
 ## 2. Estado actual verificado
 
-- Tauri y React usan `src/lib/api.ts` como puente hacia comandos Rust (`invoke`) o el mock (`mockInvoke`). Aún no existe `supabaseInvoke`.
+- Tauri y React usan `src/lib/api.ts` como puente hacia comandos Rust (`invoke`) o el mock (`mockInvoke`). La administración remota usa `supabaseInvoke`.
 - SQLite está en el directorio de datos de la aplicación (`nightdesk.db`), fuera del repositorio. WAL y claves foráneas están habilitados.
 - Roles, sesiones Argon2id, cierre transaccional, tickets, PDF diario y catálogo local están implementados (N01–N06, N11, I01–I04).
 - `uid`/`version`/`updated_at`, `charges.deleted_at`, `sync_outbox` y `sync_state` viven en SQLite (`014_sync`). El worker I07 drena la outbox, hace pull por cursor y escucha Realtime. La subida diaria a Storage sigue pendiente (I08). El esquema Supabase (N12) ya existe.
-- Migraciones SQLite aplicadas hasta `014_sync`.
+- Catálogo de migraciones SQLite hasta `021_local_reception`.
 - I03 midió el snapshot: un mes sintético gzip ≈ 132 KiB. Esa cifra se reutiliza para Storage.
 
 ## 3. Arquitectura objetivo

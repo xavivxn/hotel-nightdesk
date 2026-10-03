@@ -7,7 +7,11 @@ export type ErrorCode =
   | "rate_limited"
   | "invalid_credentials"
   | "storage"
-  | "printer";
+  | "printer"
+  | "host_unavailable"
+  | "operation_pending"
+  | "recovery_required"
+  | "incompatible_version";
 
 export class ApiError extends Error {
   code: ErrorCode | string;

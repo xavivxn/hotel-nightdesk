@@ -1,3 +1,8 @@
+mod device;
+mod operations;
+mod backend;
+mod lan;
+mod printing;
 mod billing;
 mod auth;
 mod backup;
@@ -19,7 +24,12 @@ use rusqlite::Connection;
 use std::sync::Mutex;
 use tauri::{LogicalSize, Manager};
 
+pub static MAINTENANCE: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
+
 pub struct AppState {
+    pub data_dir: std::path::PathBuf,
+    pub device: Mutex<device::DeviceConfig>,
+    pub lan: lan::Runtime,
     pub db: Mutex<Connection>,
     pub auth: Mutex<auth::AuthState>,
     pub sync: Mutex<Option<sync::worker::SyncHandle>>,
@@ -28,6 +38,7 @@ pub struct AppState {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
     tauri::Builder::default()
         // Must be the first plugin: a second launch (desktop icon while the app already started
         // with Windows) focuses this window instead of opening another copy over the same SQLite.
@@ -42,10 +53,11 @@ pub fn run() {
         .setup(|app| {
             let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
             std::fs::create_dir_all(&dir)?;
-            let _ = credentials::apply_embedded_defaults(&dir);
+            let config = device::load(&dir).map_err(|e| e.to_string())?;
+            let mode = config.mode.clone();
+            if matches!(mode.as_deref(), Some("reception" | "remote")) { let _ = credentials::apply_embedded_defaults(&dir); }
             let db_path = dir.join("nightdesk.db");
-            let conn = db::open(&db_path).map_err(|e| e.to_string())?;
-            let mode = service::device_mode_get(&conn).ok().flatten();
+            let conn = device::operational_connection(&dir, mode.as_deref()).map_err(|e| e.to_string())?;
             // A vault failure must not block offline reception. sync_status and
             // catalog operations will surface the underlying error to the UI.
             let configured = credentials::device_configured(&dir).unwrap_or(false);
@@ -60,11 +72,32 @@ pub fn run() {
                 None
             };
             app.manage(AppState {
+                data_dir: dir.clone(), device: Mutex::new(config), lan: lan::Runtime::default(),
                 db: Mutex::new(conn),
                 auth: Mutex::new(auth::AuthState::default()),
                 sync: Mutex::new(sync),
                 backup: Mutex::new(backup),
             });
+            lan::start_observer(app.handle().clone());
+            let lan_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(error) = lan::start(lan_app.clone()).await {
+                    lan_app.state::<AppState>().lan.connection.lock().unwrap().last_error = Some(error.to_string());
+                }
+            });
+            let show = tauri::menu::MenuItem::with_id(app, "show", "Abrir Nightdesk", true, None::<&str>)?;
+            let quit = tauri::menu::MenuItem::with_id(app, "quit", "Detener recepción y salir", true, None::<&str>)?;
+            let menu = tauri::menu::Menu::with_items(app, &[&show, &quit])?;
+            tauri::tray::TrayIconBuilder::new().tooltip("Nightdesk · Recepción")
+                .icon(tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))?)
+                .menu(&menu).on_menu_event(|app,event| {
+                    if event.id.as_ref() == "quit" {
+                        app.state::<AppState>().lan.stopping.store(true, std::sync::atomic::Ordering::Relaxed);
+                        lan::stop(app); app.exit(0);
+                    } else if let Some(window)=app.get_webview_window("main") {
+                        let _=window.show(); let _=window.unminimize(); let _=window.set_focus();
+                    }
+                }).build(app)?;
             // Force window/taskbar icon (bundle icons alone often stay cached in `tauri dev` on Windows).
             if let Some(window) = app.get_webview_window("main") {
                 let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))
@@ -80,7 +113,18 @@ pub fn run() {
             }
             Ok(())
         })
+        .on_window_event(|window,event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let state=window.state::<AppState>();
+                let config=state.device.lock().unwrap();
+                if config.mode.as_deref()==Some("reception") && config.lan_enabled {
+                    api.prevent_close(); let _=window.hide();
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
+            lan::ipc::reception_invoke,
+            lan::ipc::lan_control,
             auth::auth_setup_required,
             auth::auth_setup,
             auth::auth_create_user,
@@ -91,27 +135,17 @@ pub fn run() {
             commands::list_board,
             commands::list_rooms,
             commands::save_room,
-            commands::set_room_status,
             commands::list_rate_plans,
             commands::save_rate_plan,
-            commands::check_in,
             commands::preview_bill,
             commands::get_stay_detail,
-            commands::convert_to_overnight,
             commands::list_products,
             commands::save_product,
             commands::set_product_active,
             commands::list_users,
             commands::set_user_active,
             commands::delete_user,
-            commands::add_charge,
-            commands::add_product_charge,
-            commands::delete_charge,
-            commands::check_out,
             commands::list_reservations,
-            commands::create_reservation,
-            commands::set_reservation_status,
-            commands::check_in_reservation,
             commands::list_history,
             commands::daily_report,
             commands::analytics_summary,
@@ -142,10 +176,8 @@ pub fn run() {
             commands::app_update_check,
             commands::app_update_install,
             commands::list_product_stock,
-            commands::update_product_stock,
             commands::list_stock_movements,
             commands::list_price_rules,
-            commands::save_price_rules,
             commands::current_prices,
         ])
         .run(tauri::generate_context!())

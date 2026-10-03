@@ -1,3 +1,4 @@
+import { useOperationalRefresh } from "@/lib/useOperationalRefresh";
 import { Button } from "@/components/ui/Button";
 import { Drawer } from "@/components/ui/Drawer";
 import { PriceRulesSection } from "@/components/rates/PriceRulesSection";
@@ -70,7 +71,7 @@ function rateDraft(rate?: RatePlan): RateDraft {
 }
 
 export function RoomsPage({ settings, deviceMode = "reception" }: { settings: AppSettings; deviceMode?: DeviceMode }) {
-  const reception = deviceMode === "reception";
+  const reception = deviceMode !== "remote";
   const [rooms, setRooms] = useState<Room[]>([]);
   const [rates, setRates] = useState<RatePlan[]>([]);
   const [roomForm, setRoomForm] = useState<RoomDraft | null>(null);
@@ -86,6 +87,7 @@ export function RoomsPage({ settings, deviceMode = "reception" }: { settings: Ap
   const rateGraceRef = useRef<HTMLInputElement>(null);
   const rateCutoffRef = useRef<HTMLInputElement>(null);
 
+  useOperationalRefresh(load);
   async function load() {
     const [roomList, rateList] = await Promise.all([api.listRooms(), api.listRatePlans(false)]);
     setRooms(roomList);
@@ -125,16 +127,16 @@ export function RoomsPage({ settings, deviceMode = "reception" }: { settings: Ap
                 </div>
                 <div className="flex gap-2">
                   {reception && room.status === "dirty" ? (
-                    <Button size="sm" variant="secondary" onClick={async () => { await api.setRoomStatus(room.id, "available"); await load(); }}>
+                    <Button size="sm" variant="secondary" onClick={async () => { await api.setRoomStatus(room.id, "available", room.operational_version); await load(); }}>
                       Limpia
                     </Button>
                   ) : null}
                   {reception && room.status === "blocked" ? (
-                    <Button size="sm" variant="secondary" onClick={async () => { await api.setRoomStatus(room.id, "available"); await load(); }}>
+                    <Button size="sm" variant="secondary" onClick={async () => { await api.setRoomStatus(room.id, "available", room.operational_version); await load(); }}>
                       Desbloquear
                     </Button>
                   ) : reception && room.status === "available" ? (
-                    <Button size="sm" variant="ghost" onClick={async () => { await api.setRoomStatus(room.id, "blocked"); await load(); }}>
+                    <Button size="sm" variant="ghost" onClick={async () => { await api.setRoomStatus(room.id, "blocked", room.operational_version); await load(); }}>
                       Bloquear
                     </Button>
                   ) : null}

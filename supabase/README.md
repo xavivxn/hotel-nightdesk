@@ -112,3 +112,9 @@ Privado. Device: `INSERT` de objetos (+ `SELECT` del propio para confirmar). Adm
 ## Qué no entra en N12
 
 Worker Rust, `src/lib/supabase.ts`, UI remota, Edge Function de retención (I08), migración SQLite `014_sync` (I06).
+
+## Dos recepciones LAN (IPC 3)
+
+Aplicar `20261003120000_local_reception_audit.sql` **antes** de conectar a Supabase una principal con la nueva versión. Agrega `operational_audit`, RLS de lectura administrativa, extensión del RPC de dispositivo y lectura de cierres históricos sin identidad verificable. No crear otra cuenta `device` para la recepción adicional.
+
+En Supabase local, ejecutar también `tests/local_reception_audit.sql` con `ON_ERROR_STOP=1`. La prueba revierte fixtures al terminar. El despliegue real y el ensayo de políticas requieren PostgreSQL/Supabase; compilar Rust/TypeScript no los verifica. [Instalación y piloto Windows](../docs/recepciones-lan.md).

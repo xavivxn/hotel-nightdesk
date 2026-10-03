@@ -152,16 +152,17 @@ fn send_to_printer(bytes: &[u8], settings: &AppSettings) -> Result<(), String> {
     if settings.printer_name.trim().is_empty() {
         return Err("Configurá el nombre o la ruta de la impresora".into());
     }
-    print_named(bytes, settings.printer_name.trim())
+    print_named(bytes, settings.printer_name.trim(), settings.paper_width)
 }
 
-fn print_named(bytes: &[u8], name: &str) -> Result<(), String> {
+fn print_named(bytes: &[u8], name: &str, paper_width: i64) -> Result<(), String> {
     #[cfg(windows)]
     {
-        return windows_spooler::send(bytes, name);
+        return windows_spooler::send(bytes, name, paper_width);
     }
     #[cfg(not(windows))]
     {
+        let _ = paper_width;
         let mut child = Command::new("lp")
             .args(["-d", name, "-o", "raw"])
             .stdin(Stdio::piped())
@@ -453,8 +454,8 @@ mod tests {
         settings.printer_name = name.clone();
         let bytes = build_test_receipt(&settings);
         let (first, second) = std::thread::scope(|scope| {
-            let a = scope.spawn(|| print_named(&bytes, &name));
-            let b = scope.spawn(|| print_named(&bytes, &name));
+            let a = scope.spawn(|| print_named(&bytes, &name, 80));
+            let b = scope.spawn(|| print_named(&bytes, &name, 80));
             (a.join().unwrap(), b.join().unwrap())
         });
         first.expect("cola concurrente 1");

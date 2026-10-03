@@ -100,6 +100,10 @@ const MIGRATIONS: &[Migration] = &[
         id: "020_jacuzzi_rates_and_stay_users",
         sql: include_str!("../migrations/020_jacuzzi_rates_and_stay_users.sql"),
     },
+    Migration {
+        id: "021_local_reception",
+        sql: include_str!("../migrations/021_local_reception.sql"),
+    },
 ];
 
 /// Fixed uids of the jacuzzi plans, shared with `020_jacuzzi_rates_and_stay_users` and Supabase.
@@ -111,6 +115,7 @@ const RATE_PLAN_COLUMNS: &str = "id, name, kind, base_amount_cents, extra_hour_c
 pub fn open(db_path: &Path) -> AppResult<Connection> {
     let mut conn = Connection::open(db_path)?;
     conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
     let backup = (!is_memory_path(db_path)).then_some(db_path);
     migrate(&mut conn, backup)?;
     seed_if_empty(&conn)?;
@@ -1341,6 +1346,23 @@ mod migration_runner_tests {
             |row| row.get(0),
         )?;
         assert_eq!(open, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn lan_migration_preserves_open_accounts_tickets_and_pending_outbox() -> AppResult<()> {
+        let mut conn=Connection::open_in_memory()?;conn.execute_batch("PRAGMA foreign_keys=ON")?;
+        migrate_up_to(&mut conn,"020_jacuzzi_rates_and_stay_users")?;
+        seed_if_empty(&conn)?;
+        conn.execute("INSERT INTO guests(name,created_at) VALUES ('Migración',?1)",[now_rfc3339()])?;
+        conn.execute("INSERT INTO stays(room_id,guest_id,rate_plan_id,check_in_at,status) VALUES(5,1,1,?1,'open')",[now_rfc3339()])?;
+        conn.execute("INSERT INTO receipt_snapshots(stay_id,bytes,created_at) VALUES(1,?1,?2)",params![b"legacy ticket",now_rfc3339()])?;
+        conn.execute("INSERT INTO sync_outbox(operation_id,root_operation_id,entity,entity_uid,op,payload,created_at) VALUES('pending','pending','stay','uid','upsert','{}',?1)",[now_rfc3339()])?;
+        migrate(&mut conn,None)?;
+        assert_eq!(get_stay(&conn,1)?.status,"open");
+        assert_eq!(conn.query_row::<Vec<u8>,_,_>("SELECT bytes FROM receipt_snapshots WHERE stay_id=1",[],|r|r.get(0))?,b"legacy ticket");
+        assert_eq!(conn.query_row::<String,_,_>("SELECT status FROM sync_outbox WHERE operation_id='pending'",[],|r|r.get(0))?,"pending");
+        assert_eq!(crate::operations::entity_version(&conn,"stays",1)?,1);
         Ok(())
     }
 

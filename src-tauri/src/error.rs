@@ -1,6 +1,6 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     Validation,
@@ -11,6 +11,10 @@ pub enum ErrorCode {
     RateLimited,
     InvalidCredentials,
     Storage,
+    HostUnavailable,
+    OperationPending,
+    RecoveryRequired,
+    IncompatibleVersion,
     #[allow(dead_code)]
     Printer,
 }

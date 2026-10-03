@@ -15,6 +15,7 @@ import {
   WifiOff,
 } from "lucide-react";
 import { LoveNestLogo } from "@/components/layout/BrandLogo";
+import { ReceptionConnectionStatus } from "./ReceptionConnectionStatus";
 import { DutyClock } from "@/components/layout/DutyClock";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
@@ -34,6 +35,9 @@ const links = [
   { to: "/analisis", label: "Análisis", icon: ChartNoAxesCombined },
   { to: "/catalogo", label: "Catálogo", icon: Package },
   { to: "/usuarios", label: "Usuarios", icon: Users },
+  { to: "/actividad", label: "Actividad", icon: ClipboardList },
+  { to: "/impresora", label: "Impresora", icon: Settings2 },
+  { to: "/puestos", label: "Puestos", icon: Wifi },
   { to: "/ajustes", label: "Ajustes", icon: Settings2 },
 ];
 
@@ -128,7 +132,7 @@ export function AppShell({
   const location = useLocation();
 
   useEffect(() => {
-    if (deviceMode !== "reception") return;
+    if (deviceMode === "remote") return;
     let cancelled = false;
     async function load() {
       try {
@@ -162,6 +166,7 @@ export function AppShell({
         <p className="nav-section hidden lg:block">OPERACIÓN</p>
         <nav aria-label="Navegación principal" className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin">
           {links
+            .filter((link) => (link.to !== "/puestos" || deviceMode === "reception") && (link.to !== "/impresora" || deviceMode !== "remote"))
             .filter((link) => user.role === "admin" || !ADMIN_ROUTES.has(link.to))
             .map((link) => (
               <NavLink
@@ -185,7 +190,7 @@ export function AppShell({
         <div className="sidebar-foot">
           <SessionCard
             user={user}
-            sync={deviceMode === "reception" ? sync : null}
+            sync={deviceMode !== "remote" ? sync : null}
             browserOnline={online}
           />
           <Button variant="secondary" className="w-full" onClick={onLogout}>
@@ -204,6 +209,7 @@ export function AppShell({
         </div>
       </aside>
       <div className="app-shell-main flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <ReceptionConnectionStatus mode={deviceMode} />
         <main key={location.pathname} className="app-shell-content app-route-enter min-h-0 min-w-0 flex-1 overflow-auto">
           <Outlet />
         </main>

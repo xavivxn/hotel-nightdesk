@@ -74,9 +74,9 @@ export function SettingsPage({
   const reception = deviceMode === "reception";
   const tabs = [
     { id: "business" as const, label: "Negocio", icon: Building2 },
-    ...(reception ? [{ id: "printer" as const, label: "Impresora", icon: Printer }] : []),
+
     ...(reception ? [{ id: "sync" as const, label: "Sincronización", icon: RefreshCw }] : []),
-    { id: "backup" as const, label: "Respaldos", icon: Cloud },
+    ...(deviceMode !== "reception_client" ? [{ id: "backup" as const, label: "Respaldos", icon: Cloud }] : []),
   ];
   const active = !reception && (section === "sync" || section === "printer") ? "business" : section;
   const canSave = active === "business" || (reception && active === "printer");

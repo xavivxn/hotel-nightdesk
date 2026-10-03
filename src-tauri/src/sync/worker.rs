@@ -193,10 +193,12 @@ fn run_cycle(
     app: &AppHandle,
     snapshot: &Arc<Mutex<SyncSnapshot>>,
 ) -> AppResult<DrainResult> {
+    let bootstrap_guard=crate::MAINTENANCE.blocking_read();
     if let Err(error) = bootstrap::run(conn, client, device_id) {
         remember_error(snapshot, &error);
         return Err(error);
     }
+    drop(bootstrap_guard);
     let mut drain_result = DrainResult::Done;
     if do_drain {
         drain_result = drain_cycle(conn, client, device_id, app, snapshot);
@@ -214,6 +216,7 @@ fn drain_cycle(
     _app: &AppHandle,
     snapshot: &Arc<Mutex<SyncSnapshot>>,
 ) -> DrainResult {
+    let _maintenance=crate::MAINTENANCE.blocking_read();
     match push::drain(conn, client, device_id) {
         Ok(result) => {
             remember_ok(snapshot, true, false);
@@ -227,6 +230,7 @@ fn drain_cycle(
 }
 
 fn pull_cycle(conn: &mut Connection, client: &SupabaseClient, app: &AppHandle, snapshot: &Arc<Mutex<SyncSnapshot>>) {
+    let _maintenance=crate::MAINTENANCE.blocking_read();
     match super::pull::pull_all(conn, client) {
         Ok(changed) => {
             remember_ok(snapshot, false, true);

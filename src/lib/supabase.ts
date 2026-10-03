@@ -2,6 +2,7 @@ import { createClient, type RealtimeChannel, type SupabaseClient } from "@supaba
 import { previewBill as previewBillLocal } from "./billing";
 import { fail } from "./errors";
 import type {
+  OperatorActivity,
   AppSettings,
   AnalyticsSummary,
   BackupStatus,
@@ -28,6 +29,8 @@ let boardChannel: RealtimeChannel | null = null;
 let settingsVersions: Record<string,number> | null = null;
 
 const FORBIDDEN_OPS = new Set([
+  "account_quote", "operation_result", "lan_revision", "receipt_document", "receipt_print", "receipt_print_host", "printer_config_get", "printer_config_save", "lan_control",
+  "update_product_stock", "save_price_rules",
   "check_in",
   "check_out",
   "add_charge",
@@ -574,9 +577,34 @@ export async function supabaseInvoke<T>(name: string, args: Record<string, unkno
       authSession = null;
       return undefined as T;
     }
+    case "operator_activity": {
+      if (!authSession || authSession.user.role !== "admin") fail("forbidden", "Se requiere administración remota");
+      const from = String(args.from), to = String(args.to), start = Date.parse(from), end = Date.parse(to);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || end - start > 366 * 86400000) fail("validation", "Elegí un rango de hasta 366 días");
+      const operations: OperatorActivity["operations"] = [];
+      for (let offset = 0; ; offset += 1000) {
+        let query = sb().from("operational_audit").select("*").gte("created_at", new Date(start).toISOString()).lt("created_at", new Date(end).toISOString()).order("created_at").order("uid").range(offset, offset + 999);
+        if (args.user_uid) query = query.eq("actor_uid", String(args.user_uid));
+        const { data, error } = await query;
+        if (error) fail("storage", "No se pudo consultar la actividad sincronizada. Verificá la migración de auditoría y la conexión.");
+        operations.push(...(data ?? []) as OperatorActivity["operations"]);
+        if (!data || data.length < 1000) break;
+      }
+      if (!args.user_uid) {
+        for (let offset = 0; ; offset += 1000) {
+          const { data, error } = await sb().rpc("activity_legacy_closures", { p_from: new Date(start).toISOString(), p_to: new Date(end).toISOString() }).order("created_at").order("uid").range(offset, offset + 999);
+          if (error) fail("storage", "No se pudieron consultar los cierres históricos");
+          operations.push(...(data ?? []) as OperatorActivity["operations"]);
+          if (!data || data.length < 1000) break;
+        }
+        operations.sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+      }
+      return { from, to, timezone: "America/Asuncion", operations, closed_accounts: operations.filter(r => r.command === "check_out").length,
+        closed_total_cents: operations.reduce((sum, r) => addMoney(sum, r.closed_total_cents ?? 0), 0) } satisfies OperatorActivity as T;
+    }
     case "contract_info":
       return {
-        contract_version: 1,
+        contract_version: 3,
         app_version: "0.1.0",
         schema_migrations: ["remote"],
       } satisfies ContractInfo as T;

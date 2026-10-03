@@ -27,12 +27,16 @@ fn map_user(id: i64, username: String, role: String) -> SessionUser {
         role: Role::parse(&role),
     }
 }
-fn key(token: &str) -> String { hex::encode(Sha256::digest(token.as_bytes())) }
+pub(crate) fn key(token: &str) -> String { hex::encode(Sha256::digest(token.as_bytes())) }
 
 pub fn require(state: &AppState, token: Option<&str>, admin: bool) -> AppResult<SessionUser> {
     let token = token.ok_or_else(|| error("SESSION_EXPIRED", "Iniciá sesión para continuar"))?;
     let conn = state.db.lock().map_err(|_| AppError::msg("Base no disponible"))?;
     let mut auth = state.auth.lock().map_err(|_| AppError::msg("Sesiones no disponibles"))?;
+    require_on(&conn, &mut auth, token, admin)
+}
+
+pub(crate) fn require_on(conn: &rusqlite::Connection, auth: &mut AuthState, token: &str, admin: bool) -> AppResult<SessionUser> {
     let session_key = key(token);
     let session = auth.sessions.get(&session_key).ok_or_else(|| error("SESSION_EXPIRED", "La sesión terminó. Volvé a ingresar"))?;
     if Instant::now() >= session.deadline {
@@ -69,12 +73,16 @@ fn insert_user(conn: &rusqlite::Connection, payload: &CreateUserPayload) -> AppR
 
 #[tauri::command]
 pub fn auth_setup_required(state: State<AppState>) -> AppResult<bool> {
+    let mode=state.device.lock().unwrap().mode.clone();
+    if mode.is_none() { return Ok(true); }
+    if mode.as_deref()==Some("reception_client") { return Ok(false); }
     let conn = state.db.lock().unwrap();
     Ok(conn.query_row("SELECT COUNT(*) = 0 FROM users", [], |r| r.get(0))?)
 }
 
 #[tauri::command]
 pub fn auth_setup(state: State<AppState>, payload: LoginPayload, legacy_pin: Option<String>) -> AppResult<SessionUser> {
+    if !matches!(state.device.lock().unwrap().mode.as_deref(), Some("reception" | "remote")) { return Err(AppError::forbidden("El administrador se configura en la principal")); }
     let mut conn = state.db.lock().unwrap();
     let tx = conn.transaction()?;
     let count: i64 = tx.query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0))?;
@@ -207,7 +215,7 @@ mod tests {
         let conn = db::open(Path::new(":memory:")).unwrap();
         insert_user(&conn, &CreateUserPayload { username: "admin".into(), password: "Prueba-segura-123".into(), role: "admin".into() }).unwrap();
         insert_user(&conn, &CreateUserPayload { username: "recepcion".into(), password: "Prueba-segura-456".into(), role: "recepcion".into() }).unwrap();
-        AppState { db: Mutex::new(conn), auth: Mutex::new(AuthState::default()), sync: Mutex::new(None), backup: Mutex::new(None) }
+        AppState { data_dir: std::env::temp_dir(), device: Mutex::new(crate::device::DeviceConfig::default()), lan: crate::lan::Runtime::default(), db: Mutex::new(conn), auth: Mutex::new(AuthState::default()), sync: Mutex::new(None), backup: Mutex::new(None) }
     }
     fn credentials(user: &str, password: &str) -> LoginPayload { LoginPayload { username: user.into(), password: password.into() } }
 

@@ -330,6 +330,8 @@ pub struct CheckOutPayload {
     pub operation_id: Option<String>,
     #[serde(default)]
     pub expected_version: Option<i64>,
+    #[serde(default)]
+    pub quote_token: Option<String>,
     /// Set by the command from the session, never read from the UI.
     #[serde(skip_deserializing, default)]
     pub username: Option<String>,
@@ -720,3 +722,6 @@ pub struct EffectivePrice {
     pub extra_hour_cents: i64,
     pub rule_name: Option<String>,
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AccountQuote { pub bill: BillPreview, pub version: i64, pub token: String }

@@ -5,7 +5,7 @@ use crate::models::*;
 use crate::sync::outbox::{self, Entity, OutboxOp};
 use rusqlite::{params, Connection, OptionalExtension};
 
-pub const CONTRACT_VERSION: u32 = 2;
+pub const CONTRACT_VERSION: u32 = 3;
 
 #[derive(Debug, Clone)]
 pub struct Actor {
@@ -270,7 +270,7 @@ pub fn close_account(
     operation_id: Option<String>,
 ) -> AppResult<()> {
     let root = outbox::resolve_operation_id(&operation_id);
-    let tx = conn.transaction()?;
+    let tx = conn.savepoint()?;
     persist_computed_charges(&tx, bill)?;
     tx.execute(
         "UPDATE stays SET status = 'closed', check_out_at = ?1,
@@ -308,8 +308,9 @@ pub fn close_account(
     closed.check_out_at = Some(checkout_at.into());
     let settings = db::load_settings(&tx)?;
     let bytes = crate::printer::build_receipt(&settings, &closed, bill);
-    tx.execute("INSERT INTO receipt_snapshots(stay_id, bytes, created_at) VALUES (?1, ?2, ?3)",
-        params![stay.id, bytes, checkout_at])?;
+    let document = serde_json::json!({"settings": get_settings(&tx)?, "stay": closed, "bill": bill});
+    tx.execute("INSERT INTO receipt_snapshots(stay_id, bytes, created_at, document_json) VALUES (?1, ?2, ?3, ?4)",
+        params![stay.id, bytes, checkout_at, document.to_string()])?;
 
     let mut ops = vec![OutboxOp::upsert(
         Entity::Stay,
@@ -456,7 +457,7 @@ pub fn set_room_status(conn: &mut Connection, room_id: i64, status: String) -> A
         ));
     }
     let root = outbox::resolve_operation_id(&None);
-    let tx = conn.transaction()?;
+    let tx = conn.savepoint()?;
     db::set_room_status(&tx, room_id, &status)?;
     outbox::enqueue(
         &tx,
@@ -554,7 +555,7 @@ fn ensure_dormida_window(cutoff_hour: i64) -> AppResult<()> {
 pub fn check_in_on(conn: &mut Connection, payload: CheckInPayload) -> AppResult<Stay> {
     accept_reserved_fields(&payload.operation_id, &payload.expected_version)?;
     let root = outbox::resolve_operation_id(&payload.operation_id);
-    let tx = conn.transaction()?;
+    let tx = conn.savepoint()?;
     let stay_id = check_in_in_tx(&tx, payload, &root)?;
     tx.commit()?;
     db::get_stay(conn, stay_id)
@@ -563,7 +564,7 @@ pub fn check_in_on(conn: &mut Connection, payload: CheckInPayload) -> AppResult<
 #[cfg(test)]
 fn check_in_on_failing(conn: &mut Connection, payload: CheckInPayload) -> AppResult<Stay> {
     let root = outbox::resolve_operation_id(&payload.operation_id);
-    let tx = conn.transaction()?;
+    let tx = conn.savepoint()?;
     let _stay_id = check_in_in_tx(&tx, payload, &root)?;
     Err(AppError::msg("fallo inyectado"))
 }
@@ -703,7 +704,7 @@ pub fn convert_to_overnight(conn: &mut Connection, stay_id: i64) -> AppResult<St
             .to_rfc3339()
     });
     let root = outbox::resolve_operation_id(&None);
-    let tx = conn.transaction()?;
+    let tx = conn.savepoint()?;
     tx.execute(
         "UPDATE stays SET converted_to_overnight = 1, overnight_rate_plan_id = ?1, expected_checkout_at = COALESCE(?2, expected_checkout_at) WHERE id = ?3",
         params![overnight.id, expected_checkout, stay_id],
@@ -936,7 +937,7 @@ pub fn add_charge(conn: &mut Connection, actor: &Actor, payload: AddChargePayloa
     }
     let root = outbox::resolve_operation_id(&payload.operation_id);
     let now = now_rfc3339();
-    let tx = conn.transaction()?;
+    let tx = conn.savepoint()?;
     tx.execute(
         "INSERT INTO charges (stay_id, kind, description, amount_cents, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
         params![payload.stay_id, kind, payload.description.trim(), amount, now],
@@ -989,7 +990,7 @@ pub fn add_product_charge_by(
     }
     let root = outbox::resolve_operation_id(&payload.operation_id);
     let now = now_rfc3339();
-    let tx = conn.transaction()?;
+    let tx = conn.savepoint()?;
     tx.execute(
         "INSERT INTO charges (stay_id, kind, description, amount_cents, created_at) VALUES (?1, 'surcharge', ?2, ?3, ?4)",
         params![payload.stay_id, product.name, product.price_cents, now],
@@ -1033,7 +1034,7 @@ pub fn delete_charge(conn: &mut Connection, actor: &Actor, charge_id: i64) -> Ap
     }
     let root = outbox::resolve_operation_id(&None);
     let now = now_rfc3339();
-    let tx = conn.transaction()?;
+    let tx = conn.savepoint()?;
     tx.execute(
         "UPDATE charges SET deleted_at = ?1 WHERE id = ?2 AND kind IN ('surcharge', 'discount') AND deleted_at IS NULL",
         params![now, charge_id],
@@ -1055,7 +1056,12 @@ pub fn delete_charge(conn: &mut Connection, actor: &Actor, charge_id: i64) -> Ap
     Ok(())
 }
 
+#[cfg(test)]
 pub fn check_out(conn: &mut Connection, payload: &CheckOutPayload) -> AppResult<(Stay, BillPreview)> {
+    check_out_confirmed(conn, payload, None)
+}
+
+pub fn check_out_confirmed(conn: &mut Connection, payload: &CheckOutPayload, confirmation: Option<&str>) -> AppResult<(Stay, BillPreview)> {
     accept_reserved_fields(&payload.operation_id, &payload.expected_version)?;
     let mut stay = db::get_stay(conn, payload.stay_id)?;
     if stay.status != "open" {
@@ -1063,6 +1069,11 @@ pub fn check_out(conn: &mut Connection, payload: &CheckOutPayload) -> AppResult<
     }
     stay.checked_out_by = payload.username.clone();
     let bill = build_preview(conn, &stay)?;
+    if let Some(expected) = confirmation {
+        if crate::operations::quote_token(conn, stay.id, &bill)? != expected {
+            return Err(AppError::conflict("La cuenta cambió. Revisá el importe actualizado antes de cerrar"));
+        }
+    }
     let checkout_at = now_rfc3339();
     close_account(conn, &stay, &bill, &checkout_at, payload.operation_id.clone())?;
     stay.status = "closed".into();
@@ -1102,7 +1113,7 @@ pub fn create_reservation_on(
 ) -> AppResult<Reservation> {
     accept_reserved_fields(&payload.operation_id, &payload.expected_version)?;
     let root = outbox::resolve_operation_id(&payload.operation_id);
-    let tx = conn.transaction()?;
+    let tx = conn.savepoint()?;
     let reservation_id = create_reservation_in_tx(&tx, payload, &root)?;
     tx.commit()?;
     db::get_reservation(conn, reservation_id)
@@ -1114,7 +1125,7 @@ fn create_reservation_on_failing(
     payload: CreateReservationPayload,
 ) -> AppResult<Reservation> {
     let root = outbox::resolve_operation_id(&payload.operation_id);
-    let tx = conn.transaction()?;
+    let tx = conn.savepoint()?;
     let _reservation_id = create_reservation_in_tx(&tx, payload, &root)?;
     Err(AppError::msg("fallo inyectado"))
 }
@@ -1210,7 +1221,7 @@ pub fn set_reservation_status(
         ));
     }
     let root = outbox::resolve_operation_id(&None);
-    let tx = conn.transaction()?;
+    let tx = conn.savepoint()?;
     tx.execute(
         "UPDATE reservations SET status = ?1 WHERE id = ?2",
         params![status, reservation_id],
@@ -1658,6 +1669,7 @@ mod tests {
                 operation_id: Some("op-checkout-1".into()),
                 expected_version: None,
                 username: Some("recepcion".into()),
+                quote_token: None,
             },
         )?;
         assert_eq!(closed.status, "closed");

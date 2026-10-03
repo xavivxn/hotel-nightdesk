@@ -60,10 +60,15 @@ export function DeviceModePage({ onChosen }: { onChosen: (mode: DeviceMode) => v
                   : "border-[var(--line)] bg-[var(--surface)] hover:bg-[var(--surface-2)]",
               )}
             >
-              <strong className="block text-[var(--ink)]">Recepción</strong>
+              <strong className="block text-[var(--ink)]">Recepción principal</strong>
               <span className="mt-1 block text-sm text-[var(--muted)]">
                 Opera el motel en esta PC: tablero, cuentas e impresión.
               </span>
+            </button>
+            <button type="button" onClick={() => setMode("reception_client")}
+              className={cn("rounded-lg border p-4 text-left", mode === "reception_client" ? "border-[var(--accent)] bg-[var(--accent-soft)]" : "border-[var(--line)] bg-[var(--surface)]")}>
+              <strong className="block">Recepción adicional</strong>
+              <span className="mt-1 block text-sm text-[var(--muted)]">Usa los datos de la principal por la red del local, incluso sin internet.</span>
             </button>
             <button
               type="button"

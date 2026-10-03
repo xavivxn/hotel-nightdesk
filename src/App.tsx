@@ -12,6 +12,9 @@ import { SettingsPage } from "@/pages/SettingsPage";
 import { CatalogPage } from "@/pages/CatalogPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { UsersPage } from "@/pages/UsersPage";
+import { ReceptionPairingPage, ReceptionConnectionPage } from "@/pages/ReceptionConnectionPage";
+import { PrinterPage } from "@/pages/PrinterPage";
+import { ActivityPage } from "@/pages/ActivityPage";
 import { DeviceModePage } from "@/pages/DeviceModePage";
 import { RemoteConfigPage } from "@/pages/RemoteConfigPage";
 import { LoveNestLogo } from "@/components/layout/BrandLogo";
@@ -48,6 +51,7 @@ export default function App() {
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [setup, setSetup] = useState<boolean | null>(null);
   const [deviceMode, setDeviceMode] = useState<DeviceMode | null | undefined>(undefined);
+  const [paired, setPaired] = useState(false);
   const [remoteReady, setRemoteReady] = useState<boolean | null>(null);
   const [remoteEmbedded, setRemoteEmbedded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -90,6 +94,9 @@ export default function App() {
         }
         setRemoteReady(configured);
         setSetup(embedded ? await api.setupRequired() : false);
+      } else if (mode === "reception_client") {
+        setPaired((await api.lanStatus()).paired);
+        setSetup(false);
       } else if (mode === "reception") {
         setRemoteEmbedded(false);
         setRemoteReady(null);
@@ -157,11 +164,18 @@ export default function App() {
       api.clearSession();
       window.dispatchEvent(new Event("nightdesk-session-expired"));
     }, Math.max(0, session.expires_at * 1000 - Date.now()));
+    const refreshSettings = () => { void api.getSettings().then(current => { if (!cancelled) setSettings({ ...current, theme: "light" }); }).catch(() => undefined); };
+    window.addEventListener("reception:changed", refreshSettings);
+    window.addEventListener("printer:changed", refreshSettings);
+    window.addEventListener("sync:catalog-updated", refreshSettings);
     window.addEventListener("focus", refresh);
     return () => {
       cancelled = true;
       clearInterval(timer);
       clearTimeout(expiration);
+      window.removeEventListener("reception:changed", refreshSettings);
+      window.removeEventListener("printer:changed", refreshSettings);
+      window.removeEventListener("sync:catalog-updated", refreshSettings);
       window.removeEventListener("focus", refresh);
     };
   }, [session, setTheme]);
@@ -229,6 +243,8 @@ export default function App() {
                 setSetup(false);
                 setRemoteReady(false);
               }
+            } else if (mode === "reception_client") {
+              setSetup(false); setPaired(false);
             } else {
               setRemoteEmbedded(false);
               void api.setupRequired().then(setSetup);
@@ -237,6 +253,8 @@ export default function App() {
         }}
       />
     );
+  } else if (deviceMode === "reception_client" && !paired) {
+    body = <ReceptionPairingPage onPaired={() => setPaired(true)} />;
   } else if (deviceMode === "remote" && remoteReady === false) {
     body = <RemoteConfigPage onConfigured={() => setRemoteReady(true)} />;
   } else if (!session || inHandoff) {
@@ -301,6 +319,9 @@ export default function App() {
               }
             >
               <Route path="/" element={<BoardPage settings={settings} deviceMode={deviceMode} />} />
+              <Route path="/actividad" element={<ActivityPage user={session.user} />} />
+              <Route path="/impresora" element={deviceMode !== "remote" ? <PrinterPage /> : <Navigate to="/" replace />} />
+              <Route path="/puestos" element={admin && deviceMode === "reception" ? <ReceptionConnectionPage /> : <Navigate to="/" replace />} />
               <Route path="/reservas" element={<ReservationsPage deviceMode={deviceMode} />} />
               <Route path="/historial" element={<HistoryPage settings={settings} deviceMode={deviceMode} />} />
               <Route path="/resumen" element={admin ? <SummaryPage settings={settings} deviceMode={deviceMode} /> : <Navigate to="/" replace />} />
@@ -326,6 +347,7 @@ export default function App() {
       <div className="relative min-h-0 flex-1 overflow-hidden">
         {body}
         {login}
+        {deviceMode === "reception_client" && paired && !session && <Button variant="secondary" className="absolute bottom-6 right-6 z-50" onClick={async () => { try { await api.lanControl("reconnect"); api.clearSession(); setPaired(false); } catch (e) { setError(String(e)); } }}>Volver a vincular recepción</Button>}
       </div>
     </div>
   );

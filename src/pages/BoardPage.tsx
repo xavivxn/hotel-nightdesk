@@ -34,9 +34,7 @@ export function BoardPage({
       setError(null);
       setBoard(rooms);
       setRates(plans);
-      setSelected((current) =>
-        current ? (rooms.find((r) => r.room.id === current.room.id) ?? null) : null,
-      );
+      // Keep the open form and its expected version. The account drawer refreshes itself.
     } catch (e) {
       setError(String(e));
     }
@@ -44,13 +42,13 @@ export function BoardPage({
 
   useEffect(() => {
     void load();
-    const id = window.setInterval(load, deviceMode === "remote" ? 60000 : 20000);
+    const id = window.setInterval(load, deviceMode === "remote" ? 60000 : 5000);
     function onCatalog() {
       void load();
     }
     window.addEventListener("sync:catalog-updated", onCatalog);
     let unsub = () => {};
-    if (deviceMode === "remote") {
+    {
       void api.subscribeOperational(() => {
         setLiveNote(`Actualizado ${new Date().toLocaleTimeString()}`);
         void load();

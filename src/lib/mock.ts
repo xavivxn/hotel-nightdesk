@@ -467,6 +467,23 @@ export async function mockInvoke<T>(name: string, args: Record<string, unknown> 
 
 function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
   switch (name) {
+    case "account_quote": {
+      const stay = db.stays.find(s => s.id === Number(args.stay_id));
+      if (!stay) fail("Estadía inexistente");
+      return { bill: stayBill(db, stay), version: 1, token: "browser-preview" };
+    }
+    case "lan_revision": return { epoch: "browser", revision: 0 };
+    case "lan_control":
+      if (args.action === "status") return { mode: localStorage.getItem("nightdesk.device_mode"), station_id: "browser", name: "Demostración", enabled: false, running: false, paired: false, host_name: null, print_target: "local", bind_address: "", port: 17443, connection: { connected: true, last_seen_at: null, last_error: null, events_connected: false } };
+      if (args.action === "discover" || args.action === "interfaces" || args.action === "pending") return [];
+      if (args.action === "admin_info") return { identity: null, pending: [], stations: [], pairing_open: false };
+      fail("La vinculación LAN se realiza en la aplicación de Windows");
+      break;
+    case "printer_config_get": return { settings: db.settings, target: "local" };
+    case "printer_config_save": db.settings = args.settings as AppSettings; return;
+    case "receipt_print": return "Demostración: no se envió a una impresora";
+    case "operation_result": return null;
+    case "operator_activity": return { from: args.from, to: args.to, timezone: "America/Asuncion", operations: [], closed_accounts: 0, closed_total_cents: 0 };
     case "analytics_summary":
       return mockAnalytics(db, args);
     case "daily_report": {
@@ -489,7 +506,7 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
     }
     case "contract_info": {
       const info: ContractInfo = {
-        contract_version: 1,
+        contract_version: 3,
         app_version: "0.1.0",
         schema_migrations: ["001_init", "002_products", "003_rooms_scope", "004_account_closure", "005_auth", "006_stay_integrity"],
       };
@@ -908,12 +925,12 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
       return db.settings.printer_enabled ? "Simulación: reimpresión en el navegador" : null;
     case "device_mode_get": {
       const mode = localStorage.getItem("nightdesk.device_mode");
-      return mode === "reception" || mode === "remote" ? mode : null;
+      return mode === "reception" || mode === "remote" || mode === "reception_client" ? mode : null;
     }
     case "device_mode_set": {
       const payload = args.payload as { mode: string };
       if (localStorage.getItem("nightdesk.device_mode")) fail("El modo de este equipo ya está definido");
-      if (payload.mode !== "reception" && payload.mode !== "remote") fail("Elegí Recepción o Administración remota");
+      if (payload.mode !== "reception" && payload.mode !== "remote" && payload.mode !== "reception_client") fail("Elegí Recepción o Administración remota");
       localStorage.setItem("nightdesk.device_mode", payload.mode);
       return;
     }
