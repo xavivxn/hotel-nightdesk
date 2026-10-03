@@ -414,6 +414,7 @@ export type EffectivePrice = {
 
 export type AccountQuote = { bill: BillPreview; version: number; token: string };
 export type LanHost = { station_id: string; address: string; port: number; certificate: string; fingerprint: string; name: string };
+export type LanNearbyStation = { station_id: string; address: string; name: string };
 export type LanStatus = {
   mode: DeviceMode | null; station_id: string; name: string; enabled: boolean; running: boolean; paired: boolean;
   host_name: string | null; print_target: string; bind_address: string; port: number;

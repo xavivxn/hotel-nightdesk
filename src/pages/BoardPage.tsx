@@ -1,6 +1,8 @@
 import { BedDouble, BrushCleaning, CalendarClock, Check, X } from "lucide-react";
 import { RoomCard, RoomStatusLegend } from "@/components/board/RoomCard";
 import { RoomDrawer } from "@/components/board/RoomDrawer";
+import { ReceptionLanControl } from "@/components/board/ReceptionLinkCard";
+import type { ReceptionLan } from "@/components/layout/ReceptionConnectionStatus";
 import { UpdateButton } from "@/components/layout/UpdateButton";
 import { FlipStat } from "@/components/ui/FlipStat";
 import { api } from "@/lib/api";
@@ -8,6 +10,7 @@ import { playStatusPulse, runViewTransition } from "@/lib/board-motion";
 import type { AppSettings, BoardRoom, DeviceMode, RatePlan } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useOutletContext } from "react-router-dom";
 
 export function BoardPage({
   settings,
@@ -22,6 +25,7 @@ export function BoardPage({
   const [selected, setSelected] = useState<BoardRoom | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [liveNote, setLiveNote] = useState<string | null>(null);
+  const lan = useOutletContext<ReceptionLan>();
 
   const cardEls = useRef(new Map<number, HTMLButtonElement>());
   const statEls = useRef(new Map<string, HTMLElement>());
@@ -123,6 +127,7 @@ export function BoardPage({
           )}
         </div>
         <div className="flex items-center gap-4">
+          {deviceMode !== "remote" && <ReceptionLanControl mode={deviceMode} lan={lan} />}
           <UpdateButton />
           <p className="occupancy-compact">
             {occupied} de {board.length} ocupadas

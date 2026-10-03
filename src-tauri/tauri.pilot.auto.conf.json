@@ -1,0 +1,15 @@
+{
+  "productName": "Nightdesk LAN Pilot Auto",
+  "identifier": "com.nightdesk.hotel.pilot.auto",
+  "bundle": {
+    "createUpdaterArtifacts": false,
+    "macOS": {
+      "infoPlist": "macos/Info.pilot.plist"
+    },
+    "windows": {
+      "nsis": {
+        "installerHooks": "windows/pilot-installer-hooks.nsh"
+      }
+    }
+  }
+}

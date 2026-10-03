@@ -25,6 +25,7 @@ use tauri::{AppHandle, Emitter, Manager};
 pub const PROTOCOL: u32 = 1;
 pub const TLS_NAME: &str = "nightdesk.local";
 pub const SERVICE_TYPE: &str = "_nightdesk._tcp.local.";
+pub const CLIENT_SERVICE_TYPE: &str = "_nightdesk-peer._udp.local.";
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Request {
@@ -75,6 +76,7 @@ pub struct ConnectionStatus {
 }
 pub struct Runtime {
     pub host: Mutex<Option<HostRuntime>>,
+    pub client_advertisement: Mutex<Option<(String, mdns_sd::ServiceDaemon)>>,
     pub start_lock: tokio::sync::Mutex<()>,
     pub epoch: Mutex<String>,
     pub changes: tokio::sync::broadcast::Sender<Change>,
@@ -93,6 +95,7 @@ impl Default for Runtime {
         let (changes, _) = tokio::sync::broadcast::channel(64);
         Self {
             host: Mutex::new(None),
+            client_advertisement: Mutex::new(None),
             start_lock: tokio::sync::Mutex::new(()),
             epoch: Mutex::new(uuid::Uuid::new_v4().to_string()),
             changes,
@@ -151,7 +154,34 @@ pub fn start_observer(app: AppHandle) {
             if state.lan.stopping.load(Ordering::Relaxed) {
                 break;
             }
-            if state.device.lock().unwrap().mode.as_deref() != Some("reception") {
+            let config = state.device.lock().unwrap().clone();
+            if config.mode.as_deref() == Some("reception_client") {
+                ticks += 1;
+                if ticks % 10 == 0 {
+                    let addresses = discovery::client_addresses();
+                    let key = format!("{}:{}:{}", config.station_id, config.name, addresses.join(","));
+                    let previous_key = state.lan.client_advertisement.lock().unwrap().as_ref().map(|(key, _)| key.clone());
+                    if config.paired || addresses.is_empty() {
+                        if let Some((_, daemon)) = state.lan.client_advertisement.lock().unwrap().take() {
+                            let _ = daemon.shutdown();
+                        }
+                    } else if previous_key.as_deref() != Some(&key) {
+                        if let Some((_, daemon)) = state.lan.client_advertisement.lock().unwrap().take() {
+                            let _ = daemon.shutdown();
+                        }
+                        let station_id = config.station_id.clone();
+                        let name = config.name.clone();
+                        let result = tauri::async_runtime::spawn_blocking(move || discovery::advertise_client(&station_id, &name, &addresses)).await;
+                        match result {
+                            Ok(Ok(daemon)) => *state.lan.client_advertisement.lock().unwrap() = Some((key, daemon)),
+                            Ok(Err(error)) => state.lan.connection.lock().unwrap().last_error = Some(error.to_string()),
+                            Err(_) => {}
+                        }
+                    }
+                }
+                continue;
+            }
+            if config.mode.as_deref() != Some("reception") {
                 continue;
             }
             let now = state
@@ -204,6 +234,9 @@ pub fn stop(app: &AppHandle) {
         }
     }
     *state.lan.pairing_until.lock().unwrap() = None;
+    if let Some((_, daemon)) = state.lan.client_advertisement.lock().unwrap().take() {
+        let _ = daemon.shutdown();
+    };
 }
 pub async fn stop_and_wait(app: &AppHandle) -> AppResult<()> {
     let state = app.state::<AppState>();

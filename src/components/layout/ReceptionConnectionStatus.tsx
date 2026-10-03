@@ -1,49 +1,122 @@
-import { RoleContext } from "@/lib/permissions";
-import { Input } from "@/components/ui/Field";
-import { useContext, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { AlertTriangle, ArrowRight } from "lucide-react";
 import { api } from "@/lib/api";
-import type { DeviceMode, LanStatus, PendingOperation } from "@/lib/types";
-import { Button } from "@/components/ui/Button";
+import type { DeviceMode, LanHost, LanNearbyStation, LanStatus, PendingOperation } from "@/lib/types";
 
-export function ReceptionConnectionStatus({ mode }: { mode: DeviceMode }) {
-  const admin = useContext(RoleContext) === "admin";
-  const [reviewNote, setReviewNote] = useState("");
+export type LanAdminInfo = {
+  identity: LanHost | null;
+  pairing_open: boolean;
+  pending: { station_id: string; name: string; verification_code: string }[];
+  stations: { id: string; name: string; active: boolean }[];
+};
+
+export type ReceptionLan = {
+  status: LanStatus | null;
+  info: LanAdminInfo | null;
+  nearby: LanNearbyStation[];
+  pending: PendingOperation[];
+  openRequest: number;
+  showPanel: () => void;
+  refresh: () => Promise<void>;
+  scan: () => Promise<void>;
+  retry: (operationId: string) => Promise<void>;
+  review: (operationId: string, note: string) => Promise<void>;
+};
+
+export function useReceptionLan(mode: DeviceMode, admin: boolean): ReceptionLan {
   const [status, setStatus] = useState<LanStatus | null>(null);
+  const [info, setInfo] = useState<LanAdminInfo | null>(null);
+  const [nearby, setNearby] = useState<LanNearbyStation[]>([]);
   const [pending, setPending] = useState<PendingOperation[]>([]);
-  const [error, setError] = useState("");
-  const [retrying, setRetrying] = useState(false);
+  const [openRequest, setOpenRequest] = useState(0);
   const revision = useRef("");
+  const polling = useRef(false);
+  const scanning = useRef(false);
+
+  const refresh = useCallback(async () => {
+    if (mode === "remote" || polling.current) return;
+    polling.current = true;
+    try {
+      const reads: Promise<unknown>[] = [
+        api.receptionRevision().then(r => {
+          const key = `${r.epoch}:${r.revision}`;
+          if (key !== revision.current) {
+            revision.current = key;
+            window.dispatchEvent(new Event("reception:changed"));
+          }
+        }),
+        api.lanStatus().then(setStatus),
+      ];
+      if (mode === "reception_client") {
+        reads.push(api.pendingOperations().then(setPending));
+      }
+      if (mode === "reception" && admin) {
+        reads.push(api.lanControl<LanAdminInfo>("admin_info").then(setInfo));
+      }
+      // A failed read never hides the last known unresolved request or stops other reads.
+      await Promise.allSettled(reads);
+    } finally {
+      polling.current = false;
+    }
+  }, [mode, admin]);
+
+  const scan = useCallback(async () => {
+    if (mode !== "reception" || !admin || scanning.current) return;
+    scanning.current = true;
+    try { setNearby(await api.discoverAdditionalStations()); }
+    finally { scanning.current = false; }
+  }, [mode, admin]);
+
   useEffect(() => {
     if (mode === "remote") return;
-    let active = true;
-    async function load() {
-      try {
-        const r = await api.receptionRevision();
-        const key = `${r.epoch}:${r.revision}`;
-        if (key !== revision.current) { revision.current = key; window.dispatchEvent(new Event("reception:changed")); }
-        if (mode === "reception_client") { const rows = await api.pendingOperations(); if (active) setPending(rows); }
-      } catch { /* Keep the last visible data and show the separate LAN indicator. */ }
-      try { const next = await api.lanStatus(); if (active) setStatus(next); } catch { /* local status can be retried */ }
-    }
-    void load(); const timer = window.setInterval(() => void load(), 5000);
-    return () => { active = false; window.clearInterval(timer); };
+    void refresh();
+    const id = window.setInterval(() => void refresh(), 5000);
+    return () => window.clearInterval(id);
+  }, [mode, refresh]);
+
+  useEffect(() => {
+    if (mode !== "reception" || !admin) return;
+    void scan().catch(() => undefined);
+    const id = window.setInterval(() => void scan().catch(() => undefined), 10000);
+    return () => window.clearInterval(id);
+  }, [mode, admin, scan]);
+
+  const retry = useCallback(async (operationId: string) => {
+    if (mode !== "reception_client") return;
+    setPending(await api.retryOperation(operationId));
   }, [mode]);
-  if (mode === "remote" || (mode === "reception" && !status?.enabled)) return null;
-  const connected = mode === "reception" ? status?.running : status?.connection.connected;
-  return <div className="space-y-2 border-b border-[var(--line)] bg-[var(--surface-2)] px-6 py-2 text-sm" role="status">
-    <p className={connected ? "text-[var(--ok)]" : "text-[var(--danger)]"}>
-      {mode === "reception" ? "Recepción principal" : "Conexión con recepción principal"}: {connected ? "activa" : "sin conexión"}
-      {!connected && mode === "reception_client" && " · Nuevas operaciones detenidas. Los datos visibles pueden estar desactualizados."}
-    </p>
-    {status?.connection.last_seen_at && !connected && <p className="text-[var(--muted)]">Última conexión: {new Date(status.connection.last_seen_at).toLocaleString("es-PY", { timeZone: "America/Asuncion" })}</p>}
-    {pending.map(p => <div key={p.operation_id} className="flex flex-wrap items-center gap-3">
-      <p>Operación de {p.username} enviada a las {new Date(p.created_at).toLocaleTimeString()}: {p.command}. Su resultado no está confirmado.</p>
-      <Button size="sm" variant="secondary" disabled={!connected || retrying || !p.can_retry} onClick={async () => {
-        setRetrying(true); setError(""); try { setPending(await api.retryOperation(p.operation_id)); } catch (e) { setError(String(e)); } finally { setRetrying(false); }
-      }}>Consultar y reenviar la misma solicitud</Button>
-      {!p.can_retry && <p>Debe revisarse con su usuario original o con administración si cambió la base principal.</p>}
-      {admin && <details className="w-full"><summary>Revisión manual de administración</summary><p className="my-2">Verificá el historial, los consumos y la cuenta en la principal. Archivar esta solicitud permite continuar y no ejecuta ninguna operación.</p><Input aria-label="Resultado de la revisión" value={reviewNote} onChange={e => setReviewNote(e.target.value)} placeholder="Qué se verificó y cómo se resolvió" /><Button size="sm" variant="secondary" disabled={!connected || retrying || reviewNote.trim().length < 12} onClick={async () => { setRetrying(true); try { await api.lanControl("review_pending", { operation_id: p.operation_id, note: reviewNote }); setPending(await api.pendingOperations()); setReviewNote(""); } catch (e) { setError(String(e)); } finally { setRetrying(false); } }}>Registrar revisión y archivar solicitud</Button></details>}
-    </div>)}
-    {error && <p className="text-[var(--danger)]">{error}</p>}
+
+  const review = useCallback(async (operationId: string, note: string) => {
+    if (mode !== "reception_client" || !admin) return;
+    await api.lanControl("review_pending", { operation_id: operationId, note });
+    setPending(await api.pendingOperations());
+  }, [mode, admin]);
+
+  return { status, info, nearby, pending, openRequest, showPanel: () => setOpenRequest(v => v + 1), refresh, scan, retry, review };
+}
+
+export function ReceptionLanAlert({ mode, lan }: { mode: DeviceMode; lan: ReceptionLan }) {
+  const navigate = useNavigate();
+  const [showLoss, setShowLoss] = useState(false);
+  const pending = lan.pending.length;
+  const lost = mode === "reception_client" && !!lan.status?.paired && !lan.status.connection.connected;
+  const serverDown = mode === "reception" && !!lan.status?.enabled && !lan.status.running;
+  useEffect(() => {
+    if (!lost && !serverDown) { setShowLoss(false); return; }
+    setShowLoss(true);
+    const timer = window.setTimeout(() => setShowLoss(false), 7000);
+    return () => window.clearTimeout(timer);
+  }, [lost, serverDown]);
+  if (mode === "remote" || (!pending && !showLoss)) return null;
+  const message = pending
+    ? `${pending} operación${pending === 1 ? "" : "es"} sin confirmar`
+    : lost ? "Sin conexión con la principal" : "Servicio LAN no disponible";
+  return <div className={`lan-alert ${pending ? "is-pending" : ""}`} role="alert">
+    <AlertTriangle size={17} aria-hidden="true" />
+    <span>{message}</span>
+    <button type="button" onClick={() => { navigate("/"); lan.showPanel(); }} aria-label={`Ver detalle: ${message}`}>
+      Ver detalle <ArrowRight size={15} aria-hidden="true" />
+    </button>
   </div>;
 }

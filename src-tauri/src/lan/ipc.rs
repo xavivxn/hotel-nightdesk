@@ -180,6 +180,11 @@ pub async fn lan_control(
                 .collect::<Vec<_>>();
             Ok(json!(list))
         }
+        "discover_clients" => encode(
+            tauri::async_runtime::spawn_blocking(discovery::discover_clients)
+                .await
+                .map_err(|_| AppError::storage("No se pudieron buscar puestos adicionales"))??,
+        ),
         "configure" => {
             let mut config = state.device.lock().unwrap().clone();
             let enabled = field(&args, "enabled")?;

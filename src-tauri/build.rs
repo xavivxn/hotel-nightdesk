@@ -9,7 +9,14 @@ fn main() {
 fn embed_device_defaults() {
     let path = Path::new("embedded_device.local.json");
     println!("cargo:rerun-if-changed=embedded_device.local.json");
-    let parsed = if path.is_file() {
+    println!("cargo:rerun-if-env-changed=NIGHTDESK_PILOT_BUILD");
+    let pilot = std::env::var("NIGHTDESK_PILOT_BUILD").as_deref() == Ok("1");
+    if pilot {
+        println!("cargo:warning=Nightdesk LAN pilot: cloud credentials are not embedded");
+    }
+    let parsed = if pilot {
+        serde_json::Value::Null
+    } else if path.is_file() {
         let raw = fs::read_to_string(path).unwrap_or_default();
         serde_json::from_str(&raw).unwrap_or(serde_json::Value::Null)
     } else {

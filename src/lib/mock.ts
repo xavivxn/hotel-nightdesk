@@ -475,7 +475,7 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
     case "lan_revision": return { epoch: "browser", revision: 0 };
     case "lan_control":
       if (args.action === "status") return { mode: localStorage.getItem("nightdesk.device_mode"), station_id: "browser", name: "Demostración", enabled: false, running: false, paired: false, host_name: null, print_target: "local", bind_address: "", port: 17443, connection: { connected: true, last_seen_at: null, last_error: null, events_connected: false } };
-      if (args.action === "discover" || args.action === "interfaces" || args.action === "pending") return [];
+      if (args.action === "discover" || args.action === "discover_clients" || args.action === "interfaces" || args.action === "pending") return [];
       if (args.action === "admin_info") return { identity: null, pending: [], stations: [], pairing_open: false };
       fail("La vinculación LAN se realiza en la aplicación de Windows");
       break;

@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowRight, LoaderCircle, RefreshCw, ShieldCheck, Wifi } from "lucide-react";
 import { api } from "@/lib/api";
 import type { LanHost, LanStatus } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
@@ -19,15 +20,27 @@ export function ReceptionPairingPage({ onPaired }: { onPaired: () => void }) {
   const [pending, setPending] = useState(false);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const [error, setError] = useState("");
+  const scanInFlight = useRef(false);
 
-  async function search() {
-    setBusy(true); setError("");
-    try { setHosts(await api.discoverReception()); }
-    catch (e) { setError(String(e)); }
-    finally { setBusy(false); }
-  }
-  useEffect(() => { void search(); }, []);
+  const search = useCallback(async () => {
+    if (scanInFlight.current) return;
+    scanInFlight.current = true;
+    setScanning(true);
+    try {
+      const found = await api.discoverReception();
+      setHosts(found);
+      setError("");
+    } catch (e) { setError(String(e)); }
+    finally { scanInFlight.current = false; setScanning(false); }
+  }, []);
+  useEffect(() => {
+    if (pending) return;
+    void search();
+    const timer = window.setInterval(() => void search(), 8000);
+    return () => window.clearInterval(timer);
+  }, [pending, search]);
   useEffect(() => {
     if (!pending) return;
     const timer = window.setInterval(() => {
@@ -36,22 +49,24 @@ export function ReceptionPairingPage({ onPaired }: { onPaired: () => void }) {
     return () => window.clearInterval(timer);
   }, [pending, onPaired]);
 
-  return <div className="h-full overflow-auto px-6 py-8"><div className="mx-auto max-w-2xl space-y-5">
-    <header><p className="page-kicker">Recepción adicional</p><h1 className="page-title">Conectar con la principal</h1>
-      <p className="mt-2 text-[var(--muted)]">Conectá ambas PCs a la misma red. En la principal, un administrador debe abrir Puestos y habilitar la vinculación.</p></header>
+  return <div className="reception-pair-page h-full overflow-auto px-6 py-8"><div className="mx-auto max-w-2xl space-y-5">
+    <header className="reception-pair-hero"><div className="reception-pair-hero-icon"><Wifi size={26} /></div><p className="page-kicker">Recepción adicional · Primer arranque</p><h1 className="page-title">Vincular con principal</h1>
+      <p className="mt-2 text-[var(--muted)]">Buscamos automáticamente la recepción principal en esta red. Ambas PCs pueden estar conectadas por Wi-Fi o cable, sin internet.</p>
+      <div className="reception-pair-search" role="status"><LoaderCircle size={17} className="reception-link-spin" /> {hosts.length ? `${hosts.length} recepción${hosts.length === 1 ? "" : "es"} encontrada${hosts.length === 1 ? "" : "s"}` : "Buscando en la red local…"}</div>
+    </header>
     <Field label="Nombre de este puesto"><Input value={name} maxLength={64} onChange={e => setName(e.target.value)} /></Field>
-    <Button variant="secondary" disabled={busy || pending} onClick={() => void search()}>{busy ? "Buscando…" : "Buscar recepción"}</Button>
-    {hosts.map(host => <button key={host.station_id} className="card block w-full rounded-lg p-4 text-left" onClick={() => { setChosen(host); setVerified(false); }}>
-      <strong>{host.name}</strong><span className="ml-3 font-mono text-sm text-[var(--muted)]">{host.address}</span>
+    <div className="flex items-center justify-between gap-3"><h2 className="font-semibold">Recepciones disponibles</h2><Button variant="secondary" size="sm" disabled={scanning || pending} onClick={() => void search()}><RefreshCw size={15} className={scanning ? "reception-link-spin" : ""} /> {scanning ? "Buscando…" : "Buscar ahora"}</Button></div>
+    {hosts.map(host => <button key={host.station_id} type="button" className={`reception-pair-host ${chosen?.station_id === host.station_id ? "is-selected" : ""}`} onClick={() => { setChosen(host); setVerified(false); }}>
+      <span className="reception-link-peer-icon"><Wifi size={19} /></span><span className="min-w-0 flex-1"><strong>{host.name}</strong><small>{host.address}</small></span><ArrowRight size={18} />
     </button>)}
-    {!busy && hosts.length === 0 && <p className="text-sm text-[var(--muted)]">No se encontró una recepción. Revisá el firewall o usá los datos de conexión manual.</p>}
+    {!scanning && hosts.length === 0 && <p className="text-sm text-[var(--muted)]">Aún no aparece la principal. Abrí Nightdesk en esa PC y activá la red local desde “Vincular con otra recepción”. También podés usar la conexión manual.</p>}
     <details className="card rounded-lg p-4"><summary>Conexión manual</summary>
       <p className="my-3 text-sm text-[var(--muted)]">Copiá los datos que muestra Puestos en la principal. Podés ajustar la dirección si cambió.</p>
       <Textarea aria-label="Datos de conexión" value={manual} onChange={e => setManual(e.target.value)} />
       <Button variant="secondary" className="mt-3" onClick={() => { try { const value = JSON.parse(manual) as LanHost; if (!value || typeof value.certificate !== "string" || typeof value.fingerprint !== "string" || typeof value.station_id !== "string" || !Number.isInteger(value.port)) throw new Error(); setChosen(value); setVerified(false); } catch { setError("Los datos de conexión no son válidos."); } }}>Usar estos datos</Button>
     </details>
     {chosen && <section className="card space-y-3 rounded-lg p-5">
-      <h2 className="text-lg font-semibold">Verificar recepción</h2>
+      <h2 className="flex items-center gap-2 text-lg font-semibold"><ShieldCheck size={20} /> Verificar recepción</h2>
       <Field label="Dirección local"><Input value={chosen.address ?? ""} onChange={e => setChosen({ ...chosen, address: e.target.value })} /></Field>
       <p className="text-sm text-[var(--muted)]">Compará esta huella completa con la que aparece en la PC principal:</p>
       <p className="break-all font-mono text-sm">{chosen.fingerprint}</p>

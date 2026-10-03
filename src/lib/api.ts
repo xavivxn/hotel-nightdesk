@@ -1,5 +1,5 @@
 import type {
-  AccountQuote, LanStatus, LanHost, PendingOperation, OperatorActivity,
+  AccountQuote, LanStatus, LanHost, LanNearbyStation, PendingOperation, OperatorActivity,
   DailyReport,
   AnalyticsSummary,
   SessionInfo, SessionUser, LoginPayload, CreateUserPayload, ManagedUser,
@@ -334,6 +334,7 @@ export const api = {
   lanStatus: () => cmd<LanStatus>("lan_control", { action: "status", args: {} }),
   lanControl: <T = unknown>(action: string, args: Record<string, unknown> = {}) => cmd<T>("lan_control", { action, args }),
   discoverReception: () => cmd<LanHost[]>("lan_control", { action: "discover", args: {} }),
+  discoverAdditionalStations: () => cmd<LanNearbyStation[]>("lan_control", { action: "discover_clients", args: {} }),
   pendingOperations: () => cmd<PendingOperation[]>("lan_control", { action: "pending", args: {} }),
   retryOperation: (operation_id: string) => cmd<PendingOperation[]>("lan_control", { action: "retry", args: { operation_id } }),
   receptionRevision: () => cmd<{ epoch: string; revision: number }>("lan_revision"),

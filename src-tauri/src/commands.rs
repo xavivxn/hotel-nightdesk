@@ -421,6 +421,7 @@ pub fn device_mode_set(state: State<AppState>, app: AppHandle, payload: DeviceMo
         return Err(AppError::forbidden("El equipo ya está configurado. No se puede reemplazar su base cambiando de modo"));
     }
     let mut next=config.clone(); next.mode=Some(payload.mode.clone());
+    if payload.mode == "reception_client" { next.name = "Recepción adicional".into(); }
     let connection=crate::device::operational_connection(&state.data_dir,Some(&payload.mode))?;
     if payload.mode!="reception_client" {
         service::device_mode_set(&connection,&payload.mode)?;

@@ -43,6 +43,7 @@ src-tauri/WixTools/
 *.msi
 *.dmg
 *.app
+pilot-artifacts/
 
 # Local SQLite copies (app data lives in the OS data dir; ignore any stray DBs)
 *.db

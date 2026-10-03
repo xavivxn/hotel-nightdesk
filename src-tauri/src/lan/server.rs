@@ -88,7 +88,15 @@ pub async fn start(app: AppHandle) -> AppResult<()> {
         })?;
     listener.set_nonblocking(true)?;
     let handle = axum_server::Handle::new();
-    let mdns = super::discovery::advertise(&identity(&app)?).ok();
+    let (mdns, discovery_error) = match super::discovery::advertise(&identity(&app)?) {
+        Ok(daemon) => (Some(daemon), None),
+        Err(error) => (
+            None,
+            Some(format!(
+                "Descubrimiento automático no disponible: {error}. Usá conexión manual"
+            )),
+        ),
+    };
     let router = Router::new()
         .route("/lan/v1/call", post(call))
         .route("/lan/v1/pair", post(pair))
@@ -99,7 +107,7 @@ pub async fn start(app: AppHandle) -> AppResult<()> {
     let server = axum_server::from_tcp_rustls(listener, tls)
         .map_err(|_| AppError::storage("No se pudo iniciar recepción"))?
         .handle(handle.clone());
-    state.lan.connection.lock().unwrap().last_error = None;
+    state.lan.connection.lock().unwrap().last_error = discovery_error;
     let instance = uuid::Uuid::new_v4().to_string();
     let finished = Arc::new(tokio::sync::Notify::new());
     *state.lan.host.lock().unwrap() = Some(HostRuntime {

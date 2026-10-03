@@ -1120,7 +1120,62 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
 main {
   background: radial-gradient(ellipse at top right, color-mix(in srgb, var(--gold) 12%, transparent), transparent 60%), var(--bg);
 }
-.board-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 24px; flex-wrap: wrap; }
+.board-header { position: relative; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 24px; flex-wrap: wrap; }
+.app-shell-main { position: relative; }
+.lan-control-wrap { position: relative; flex: 0 0 auto; }
+.lan-control { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-width: 76px; min-height: 44px; padding: 0 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); color: var(--ink); font-size: 12px; font-weight: 800; letter-spacing: .06em; cursor: pointer; transition: border-color 160ms ease, background-color 160ms ease; }
+.lan-control:hover, .lan-control[aria-expanded="true"] { border-color: var(--accent); background: var(--surface-2); }
+.lan-control-dot { display: inline-block; width: 9px; height: 9px; flex: 0 0 auto; border-radius: 50%; background: var(--muted); }
+.is-on > .lan-control-dot, .is-on .lan-control-dot { background: var(--ok); }
+.is-retry > .lan-control-dot, .is-retry .lan-control-dot { background: var(--warn); animation: reception-link-pulse 1.7s ease-in-out infinite; }
+.is-lost > .lan-control-dot, .is-lost .lan-control-dot { background: var(--danger); }
+.lan-control-count { display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px; background: var(--warn); color: var(--surface); font-size: 10px; letter-spacing: 0; }
+.lan-control-panel { position: absolute; top: calc(100% + 9px); right: 0; z-index: 40; width: min(390px, calc(100vw - 28px)); max-height: min(70vh, 610px); overflow-y: auto; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); animation: lan-panel-down 180ms cubic-bezier(.2,.85,.25,1) both; }
+.lan-control-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 17px 18px 12px; }
+.lan-control-panel-head h2 { font-size: 16px; font-weight: 700; }
+.lan-control-eyebrow { color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+.lan-panel-close { display: grid; place-items: center; width: 44px; height: 44px; margin: -9px -10px -8px 0; border-radius: 10px; color: var(--muted); cursor: pointer; }
+.lan-panel-close:hover { color: var(--ink); background: var(--surface-2); }
+.lan-panel-status { display: flex; align-items: center; gap: 9px; margin: 0 18px; padding: 10px 12px; border-radius: 9px; background: var(--surface-2); font-size: 12px; }
+.lan-panel-status.is-on { color: var(--ok); background: var(--ok-soft); }
+.lan-panel-status.is-retry { color: var(--warn); background: var(--warn-soft); }
+.lan-panel-status.is-lost { color: var(--danger); background: var(--danger-soft); }
+.lan-panel-body { display: grid; gap: 15px; padding: 18px; }
+.lan-pending-operation { display: grid; gap: 9px; padding: 12px; border: 1px solid var(--warn); border-radius: 10px; background: var(--warn-soft); font-size: 12px; }
+.lan-pending-operation details { display: grid; gap: 9px; }
+.lan-pending-operation summary { cursor: pointer; font-weight: 700; }
+.lan-linked-list { display: grid; gap: 4px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; font-size: 12px; }
+.lan-linked-list small { color: var(--muted); }
+.lan-alert { position: absolute; z-index: 35; right: 20px; bottom: 20px; display: flex; align-items: center; flex-wrap: wrap; gap: 9px; max-width: min(420px, calc(100% - 40px)); padding: 10px 12px; border: 1px solid var(--danger); border-radius: 11px; background: var(--surface); box-shadow: var(--shadow); color: var(--danger); font-size: 12px; font-weight: 700; }
+.lan-alert.is-pending { border-color: var(--warn); color: var(--warn); }
+.lan-alert button { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; color: var(--accent); font-weight: 700; cursor: pointer; }
+.reception-link-peer-icon { display: grid; place-items: center; flex: 0 0 auto; color: var(--accent); background: var(--accent-soft); border-radius: 12px; }
+.reception-link-spin { animation: reception-link-spin 1.5s linear infinite; }
+.reception-link-discovery { display: grid; gap: 12px; padding: 15px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); }
+.reception-link-refresh { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; color: var(--accent); font-size: 12px; font-weight: 700; cursor: pointer; }
+.reception-link-peer { display: flex; align-items: center; gap: 11px; padding: 10px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.reception-link-peer p { color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+.reception-link-peer-icon { width: 36px; height: 36px; }
+.reception-link-details summary { cursor: pointer; color: var(--accent); font-size: 12px; font-weight: 700; }
+.reception-link-details p { margin-top: 7px; }
+.reception-link-request { display: flex; align-items: flex-start; gap: 10px; padding: 13px; border: 1px solid var(--info); border-radius: 10px; font-size: 13px; }
+.reception-link-request > div { min-width: 0; flex: 1; }
+.reception-link-request p { margin: 5px 0; color: var(--muted); }
+.reception-link-request code { font-family: var(--font-mono); font-size: 18px; font-weight: 700; }
+.reception-link-settings { display: inline-flex; align-items: center; gap: 7px; color: var(--accent); font-size: 12px; font-weight: 700; }
+.reception-pair-page { background: radial-gradient(circle at 75% 12%, color-mix(in srgb, var(--gold) 18%, transparent), transparent 50%), var(--bg); }
+.reception-pair-hero { padding: 27px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow); animation: reception-link-arrive 480ms cubic-bezier(.2,.85,.25,1) both; }
+.reception-pair-hero-icon { display: grid; place-items: center; width: 54px; height: 54px; margin-bottom: 19px; border-radius: 14px; color: var(--accent); background: var(--accent-soft); }
+.reception-pair-search { display: inline-flex; align-items: center; gap: 8px; margin-top: 17px; padding: 8px 11px; border-radius: 999px; color: var(--info); background: var(--info-soft); font-size: 12px; font-weight: 700; }
+.reception-pair-host { display: flex; align-items: center; gap: 13px; width: 100%; padding: 15px; border: 1px solid var(--line); border-radius: 12px; text-align: left; background: var(--surface); cursor: pointer; transition: border-color 180ms ease, transform 180ms ease, box-shadow 180ms ease; }
+.reception-pair-host:hover, .reception-pair-host.is-selected { border-color: var(--accent); box-shadow: var(--shadow); transform: translateY(-2px); }
+.reception-pair-host strong, .reception-pair-host small { display: block; }
+.reception-pair-host small { margin-top: 3px; color: var(--muted); font-family: var(--font-mono); }
+@keyframes reception-link-arrive { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes reception-link-pulse { 50% { box-shadow: 0 0 0 10px color-mix(in srgb, var(--accent) 3%, transparent); } }
+@keyframes lan-panel-down { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes reception-link-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .lan-control-panel, .lan-control-dot, .reception-pair-hero, .reception-link-spin { animation: none !important; } }
 .page-kicker { margin-bottom: 8px; }
 .page-description { font-size: 13px; color: var(--muted); margin-top: 10px; }
 .occupancy-compact { margin: 0; font-size: 13px; font-weight: 600; color: var(--muted); white-space: nowrap; }

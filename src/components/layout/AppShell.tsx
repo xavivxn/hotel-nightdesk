@@ -15,7 +15,7 @@ import {
   WifiOff,
 } from "lucide-react";
 import { LoveNestLogo } from "@/components/layout/BrandLogo";
-import { ReceptionConnectionStatus } from "./ReceptionConnectionStatus";
+import { ReceptionLanAlert, useReceptionLan } from "./ReceptionConnectionStatus";
 import { DutyClock } from "@/components/layout/DutyClock";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
@@ -130,6 +130,7 @@ export function AppShell({
   const [enter] = useState(() => consumeShellEnter());
   const online = useOnline();
   const location = useLocation();
+  const lan = useReceptionLan(deviceMode, user.role === "admin");
 
   useEffect(() => {
     if (deviceMode === "remote") return;
@@ -209,10 +210,10 @@ export function AppShell({
         </div>
       </aside>
       <div className="app-shell-main flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <ReceptionConnectionStatus mode={deviceMode} />
         <main key={location.pathname} className="app-shell-content app-route-enter min-h-0 min-w-0 flex-1 overflow-auto">
-          <Outlet />
+          <Outlet context={lan} />
         </main>
+        {deviceMode !== "remote" && <ReceptionLanAlert mode={deviceMode} lan={lan} />}
       </div>
     </div>
   );
