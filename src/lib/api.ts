@@ -110,9 +110,12 @@ let cachedMode: DeviceMode | null | undefined;
 let cachedEmbeddedRemote: boolean | undefined;
 
 export async function refreshDeviceMode(): Promise<DeviceMode | null> {
-  cachedMode = undefined;
+  // Keep the previous mode until the new one arrives: commands already in flight
+  // route through reception_invoke by reading cachedMode.
   cachedEmbeddedRemote = undefined;
-  return getDeviceMode();
+  const mode = await cmdRaw<DeviceMode | null>("device_mode_get", {});
+  cachedMode = mode;
+  return mode;
 }
 
 export async function remoteEmbeddedAuth(): Promise<boolean> {

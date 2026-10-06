@@ -19,10 +19,11 @@ mod pricing;
 mod stock;
 mod sync;
 mod updater;
+mod window_fit;
 
 use rusqlite::Connection;
 use std::sync::Mutex;
-use tauri::{LogicalSize, Manager};
+use tauri::Manager;
 
 pub static MAINTENANCE: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
 
@@ -45,6 +46,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.unminimize();
+                window_fit::ensure_visible(&window);
                 let _ = window.show();
                 let _ = window.set_focus();
             }
@@ -95,7 +97,8 @@ pub fn run() {
                         app.state::<AppState>().lan.stopping.store(true, std::sync::atomic::Ordering::Relaxed);
                         lan::stop(app); app.exit(0);
                     } else if let Some(window)=app.get_webview_window("main") {
-                        let _=window.show(); let _=window.unminimize(); let _=window.set_focus();
+                        let _=window.unminimize(); window_fit::ensure_visible(&window);
+                        let _=window.show(); let _=window.set_focus();
                     }
                 }).build(app)?;
             // Force window/taskbar icon (bundle icons alone often stay cached in `tauri dev` on Windows).
@@ -106,10 +109,10 @@ pub fn run() {
                 if let Some(name) = app.config().product_name.as_deref() {
                     let _ = window.set_title(name);
                 }
-                let _ = window.set_fullscreen(false);
-                let _ = window.unmaximize();
-                let _ = window.set_size(LogicalSize::new(1680.0, 1050.0));
-                let _ = window.center();
+                // The window starts hidden (tauri.conf.json) and is shown once it fits the
+                // monitor, so it never flashes partly off-screen.
+                window_fit::place_initial(&window);
+                let _ = window.show();
             }
             Ok(())
         })
