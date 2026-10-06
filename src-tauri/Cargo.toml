@@ -1,6 +1,6 @@
 [package]
 name = "nightdesk"
-version = "0.1.11"
+version = "0.1.13"
 description = "Sistema local de recepción para hotel y motel"
 authors = ["Nightdesk"]
 edition = "2021"
