@@ -14,11 +14,12 @@
       {
         "label": "main",
         "title": "Love Nestt Motel App",
-        "width": 1680,
-        "height": 1050,
-        "minWidth": 1100,
-        "minHeight": 820,
+        "width": 1280,
+        "height": 800,
+        "minWidth": 1024,
+        "minHeight": 600,
         "center": true,
+        "visible": false,
         "maximized": false,
         "decorations": false,
         "fullscreen": false
