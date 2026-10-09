@@ -1,4 +1,8 @@
 -- Nightdesk: deja Supabase SIN DATOS para empezar de cero.
+-- Auditado el 09/10/2026: 17 tablas de la app, incluida operational_audit.
+-- La migración product_analytics no crea tablas adicionales: product_uid y
+-- product_quantity se eliminan al vaciar charges; product_tracking_since,
+-- al vaciar stays. No se reconstruyen ni conservan ventas históricas.
 --
 -- BORRA (no se puede deshacer):
 --   habitaciones, tarifas, productos, ajustes del negocio, usuarios de la app,
@@ -16,6 +20,9 @@
 -- Uso:
 --   1. Si hay algo que quieras conservar, exportalo antes.
 --   2. Cerrá la app en las PCs de recepción (bandeja → salir).
+--      IMPORTANTE: este SQL no limpia SQLite ni la outbox de esas PCs.
+--      Antes de reconectarlas, prepará una base local limpia para Día D;
+--      una base vieja puede volver a subir los datos que acabás de borrar.
 --   3. Supabase → SQL Editor → pegá este archivo completo (sin seleccionar
 --      una parte: así se ejecuta todo).
 --   4. Más abajo, cambiá  confirmar text := 'NO';
@@ -51,18 +58,56 @@ DECLARE
     'public.app_users'
   ];
   existentes text;
+  no_incluidas text;
+  tabla text;
+  filas bigint;
 BEGIN
   IF confirmar IS DISTINCT FROM 'BORRAR TODO' THEN
     RAISE EXCEPTION 'No se borró nada: cambiá confirmar text := ''NO'' por ''BORRAR TODO'' y volvé a ejecutar.';
   END IF;
 
+  -- Una tabla nueva de la app exige revisar el listado antes de borrar.
+  -- Se excluyen tablas que pertenecen a extensiones de PostgreSQL.
+  SELECT string_agg(format('%I.%I', n.nspname, c.relname), ', ' ORDER BY n.nspname, c.relname)
+  INTO no_incluidas
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname IN ('public', 'nightdesk')
+    AND c.relkind IN ('r', 'p')
+    AND NOT c.relispartition
+    AND format('%I.%I', n.nspname, c.relname) <> ALL(tablas)
+    AND NOT EXISTS (
+      SELECT 1 FROM pg_depend d
+      WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid
+        AND d.refclassid = 'pg_extension'::regclass AND d.deptype = 'e'
+    );
+  IF no_incluidas IS NOT NULL THEN
+    RAISE EXCEPTION 'No se borró nada: hay tablas nuevas sin revisar: %', no_incluidas;
+  END IF;
+
   -- Solo las tablas que existen (operational_audit puede no estar migrada todavía).
-  SELECT string_agg(t, ', ') INTO existentes
+  SELECT string_agg(t, ', ' ORDER BY t) INTO existentes
   FROM unnest(tablas) AS t
   WHERE to_regclass(t) IS NOT NULL;
 
+  IF existentes IS NULL THEN
+    RAISE EXCEPTION 'No se borró nada: no se encontraron las tablas de Nightdesk.';
+  END IF;
+
   -- Un único TRUNCATE: se vacían todas juntas o ninguna.
+  -- Sin CASCADE: no alcanza tablas ajenas al listado por una clave foránea.
+  PERFORM set_config('lock_timeout', '5s', true);
   EXECUTE 'TRUNCATE TABLE ' || existentes || ' RESTART IDENTITY';
+
+  -- Comprobar dentro de la misma transacción: si alguna no queda vacía,
+  -- la excepción revierte también el TRUNCATE.
+  FOR tabla IN SELECT t FROM unnest(tablas) AS t WHERE to_regclass(t) IS NOT NULL
+  LOOP
+    EXECUTE format('SELECT count(*) FROM %s', tabla) INTO filas;
+    IF filas <> 0 THEN
+      RAISE EXCEPTION 'Borrado revertido: % conserva % filas.', tabla, filas;
+    END IF;
+  END LOOP;
 END $$;
 
 -- Verificación: todas las tablas deben mostrar 0.

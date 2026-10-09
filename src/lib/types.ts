@@ -69,6 +69,7 @@ export type Stay = {
   notes: string | null;
   checked_in_by: string | null;
   checked_out_by: string | null;
+  product_tracking_since?: string | null;
 };
 
 export type Reservation = {
@@ -95,6 +96,8 @@ export type Charge = {
   amount_cents: number;
   created_at: string;
   deleted_at?: string | null;
+  product_uid?: string | null;
+  product_quantity?: number | null;
 };
 
 export type Payment = {
@@ -283,6 +286,14 @@ export type AnalyticsSummary = {
   by_room: { room_number: string; room_type: string; revenue_cents: number; closed_accounts: number }[];
   /** Additional-charge descriptions; a charge is not necessarily a catalog product. */
   top_extras: { description: string; count: number; revenue_cents: number }[];
+  product_tracking_since: string | null;
+  product_sales: { product_uid: string; description: string; units: number; revenue_cents: number }[];
+  product_purchase: {
+    eligible_accounts: number; purchasing_accounts: number; incomplete_accounts: number;
+    rate_percent: number | null; revenue_cents: number; average_purchase_cents: number | null;
+  };
+  check_in_heatmap: { weekday: number; hour: number; count: number; observed_blocks: number; average: number | null }[];
+  by_stay_mode: { mode: "hourly" | "overnight" | "unclassified"; closed_accounts: number; lodging_cents: number; average_lodging_cents: number | null }[];
   /** Closed accounts and revenue by local checkout hour (24 entries). */
   closed_hours: { hour: number; count: number; revenue_cents: number }[];
   /** Consumos borrados de cuentas abiertas en el período (por fecha de borrado). */

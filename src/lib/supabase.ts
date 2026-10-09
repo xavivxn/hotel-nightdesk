@@ -1,3 +1,4 @@
+import { buildCheckInHeatmap, createSalesMetrics } from "./analytics-metrics";
 import { createClient, type RealtimeChannel, type SupabaseClient } from "@supabase/supabase-js";
 import { previewBill as previewBillLocal } from "./billing";
 import { fail } from "./errors";
@@ -334,8 +335,15 @@ async function remoteAnalyticsSummary(args: Record<string, unknown>): Promise<An
     dailyByDate.set(date, item);
   }
 
+  const generatedAt = new Date().toISOString();
+  const { data: coverageRows, error: coverageError } = await sb().from("stays")
+    .select("product_tracking_since").not("product_tracking_since", "is", null)
+    .order("product_tracking_since").limit(1);
+  if (coverageError) fail("storage", "No se pudo consultar la cobertura de productos. Verificá la migración de Análisis en Supabase.");
+  const productTrackingSince = coverageRows?.[0]?.product_tracking_since ?? null;
+  const metrics = createSalesMetrics();
   const closedRows = await pagedRows(async (start, end) => await sb().from("stays")
-    .select("uid,room_uid,check_in_at,check_out_at,closed_total_cents,closed_line_count")
+    .select("uid,room_uid,check_in_at,check_out_at,closed_total_cents,closed_line_count,closed_applied_kind,product_tracking_since")
     .eq("status", "closed")
     .gte("check_out_at", broadStart)
     .lt("check_out_at", broadEnd)
@@ -351,7 +359,7 @@ async function remoteAnalyticsSummary(args: Record<string, unknown>): Promise<An
   for (let index = 0; index < closedUids.length; index += 80) {
     const batch = closedUids.slice(index, index + 80);
     const charges = await pagedRows(async (start, end) => await sb().from("charges")
-      .select("uid,stay_uid,kind,description,amount_cents")
+      .select("uid,stay_uid,kind,description,amount_cents,product_uid,product_quantity,created_at")
       .in("stay_uid", batch)
       .is("deleted_at", null)
       .order("uid")
@@ -398,12 +406,13 @@ async function remoteAnalyticsSummary(args: Record<string, unknown>): Promise<An
       room_number: roomNumber, room_type: typeName, revenue_cents: 0, closed_accounts: 0,
     };
     let stayTotal = 0;
+    let stayLodging = 0;
     for (const line of lines) {
       const amount = checkedMoney(line.amount_cents);
       stayTotal = addMoney(stayTotal, amount);
       switch (String(line.kind)) {
         case "stay":
-        case "extra_hour": lodging = addMoney(lodging, amount); break;
+        case "extra_hour": lodging = addMoney(lodging, amount); stayLodging = addMoney(stayLodging, amount); break;
         case "surcharge": {
           extras = addMoney(extras, amount);
           const description = String(line.description ?? "").trim() || "Cargo sin descripción";
@@ -421,6 +430,13 @@ async function remoteAnalyticsSummary(args: Record<string, unknown>): Promise<An
     if (stayTotal !== expectedTotal) {
       fail("storage", "El total del cierre todavía no coincide con la réplica. Esperá la sincronización y volvé a cargar Análisis");
     }
+    metrics.account(String(stay.check_in_at), stay.product_tracking_since == null ? null : String(stay.product_tracking_since),
+      stay.closed_applied_kind == null ? null : String(stay.closed_applied_kind), stayLodging,
+      lines.filter(line => line.kind === "surcharge").map(line => ({
+        product_uid: line.product_uid == null ? null : String(line.product_uid),
+        product_quantity: line.product_quantity == null ? null : Number(line.product_quantity),
+        description: String(line.description), amount_cents: checkedMoney(line.amount_cents), created_at: String(line.created_at),
+      })));
     total = addMoney(total, stayTotal);
     day.revenue_cents = addMoney(day.revenue_cents, stayTotal);
     day.closed_accounts += 1;
@@ -519,7 +535,10 @@ async function remoteAnalyticsSummary(args: Record<string, unknown>): Promise<An
   }
 
   return {
-    from, to, generated_at: new Date().toISOString(),
+    from, to, generated_at: generatedAt,
+    product_tracking_since: productTrackingSince,
+    ...metrics.finish(),
+    check_in_heatmap: buildCheckInHeatmap(daily.map(day => day.date), checkIns.filter(stay => includeRoom(roomByUid.get(String(stay.room_uid)))).map(stay => String(stay.check_in_at)), generatedAt),
     total_revenue_cents: total,
     closed_accounts: closed.length,
     average_ticket_cents: closed.length ? Math.trunc(total / closed.length) : 0,
@@ -794,6 +813,8 @@ export async function supabaseInvoke<T>(name: string, args: Record<string, unkno
           description: String(cr.description ?? ""),
           amount_cents: Number(cr.amount_cents ?? 0),
           created_at: String(cr.created_at ?? ""),
+          product_uid: cr.product_uid == null ? null : String(cr.product_uid),
+          product_quantity: cr.product_quantity == null ? null : Number(cr.product_quantity),
         };
       });
       const settings = await settingsFromKv();

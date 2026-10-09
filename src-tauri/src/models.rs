@@ -192,6 +192,8 @@ pub struct Charge {
     pub description: String,
     pub amount_cents: i64,
     pub created_at: String,
+    pub product_uid: Option<String>,
+    pub product_quantity: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -510,6 +512,41 @@ pub struct AnalyticsHourRevenue {
 }
 
 #[derive(Debug, Serialize)]
+pub struct AnalyticsProduct {
+    pub product_uid: String,
+    pub description: String,
+    pub units: i64,
+    pub revenue_cents: i64,
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct AnalyticsPurchase {
+    pub eligible_accounts: i64,
+    pub purchasing_accounts: i64,
+    pub incomplete_accounts: i64,
+    pub rate_percent: Option<f64>,
+    pub revenue_cents: i64,
+    pub average_purchase_cents: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AnalyticsHeatCell {
+    pub weekday: u32,
+    pub hour: u32,
+    pub count: i64,
+    pub observed_blocks: i64,
+    pub average: Option<f64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AnalyticsStayMode {
+    pub mode: String,
+    pub closed_accounts: i64,
+    pub lodging_cents: i64,
+    pub average_lodging_cents: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct AnalyticsSummary {
     pub from: String,
     pub to: String,
@@ -531,6 +568,11 @@ pub struct AnalyticsSummary {
     pub by_room_type: Vec<AnalyticsTypeTotal>,
     pub by_room: Vec<AnalyticsRoomTotal>,
     pub top_extras: Vec<AnalyticsExtra>,
+    pub product_tracking_since: Option<String>,
+    pub product_sales: Vec<AnalyticsProduct>,
+    pub product_purchase: AnalyticsPurchase,
+    pub check_in_heatmap: Vec<AnalyticsHeatCell>,
+    pub by_stay_mode: Vec<AnalyticsStayMode>,
     /// Closed accounts and their revenue by local checkout hour (0..24), for the daily summary.
     pub closed_hours: Vec<AnalyticsHourRevenue>,
     /// Shop or manual charges deleted from open accounts in the period (by deletion date).

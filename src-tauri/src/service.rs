@@ -645,8 +645,8 @@ fn check_in_in_tx(conn: &Connection, payload: CheckInPayload, operation_id: &str
     };
 
     conn.execute(
-        "INSERT INTO stays (room_id, guest_id, rate_plan_id, reservation_id, check_in_at, expected_checkout_at, status, converted_to_overnight, checked_in_by)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'open', 0, ?7)",
+        "INSERT INTO stays (room_id, guest_id, rate_plan_id, reservation_id, check_in_at, expected_checkout_at, status, converted_to_overnight, checked_in_by, product_tracking_since)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'open', 0, ?7, (SELECT value FROM settings WHERE key='product_tracking_since'))",
         params![
             room.id,
             guest_id,
@@ -959,6 +959,8 @@ pub fn add_charge(conn: &mut Connection, actor: &Actor, payload: AddChargePayloa
         description: payload.description.trim().into(),
         amount_cents: amount,
         created_at: now,
+        product_uid: None,
+        product_quantity: None,
     })
 }
 
@@ -981,6 +983,7 @@ pub fn add_product_charge_by(
         ));
     }
     let product = db::get_product(conn, payload.product_id)?;
+    let product_uid = db::uid_of(conn, "products", product.id)?;
     if !product.active {
         return Err(AppError::msg("El producto no está activo"));
     }
@@ -991,8 +994,8 @@ pub fn add_product_charge_by(
     let now = now_rfc3339();
     let tx = conn.transaction()?;
     tx.execute(
-        "INSERT INTO charges (stay_id, kind, description, amount_cents, created_at) VALUES (?1, 'surcharge', ?2, ?3, ?4)",
-        params![payload.stay_id, product.name, product.price_cents, now],
+        "INSERT INTO charges (stay_id, kind, description, amount_cents, created_at, product_uid, product_quantity) VALUES (?1, 'surcharge', ?2, ?3, ?4, ?5, 1)",
+        params![payload.stay_id, product.name, product.price_cents, now, product_uid],
     )?;
     let charge_id = tx.last_insert_rowid();
     crate::stock::record_sale(&tx, product.id, charge_id, username)?;
@@ -1013,6 +1016,8 @@ pub fn add_product_charge_by(
         description: product.name,
         amount_cents: product.price_cents,
         created_at: now,
+        product_uid: Some(product_uid),
+        product_quantity: Some(1),
     })
 }
 
@@ -1697,6 +1702,9 @@ mod tests {
     fn shop_sale_counts_stock_and_admin_void_returns_it() -> AppResult<()> {
         let mut conn = db::open(Path::new(":memory:"))?;
         let stay = check_in_on(&mut conn, walk_in_payload(NORMAL_ROOM))?;
+        let metadata = db::payload_for_stay(&conn, stay.id)?;
+        let tracking_since = metadata["product_tracking_since"].as_str().expect("new stays have product coverage");
+        assert!(db::parse_dt(tracking_since)? <= db::parse_dt(&stay.check_in_at)?);
         let product = db::list_products(&conn, true)?.into_iter().next().expect("seed products");
         crate::stock::update(
             &mut conn,
@@ -1705,6 +1713,8 @@ mod tests {
         )?;
         let sale = AddProductChargePayload { stay_id: stay.id, product_id: product.id, operation_id: None, expected_version: None };
         let charge = add_product_charge_by(&mut conn, sale, "recepcion01")?;
+        assert_eq!(charge.product_uid, Some(db::uid_of(&conn, "products", product.id)?));
+        assert_eq!(charge.product_quantity, Some(1));
         let quantity = || crate::stock::list(&conn).map(|rows| rows[0].quantity);
         assert_eq!(quantity()?, 2);
         delete_charge(&mut conn, &admin_actor(), charge.id)?;

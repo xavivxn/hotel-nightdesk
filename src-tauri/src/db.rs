@@ -100,6 +100,10 @@ const MIGRATIONS: &[Migration] = &[
         id: "020_jacuzzi_rates_and_stay_users",
         sql: include_str!("../migrations/020_jacuzzi_rates_and_stay_users.sql"),
     },
+    Migration {
+        id: "021_product_analytics",
+        sql: include_str!("../migrations/021_product_analytics.sql"),
+    },
 ];
 
 /// Fixed uids of the jacuzzi plans, shared with `020_jacuzzi_rates_and_stay_users` and Supabase.
@@ -649,7 +653,7 @@ pub fn open_stay_for_room(conn: &Connection, room_id: i64) -> AppResult<Option<S
 
 pub fn list_charges(conn: &Connection, stay_id: i64) -> AppResult<Vec<Charge>> {
     let mut stmt = conn.prepare(
-        "SELECT id, stay_id, kind, description, amount_cents, created_at FROM charges WHERE stay_id = ?1 AND deleted_at IS NULL ORDER BY id",
+        "SELECT id, stay_id, kind, description, amount_cents, created_at, product_uid, product_quantity FROM charges WHERE stay_id = ?1 AND deleted_at IS NULL ORDER BY id",
     )?;
     let rows = stmt.query_map([stay_id], |row| {
         Ok(Charge {
@@ -659,6 +663,8 @@ pub fn list_charges(conn: &Connection, stay_id: i64) -> AppResult<Vec<Charge>> {
             description: row.get(3)?,
             amount_cents: row.get(4)?,
             created_at: row.get(5)?,
+            product_uid: row.get(6)?,
+            product_quantity: row.get(7)?,
         })
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
@@ -835,7 +841,7 @@ pub fn payload_for_stay(conn: &Connection, id: i64) -> AppResult<serde_json::Val
         "SELECT s.id, s.uid, r.uid, g.uid, rp.uid, res.uid, s.check_in_at, s.expected_checkout_at,
                 s.check_out_at, s.status, s.converted_to_overnight, orp.uid, s.notes,
                 s.closed_applied_kind, s.closed_tax_percent, s.closed_duration_label,
-                s.closed_total_cents, s.closed_line_count, s.checked_in_by, s.checked_out_by
+                s.closed_total_cents, s.closed_line_count, s.checked_in_by, s.checked_out_by, s.product_tracking_since
          FROM stays s
          JOIN rooms r ON r.id = s.room_id
          JOIN guests g ON g.id = s.guest_id
@@ -866,6 +872,7 @@ pub fn payload_for_stay(conn: &Connection, id: i64) -> AppResult<serde_json::Val
                 "closed_line_count": row.get::<_, Option<i64>>(17)?,
                 "checked_in_by": row.get::<_, Option<String>>(18)?,
                 "checked_out_by": row.get::<_, Option<String>>(19)?,
+                "product_tracking_since": row.get::<_, Option<String>>(20)?,
             }))
         },
     )
@@ -874,7 +881,8 @@ pub fn payload_for_stay(conn: &Connection, id: i64) -> AppResult<serde_json::Val
 
 pub fn payload_for_charge(conn: &Connection, id: i64) -> AppResult<serde_json::Value> {
     conn.query_row(
-        "SELECT c.id, c.uid, s.uid, c.kind, c.description, c.amount_cents, c.deleted_at
+        "SELECT c.id, c.uid, s.uid, c.kind, c.description, c.amount_cents, c.deleted_at,
+                c.product_uid, c.product_quantity, c.created_at
          FROM charges c
          JOIN stays s ON s.id = c.stay_id
          WHERE c.id = ?1",
@@ -888,6 +896,9 @@ pub fn payload_for_charge(conn: &Connection, id: i64) -> AppResult<serde_json::V
                 "description": row.get::<_, String>(4)?,
                 "amount_cents": row.get::<_, i64>(5)?,
                 "deleted_at": row.get::<_, Option<String>>(6)?,
+                "product_uid": row.get::<_, Option<String>>(7)?,
+                "product_quantity": row.get::<_, Option<i64>>(8)?,
+                "created_at": row.get::<_, String>(9)?,
             }))
         },
     )

@@ -1,3 +1,4 @@
+import { analyticsTime, buildCheckInHeatmap, createSalesMetrics } from "./analytics-metrics";
 import { previewBill, theoreticalNightEnd, dormidaWindowOpen, dormidaUnavailableMessage, type PriceOverride } from "./billing";
 import { matchingRule, validateRules } from "./price-rules";
 import { mockAuth } from "./mock-auth";
@@ -43,6 +44,7 @@ type Db = {
   closed_bills: Record<string, ReturnType<typeof previewBill>>;
   settings: AppSettings;
   ids: { room: number; rate: number; product: number; guest: number; reservation: number; stay: number; charge: number; payment: number; stock_movement?: number };
+  product_tracking_since?: string;
   stock?: ProductStock[];
   stock_movements?: StockMovement[];
   price_rules?: PriceRule[];
@@ -185,6 +187,7 @@ function seed(): Db {
     charges: [],
     payments: [],
     closed_bills: {},
+    product_tracking_since: nowIso(),
     settings: {
       business_name: "MotelApp",
       address: "Av. Principal 100",
@@ -258,6 +261,7 @@ function load(): Db {
   try {
     const db = JSON.parse(raw) as Db;
     db.closed_bills ??= {};
+    if (!db.product_tracking_since) { db.product_tracking_since = nowIso(); save(db); }
     db.products ??= buildSeedProducts().map((product) => ({ ...product, version: 1 }));
     db.rooms = (db.rooms ?? []).map((room) => ({ ...room, version: room.version ?? 1 }));
     db.rates = (db.rates ?? []).map((rate) => ({ ...rate, version: rate.version ?? 1, room_category: rate.room_category ?? "normal" }));
@@ -336,12 +340,12 @@ function mockAnalytics(db: Db, args: Record<string, unknown>): AnalyticsSummary 
   const from = String(args.from ?? "");
   const to = String(args.to ?? "");
   const roomType = String(args.room_type ?? "all").toLowerCase();
-  const start = new Date(`${from}T00:00:00`);
-  const end = new Date(`${to}T00:00:00`);
+  const start = new Date(`${from}T00:00:00Z`);
+  const end = new Date(`${to}T00:00:00Z`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) ||
-      Number.isNaN(+start) || Number.isNaN(+end) || localDay(start.toISOString()) !== from ||
-      localDay(end.toISOString()) !== to || start > end || to > localDay() ||
-      (Date.UTC(end.getFullYear(), end.getMonth(), end.getDate()) - Date.UTC(start.getFullYear(), start.getMonth(), start.getDate())) / 86400000 >= 366) {
+      Number.isNaN(+start) || Number.isNaN(+end) || start.toISOString().slice(0, 10) !== from ||
+      end.toISOString().slice(0, 10) !== to || start > end || to > analyticsTime(nowIso()).date ||
+      (+end - +start) / 86400000 >= 366) {
     fail("validation", "Elegí un rango válido de hasta 366 días, sin fechas futuras");
   }
   if (!["all", "normal", "jacuzzi"].includes(roomType)) fail("validation", "Tipo de habitación inválido");
@@ -349,13 +353,16 @@ function mockAnalytics(db: Db, args: Record<string, unknown>): AnalyticsSummary 
   const rooms = db.rooms.filter(r => roomType === "all" || r.room_type.toLowerCase() === roomType);
   const roomById = new Map(rooms.map(r => [r.id, r]));
   const daily = [] as AnalyticsSummary["daily"];
-  for (const day = new Date(start); day <= end; day.setDate(day.getDate() + 1)) {
-    daily.push({ date: localDay(day.toISOString()), revenue_cents: 0, closed_accounts: 0, check_ins: 0, reservation_arrivals: 0, reservation_cancellations: 0, no_shows: 0 });
+  for (const day = new Date(start); day <= end; day.setUTCDate(day.getUTCDate() + 1)) {
+    daily.push({ date: day.toISOString().slice(0, 10), revenue_cents: 0, closed_accounts: 0, check_ins: 0, reservation_arrivals: 0, reservation_cancellations: 0, no_shows: 0 });
   }
   const dayByDate = new Map(daily.map(d => [d.date, d]));
   const byRoom = new Map<string, AnalyticsSummary["by_room"][number]>();
   const byType = new Map<string, AnalyticsSummary["by_room_type"][number]>();
   const extras = new Map<string, AnalyticsSummary["top_extras"][number]>();
+  const metrics = createSalesMetrics();
+  const checkIns: string[] = [];
+  const generatedAt = nowIso();
   const checkInHours = Array.from({ length: 24 }, (_, hour) => ({ hour, count: 0 }));
   let reservationArrivals = 0, reservationCancellations = 0, noShows = 0;
   let total = 0, closed = 0, lodging = 0, extraTotal = 0, discount = 0, tax = 0, stayMinutes = 0;
@@ -363,13 +370,14 @@ function mockAnalytics(db: Db, args: Record<string, unknown>): AnalyticsSummary 
   for (const stay of db.stays) {
     const room = roomById.get(stay.room_id);
     if (!room) continue;
-    const checkInDay = dayByDate.get(localDay(stay.check_in_at));
+    const checkInDay = dayByDate.get(analyticsTime(stay.check_in_at).date);
     if (checkInDay) {
       checkInDay.check_ins += 1;
-      checkInHours[new Date(stay.check_in_at).getHours()].count += 1;
+      checkIns.push(stay.check_in_at);
+      checkInHours[analyticsTime(stay.check_in_at).hour].count += 1;
     }
     if (stay.status !== "closed" || !stay.check_out_at) continue;
-    const day = dayByDate.get(localDay(stay.check_out_at));
+    const day = dayByDate.get(analyticsTime(stay.check_out_at).date);
     if (!day) continue;
     const bill = db.closed_bills[String(stay.id)];
     if (!bill) fail("storage", "Cuenta cerrada sin detalle histórico; requiere revisión");
@@ -383,9 +391,12 @@ function mockAnalytics(db: Db, args: Record<string, unknown>): AnalyticsSummary 
     closed += 1;
     day.revenue_cents += bill.total_cents;
     day.closed_accounts += 1;
-    closedHours[new Date(stay.check_out_at).getHours()].count += 1;
-    closedHours[new Date(stay.check_out_at).getHours()].revenue_cents += bill.total_cents;
+    closedHours[analyticsTime(stay.check_out_at).hour].count += 1;
+    closedHours[analyticsTime(stay.check_out_at).hour].revenue_cents += bill.total_cents;
     stayMinutes += Math.max(0, Math.trunc((+new Date(stay.check_out_at) - +new Date(stay.check_in_at)) / 60000));
+    metrics.account(stay.check_in_at, stay.product_tracking_since, bill.applied_kind,
+      bill.lines.filter(line => line.kind === "stay" || line.kind === "extra_hour").reduce((sum, line) => sum + line.amount_cents, 0),
+      db.charges.filter(line => line.stay_id === stay.id && !line.deleted_at && ["surcharge", "product"].includes(line.kind)));
     tax += bill.tax_cents;
     for (const line of bill.lines) {
       if (line.kind === "stay" || line.kind === "extra_hour") lodging += line.amount_cents;
@@ -409,7 +420,7 @@ function mockAnalytics(db: Db, args: Record<string, unknown>): AnalyticsSummary 
   }
   for (const reservation of db.reservations) {
     if (!roomById.has(reservation.room_id)) continue;
-    const day = dayByDate.get(localDay(reservation.expected_arrival_at));
+    const day = dayByDate.get(analyticsTime(reservation.expected_arrival_at).date);
     if (!day) continue;
     day.reservation_arrivals += 1;
     reservationArrivals += 1;
@@ -423,7 +434,7 @@ function mockAnalytics(db: Db, args: Record<string, unknown>): AnalyticsSummary 
     current.set(status, (current.get(status) ?? 0) + 1);
   }
   return {
-    from, to, generated_at: nowIso(), total_revenue_cents: total, closed_accounts: closed,
+    from, to, generated_at: generatedAt, total_revenue_cents: total, closed_accounts: closed,
     average_ticket_cents: closed ? Math.trunc(total / closed) : 0,
     lodging_cents: lodging, extras_cents: extraTotal, discount_cents: discount, tax_cents: tax,
     average_stay_minutes: closed ? Math.trunc(stayMinutes / closed) : null,
@@ -435,6 +446,9 @@ function mockAnalytics(db: Db, args: Record<string, unknown>): AnalyticsSummary 
     by_room: [...byRoom.values()].sort((a, b) => b.revenue_cents - a.revenue_cents),
     top_extras: [...extras.values()].sort((a, b) => b.revenue_cents - a.revenue_cents).slice(0, 10),
     closed_hours: closedHours,
+    product_tracking_since: db.product_tracking_since ?? null,
+    check_in_heatmap: buildCheckInHeatmap(daily.map(day => day.date), checkIns, generatedAt),
+    ...metrics.finish(),
     ...mockVoided(db, dayByDate, roomById),
   };
 }
@@ -443,7 +457,7 @@ function mockVoided(db: Db, days: Map<string, unknown>, rooms: Map<number, Room>
   let voided_count = 0;
   let voided_cents = 0;
   for (const charge of db.charges) {
-    if (!charge.deleted_at || charge.kind !== "surcharge" || !days.has(localDay(charge.deleted_at))) continue;
+    if (!charge.deleted_at || charge.kind !== "surcharge" || !days.has(analyticsTime(charge.deleted_at).date)) continue;
     const stay = db.stays.find((item) => item.id === charge.stay_id);
     if (!stay || !rooms.has(stay.room_id)) continue;
     voided_count += 1;
@@ -643,6 +657,7 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
         rate_kind: rate.kind,
         reservation_id: reservationId,
         check_in_at: nowIso(),
+        product_tracking_since: db.product_tracking_since ?? null,
         expected_checkout_at:
           rate.kind === "hourly"
             ? new Date(Date.now() + (payload.expected_hours ?? Math.max(1, rate.included_hours)) * 3600000).toISOString()
@@ -750,6 +765,8 @@ function handle(db: Db, name: string, args: Record<string, unknown>): unknown {
         id: db.ids.charge,
         stay_id: payload.stay_id,
         kind: "surcharge",
+        product_uid: `mock-product-${product.id}`,
+        product_quantity: 1,
         description: product.name,
         amount_cents: product.price_cents,
         created_at: nowIso(),

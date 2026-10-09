@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { api } from "@/lib/api";
 import { formatMoney } from "@/lib/format";
 import type { AnalyticsSummary, DeviceMode } from "@/lib/types";
+import { ProductSales, ProductPurchase, StayModes, DemandHeatmap } from "@/components/analytics/Insights";
 import "./analytics.css";
 
 type Range = { from: string; to: string; roomType?: string };
@@ -48,11 +49,11 @@ const shortMoney = (amount: number) => {
       : String(absolute));
 };
 const statusMeta: Record<string, { label: string; color: string }> = {
-  available: { label: "Libres", color: "#247d66" },
-  occupied: { label: "Ocupadas", color: "#b84b31" },
-  dirty: { label: "Por limpiar", color: "#7850a5" },
-  reserved: { label: "Reservadas", color: "#315fbd" },
-  blocked: { label: "Bloqueadas", color: "#a32235" },
+  available: { label: "Libres", color: "var(--ok)" },
+  occupied: { label: "Ocupadas", color: "var(--warn)" },
+  dirty: { label: "Por limpiar", color: "var(--dirty)" },
+  reserved: { label: "Reservadas", color: "var(--info)" },
+  blocked: { label: "Bloqueadas", color: "var(--danger)" },
 };
 
 function RevenueChart({ days }: { days: AnalyticsSummary["daily"] }) {
@@ -74,8 +75,8 @@ function RevenueChart({ days }: { days: AnalyticsSummary["daily"] }) {
       <svg viewBox="0 0 790 270" role="img" aria-label="Evolución diaria de importes de cuentas cerradas" className="analytics-chart">
         <defs>
           <linearGradient id="analytics-revenue-fill" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="#a72b48" stopOpacity=".27" />
-            <stop offset="100%" stopColor="#a72b48" stopOpacity="0" />
+            <stop offset="0%" stopColor="var(--accent)" stopOpacity=".27" />
+            <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
           </linearGradient>
         </defs>
         {[max, (max + min) / 2, min].map((value, index) => {
@@ -87,7 +88,7 @@ function RevenueChart({ days }: { days: AnalyticsSummary["daily"] }) {
         })}
         {min < 0 && max > 0 ? <line x1="56" x2="738" y1={zeroY} y2={zeroY} stroke="var(--accent)" strokeOpacity=".55" strokeDasharray="4 5" /> : null}
         {points.length ? <path className="analytics-chart-area" d={area} fill="url(#analytics-revenue-fill)" /> : null}
-        {points.length ? <path className="analytics-chart-line" d={path} fill="none" stroke="var(--accent)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /> : null}
+        {points.length ? <path className="analytics-chart-line" pathLength="1" d={path} fill="none" stroke="var(--accent)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /> : null}
         {points.filter((_, index) => index % labelEvery === 0 || index === points.length - 1).map((point, index) => (
           <g key={point.day.date} className="analytics-chart-dot" style={{ "--enter-delay": `${520 + index * 40}ms` } as CSSProperties}>
             <circle cx={point.x} cy={point.y} r="4.5" fill="var(--accent)" stroke="var(--surface)" strokeWidth="2" />
@@ -105,7 +106,7 @@ function RoomStatus({ items }: { items: AnalyticsSummary["current_rooms"] }) {
   const slices = items.filter(item => item.count > 0).map(item => {
     const begin = offset;
     offset += total ? item.count / total * 100 : 0;
-    return `${statusMeta[item.status]?.color ?? "#8d7775"} ${begin}% ${offset}%`;
+    return `${statusMeta[item.status]?.color ?? "var(--muted)"} ${begin}% ${offset}%`;
   });
   return (
     <div className="analytics-status-layout">
@@ -114,7 +115,7 @@ function RoomStatus({ items }: { items: AnalyticsSummary["current_rooms"] }) {
       </div>
       <ul className="analytics-legend">
         {items.map(item => <li key={item.status}>
-          <span className="analytics-legend-dot" style={{ background: statusMeta[item.status]?.color ?? "#8d7775" }} />
+          <span className="analytics-legend-dot" style={{ background: statusMeta[item.status]?.color ?? "var(--muted)" }} />
           <span>{statusMeta[item.status]?.label ?? item.status}</span>
           <strong>{item.count}</strong>
         </li>)}
@@ -160,7 +161,7 @@ function ReservationFlow({ report }: { report: AnalyticsSummary }) {
   const rows = [
     { label: "Llegadas previstas", value: report.reservation_arrivals, color: "var(--accent)" },
     { label: "Canceladas", value: report.reservation_cancellations, color: "var(--danger)" },
-    { label: "No se presentaron", value: report.no_shows, color: "var(--gold)" },
+    { label: "No se presentaron", value: report.no_shows, color: "var(--muted)" },
   ];
   const max = Math.max(1, report.reservation_arrivals);
   return <section className="analytics-panel">
@@ -254,7 +255,7 @@ export function AnalyticsPage({ deviceMode }: { deviceMode: DeviceMode }) {
 
     {report ? <div key={`${report.from}-${report.to}-${query.roomType ?? "all"}-${refresh}`} className="analytics-results analytics-results--enter">
       <div className="analytics-context"><span><CalendarDays size={15} /> {report.from} al {report.to} · {roomTypeLabel}</span>
-        <span>{deviceMode === "remote" ? "Réplica sincronizada de recepción" : "Datos locales de recepción"} · Consultado {new Date(report.generated_at).toLocaleString("es-PY")}</span></div>
+        <span>{deviceMode === "remote" ? "Réplica sincronizada de recepción" : "Datos locales de recepción"} · Consultado {new Date(report.generated_at).toLocaleString("es-PY", { timeZone: "America/Asuncion" })}</span></div>
       <div className="analytics-kpis">
         <div className="analytics-kpi analytics-kpi-primary"><span className="analytics-kpi-icon"><Wallet size={21} /></span><p>Ingresos de cuentas cerradas</p><strong>{money(report.total_revenue_cents)}</strong><small>Importes históricos del período</small></div>
         <div className="analytics-kpi"><span className="analytics-kpi-icon"><ReceiptText size={21} /></span><p>Cuentas cerradas</p><strong>{report.closed_accounts}</strong><small>Salidas registradas</small></div>
@@ -264,7 +265,14 @@ export function AnalyticsPage({ deviceMode }: { deviceMode: DeviceMode }) {
 
       <div className="analytics-main-grid">
         <section className="analytics-panel analytics-trend"><div className="analytics-panel-head"><h2>Ingresos día a día</h2><p>Total al cierre de cada cuenta · {money(dailyTotal)} en el período</p></div><RevenueChart days={report.daily} /></section>
-        <section className="analytics-panel"><div className="analytics-panel-head"><h2>Habitaciones ahora</h2><p>Estado actual · {statusTotal} habitaciones en el filtro</p></div><RoomStatus items={report.current_rooms} /></section>
+        <StayModes report={report} />
+      </div>
+
+      <div className="analytics-lists analytics-products-grid"><ProductSales report={report} /><ProductPurchase report={report} /></div>
+      {report.daily.length >= 7 ? <DemandHeatmap cells={report.check_in_heatmap} /> : <ActivityHours hours={report.check_in_hours} />}
+      <div className="analytics-lists analytics-current-grid">
+        <section className="analytics-panel"><div className="analytics-panel-head"><h2>Habitaciones ahora</h2><p>Estado actual · {statusTotal} habitaciones en el filtro · Independiente del período.</p></div><RoomStatus items={report.current_rooms} /></section>
+        <ReservationFlow report={report} />
       </div>
 
       <section className="analytics-panel analytics-breakdown"><div className="analytics-panel-head"><h2>Composición de las cuentas</h2><p>El total incluye cargos adicionales, descuentos e impuestos aplicados al cierre.</p></div>
@@ -276,14 +284,9 @@ export function AnalyticsPage({ deviceMode }: { deviceMode: DeviceMode }) {
         </div>
       </section>
 
-      <div className="analytics-lists analytics-activity-grid">
-        <ActivityHours hours={report.check_in_hours} />
-        <ReservationFlow report={report} />
-      </div>
-
       <div className="analytics-lists">
         <Ranking title="Habitaciones con más ingresos" subtitle="Cuentas cerradas por habitación en el período" rows={rooms} empty="Aún no hay cuentas cerradas para este filtro." />
-        <Ranking title="Cargos adicionales destacados" subtitle="Agrupados por descripción; incluye consumos y recargos manuales" rows={extras} empty="No se registraron cargos adicionales en cuentas cerradas." />
+        <Ranking title="Detalle de cargos adicionales" subtitle="Agrupados por descripción; incluye consumos y recargos manuales" rows={extras} empty="No se registraron cargos adicionales en cuentas cerradas." />
       </div>
       {report.by_room_type.length > 1 ? <section className="analytics-panel analytics-types"><div className="analytics-panel-head"><h2>Por tipo de habitación</h2><p>El tipo corresponde a la ficha actual de cada habitación.</p></div>
         <div className="analytics-type-grid">{report.by_room_type.map(type => <div key={type.room_type}><span>{type.room_type}</span><strong>{money(type.revenue_cents)}</strong><small>{type.closed_accounts} cuentas</small></div>)}</div>
