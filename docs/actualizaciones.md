@@ -2,6 +2,11 @@
 
 La app de Windows se actualiza sola desde el botón **Actualizar** del encabezado del Tablero (`tauri-plugin-updater`). Descarga el instalador, verifica la firma, cierra la app, instala en modo pasivo y la vuelve a abrir. Los datos de `%APPDATA%\com.nightdesk.hotel\` no se tocan.
 
+Excepción deliberada: la compilación especial `build:installer:windows:reset-training`
+reinicia los datos locales una sola vez, conservando usuarios. Se entrega únicamente
+para el [corte al terminar la capacitación](reinicio-capacitacion.md), con instalación
+manual sin red y limpieza coordinada de Supabase. No usarla como actualización normal.
+
 Esta guía es el procedimiento operativo: primer build con versionado e instalaciones a mano, y cada update posterior al bucket `updates`.
 
 ## Cómo funciona
@@ -50,11 +55,34 @@ Si el build falla **después** del bump (por ejemplo faltan las variables de fir
 
 ## Copiar la clave a la PC de Windows (una vez)
 
-El instalador se arma en Windows. Esa PC necesita la **misma** privada.
+Si el instalador se arma en Windows, esa PC necesita la **misma** privada.
 
 1. En Windows creá `%USERPROFILE%\.tauri\` si no existe.
 2. Copiá `nightdesk.key` (y, si querés, `nightdesk.key.password`) desde la Mac.
 3. No corras `tauri signer generate` otra vez. Eso crea un par distinto y rompe la pública del repo.
+
+### Compilar Windows x64 desde la Mac
+
+También se puede usar [compilación cruzada de Tauri](https://v2.tauri.app/distribute/windows-installer/#build-windows-apps-on-linux-and-macos)
+con `cargo-xwin`, el target `x86_64-pc-windows-msvc`, LLVM/LLD y NSIS.
+Con la clave y contraseña vigentes en `TAURI_SIGNING_PRIVATE_KEY` y
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, añadir al comando de build:
+
+```sh
+npm run build:installer:windows:reset-training -- --runner cargo-xwin --target x86_64-pc-windows-msvc
+```
+
+Usar una copia del código en una ruta sin apóstrofes: `llvm-rc` no encuentra el icono
+cuando `tauri-winres` escapa el apóstrofe de `Ivandev's Projects`. Conservar en el repo
+los cinco archivos de versión modificados por el bump de esa copia, incluso si falla.
+Añadir `/opt/homebrew/opt/llvm/bin` al `PATH`; la caché existente de esta Mac está en
+`~/Library/Caches/cargo-xwin` (`XWIN_CACHE_DIR`).
+
+El 10/10/2026 se generó así la versión **0.1.16**, con `reset-training`, y se verificó
+la firma del actualizador contra `plugins.updater.pubkey`. Los archivos listos para
+el bucket quedaron en `src-tauri/target/releases/0.1.16/`. No se publicaron. Esta firma
+no es Authenticode; la instalación y ejecución en Windows todavía requieren prueba.
+Para actualizaciones normales usar el comando sin `:reset-training`.
 
 ---
 
@@ -175,5 +203,4 @@ Si el botón tarda: caché de Storage (hasta 1 h) o el equipo no tiene credencia
 | No aparece el botón             | Versión publicada no es mayor; sin internet; sin cuenta de dispositivo; o `latest.json` se subió antes que el `.exe`. |
 | “No se pudo actualizar” / firma | Pública del instalado ≠ par que firmó este `.exe`, o pegaste mal el `.sig` en `latest.json`.                          |
 | Generaste otra clave por error  | No la uses. Seguí con `~/.tauri/nightdesk.key` (el par cuya pública está en `tauri.conf.json`).                       |
-
 

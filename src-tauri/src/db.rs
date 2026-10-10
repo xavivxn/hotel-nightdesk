@@ -7,6 +7,9 @@ use rusqlite::{params, Connection, DatabaseName, OptionalExtension};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
+#[cfg(any(test, feature = "reset-training"))]
+pub(crate) mod training_reset;
+
 const MIGRATION_001: &str = include_str!("../migrations/001_init.sql");
 const MIGRATION_002: &str = include_str!("../migrations/002_products.sql");
 const MIGRATION_003: &str = include_str!("../migrations/003_rooms_scope.sql");
@@ -103,6 +106,10 @@ const MIGRATIONS: &[Migration] = &[
     Migration {
         id: "021_product_analytics",
         sql: include_str!("../migrations/021_product_analytics.sql"),
+    },
+    Migration {
+        id: "022_maintenance_resets",
+        sql: include_str!("../migrations/022_maintenance_resets.sql"),
     },
 ];
 

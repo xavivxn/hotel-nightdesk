@@ -1,12 +1,13 @@
 {
   "name": "nightdesk",
   "private": true,
-  "version": "0.1.14",
+  "version": "0.1.16",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build --configLoader runner",
     "build:installer:windows": "node scripts/bump-version.mjs && tauri build --bundles nsis",
+    "build:installer:windows:reset-training": "node scripts/bump-version.mjs && tauri build --bundles nsis --features reset-training",
     "preview": "vite preview",
     "tauri": "tauri",
     "kill:vite": "bash scripts/kill-vite.sh"

@@ -47,6 +47,13 @@ pub fn run() {
             let _ = credentials::apply_embedded_defaults(&dir);
             let db_path = dir.join("nightdesk.db");
             let conn = db::open(&db_path).map_err(|e| e.to_string())?;
+            #[cfg(feature = "reset-training")]
+            let conn = {
+                let mut conn = conn;
+                db::training_reset::apply_once(&mut conn, &db_path)
+                    .map_err(|e| e.to_string())?;
+                conn
+            };
             let mode = service::device_mode_get(&conn).ok().flatten();
             // A vault failure must not block offline reception. sync_status and
             // catalog operations will surface the underlying error to the UI.
